@@ -1,11 +1,13 @@
-﻿# Teams Always Green
+# Teams Always Green
 
-Keep your Microsoft Teams status active without babysitting your keyboard. Teams Always Green is a lightweight Windows tray app that gently toggles Scroll Lock on a schedule you control—so your status stays green while you focus on real work.
+[![Release](https://img.shields.io/github/v/release/alexphillips-dev/Teams-Always-Green?label=release&sort=semver)](https://github.com/alexphillips-dev/Teams-Always-Green/releases/latest)
 
-**Why you’ll like it**
+Keep your Microsoft Teams status active without babysitting your keyboard. Teams Always Green is a lightweight Windows tray app that gently toggles Scroll Lock on a schedule you control�so your status stays green while you focus on real work.
+
+**Why you�ll like it**
 - **Set it and forget it:** Start once, it runs quietly in the tray.
-- **Smart scheduling:** Work hours, pause windows, and one‑click overrides.
-- **Profiles:** Switch configs for home, office, or on‑call in seconds.
+- **Smart scheduling:** Work hours, pause windows, and one-click overrides.
+- **Profiles:** Switch configs for home, office, or on-call in seconds.
 - **Deep logging when you need it:** Debug mode, diagnostics, and history.
 
 ---
@@ -13,8 +15,8 @@ Keep your Microsoft Teams status active without babysitting your keyboard. Teams
 ## Features at a Glance
 
 - Tray app with Start/Stop/Toggle, Restart, and Exit
-- Profiles with per‑profile settings (intervals, colors, hotkeys, scheduling)
-- Scheduling + pause controls (including one‑time pauses)
+- Profiles with per-profile settings (intervals, colors, hotkeys, scheduling)
+- Scheduling + pause controls (including one-time pauses)
 - Global hotkeys for quick control
 - Live Settings UI with Status, History, and Diagnostics
 - Robust logging with rotation and export
@@ -23,10 +25,10 @@ Keep your Microsoft Teams status active without babysitting your keyboard. Teams
 
 ## Quick Setup (Recommended)
 
-Download and run the single‑file bootstrapper:
+Download and run the single-file bootstrapper:
 
 1) Download `QuickSetup.cmd` from the repo.
-2) Double‑click it.
+2) Double-click it.
 3) Choose your install folder (default: `Documents\Teams Always Green`).
 
 The installer will:
@@ -76,12 +78,12 @@ Teams Always Green\
 ## Usage
 
 - The tray icon controls everything.
-- Right‑click the tray icon for Start/Stop, Settings, History, Restart, and more.
+- Right-click the tray icon for Start/Stop, Settings, History, Restart, and more.
 - Use **Settings** for profiles, scheduling, hotkeys, appearance, and logging.
 
 ---
 
-## Settings Overview (User‑Friendly)
+## Settings Overview (User-Friendly)
 
 ### General
 - Interval (how often to toggle)
@@ -138,9 +140,9 @@ Includes filters, search, copy, and export.
 
 ## Troubleshooting
 
-- **“Already running”** → Check for a lingering PowerShell process for the script.
-- **Startup issues** → Check `Logs\Teams-Always-Green.bootstrap.log`.
-- **Settings not saving** → Verify the `Settings` folder is writable.
+- **�Already running�** ? Check for a lingering PowerShell process for the script.
+- **Startup issues** ? Check `Logs\Teams-Always-Green.bootstrap.log`.
+- **Settings not saving** ? Verify the `Settings` folder is writable.
 
 ---
 
@@ -157,7 +159,7 @@ Includes filters, search, copy, and export.
 
 ## Updating
 
-- Re‑run `QuickSetup.cmd` to pull the latest script.
+- Re-run `QuickSetup.cmd` to pull the latest script.
 - Or replace `Teams Always Green.ps1` manually.
 
 ---
@@ -173,3 +175,4 @@ Includes filters, search, copy, and export.
 ## License
 
 MIT License. See `LICENSE`.
+
