@@ -1,13 +1,13 @@
-﻿# QuickSetup.ps1 - Download and install Teams-Always-Green into a chosen folder
+﻿# QuickSetup.ps1 - Download and install Teams Always Green into a chosen folder
 # Creates Desktop, Start Menu, and Startup shortcuts (no VBS needed).
 
 Add-Type -AssemblyName System.Windows.Forms
 
 $defaultBase = [Environment]::GetFolderPath("MyDocuments")
-$defaultPath = Join-Path $defaultBase "Teams-Always-Green"
+$defaultPath = Join-Path $defaultBase "Teams Always Green"
 
 $dialog = New-Object System.Windows.Forms.FolderBrowserDialog
-$dialog.Description = "Select install folder for Teams-Always-Green"
+$dialog.Description = "Select install folder for Teams Always Green"
 $dialog.SelectedPath = $defaultPath
 
 if ($dialog.ShowDialog() -ne [System.Windows.Forms.DialogResult]::OK) {
@@ -16,7 +16,7 @@ if ($dialog.ShowDialog() -ne [System.Windows.Forms.DialogResult]::OK) {
 }
 
 $installPath = $dialog.SelectedPath
-$folders = @("Debug", "Logs", "Meta", "Settings", "Meta\Icons")
+$folders = @("Debug", "Logs", "Meta", "Settings", "Meta\Icons", "Script")
 foreach ($name in $folders) {
     $path = Join-Path $installPath $name
     if (-not (Test-Path $path)) {
@@ -36,15 +36,15 @@ try {
     Write-Host "Failed to write locator files: $($_.Exception.Message)"
 }
 
-$scriptUrl = "https://raw.githubusercontent.com/alexphillips-dev/Teams-Always-Green/main/Teams-Always-Green.ps1"
+$scriptUrl = "https://raw.githubusercontent.com/alexphillips-dev/Teams-Always-Green/main/Script/Teams%20Always%20Green.ps1"
 $versionUrl = "https://raw.githubusercontent.com/alexphillips-dev/Teams-Always-Green/main/VERSION"
-$debugVbsUrl = "https://raw.githubusercontent.com/alexphillips-dev/Teams-Always-Green/main/Debug/Teams-Always-Green%20-%20Debug.VBS"
+$debugVbsUrl = "https://raw.githubusercontent.com/alexphillips-dev/Teams-Always-Green/main/Debug/Teams%20Always%20Green%20-%20Debug.VBS"
 $trayIconUrl = "https://raw.githubusercontent.com/alexphillips-dev/Teams-Always-Green/main/Meta/Icons/Tray_Icon.ico"
 $settingsIconUrl = "https://raw.githubusercontent.com/alexphillips-dev/Teams-Always-Green/main/Meta/Icons/Settings_Icon.ico"
 
-$targetScript = Join-Path $installPath "Teams-Always-Green.ps1"
+$targetScript = Join-Path $installPath "Script\Teams Always Green.ps1"
 $targetVersion = Join-Path $installPath "VERSION"
-$targetDebugVbs = Join-Path $installPath "Debug\Teams-Always-Green - Debug.VBS"
+$targetDebugVbs = Join-Path $installPath "Debug\Teams Always Green - Debug.VBS"
 $targetTrayIcon = Join-Path $installPath "Meta\Icons\Tray_Icon.ico"
 $targetSettingsIcon = Join-Path $installPath "Meta\Icons\Settings_Icon.ico"
 
@@ -100,16 +100,16 @@ function New-Shortcut([string]$shortcutPath, [string]$targetScriptPath, [string]
 }
 
 $programsDir = [Environment]::GetFolderPath("Programs")
-$menuFolder = Join-Path $programsDir "Teams-Always-Green"
+$menuFolder = Join-Path $programsDir "Teams Always Green"
 if (-not (Test-Path $menuFolder)) {
     New-Item -ItemType Directory -Path $menuFolder -Force | Out-Null
 }
-$menuShortcut = Join-Path $menuFolder "Teams-Always-Green.lnk"
+$menuShortcut = Join-Path $menuFolder "Teams Always Green.lnk"
 $desktopDir = [Environment]::GetFolderPath("Desktop")
-$desktopShortcut = Join-Path $desktopDir "Teams-Always-Green.lnk"
+$desktopShortcut = Join-Path $desktopDir "Teams Always Green.lnk"
 
 $enableStartup = [System.Windows.Forms.MessageBox]::Show(
-    "Start Teams-Always-Green when Windows starts?",
+    "Start Teams Always Green when Windows starts?",
     "Startup Shortcut",
     [System.Windows.Forms.MessageBoxButtons]::YesNo,
     [System.Windows.Forms.MessageBoxIcon]::Question
@@ -117,7 +117,7 @@ $enableStartup = [System.Windows.Forms.MessageBox]::Show(
 
 if ($enableStartup) {
     $startupDir = [Environment]::GetFolderPath("Startup")
-    $startupShortcut = Join-Path $startupDir "Teams-Always-Green.lnk"
+    $startupShortcut = Join-Path $startupDir "Teams Always Green.lnk"
 }
 
 try {
@@ -130,7 +130,7 @@ try {
     Write-Host "Failed to create shortcuts: $($_.Exception.Message)"
 }
 
-Write-Host "Installed Teams-Always-Green to: $installPath"
+Write-Host "Installed Teams Always Green to: $installPath"
 Write-Host "Start Menu shortcut: $menuShortcut"
 if ($enableStartup) {
     Write-Host "Startup shortcut: $startupShortcut"

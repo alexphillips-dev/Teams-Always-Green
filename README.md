@@ -2,9 +2,9 @@
 
 [![Release](https://img.shields.io/github/v/release/alexphillips-dev/Teams-Always-Green?label=release&sort=semver)](https://github.com/alexphillips-dev/Teams-Always-Green/releases/latest)
 
-Keep your Microsoft Teams status active without babysitting your keyboard. Teams Always Green is a lightweight Windows tray app that gently toggles Scroll Lock on a schedule you control—so your status stays green while you focus on real work.
+Keep your Microsoft Teams status active without babysitting your keyboard. Teams Always Green is a lightweight Windows tray app that gently toggles Scroll Lock on a schedule you control - so your status stays green while you focus on real work.
 
-**Why you’ll like it**
+**Why you'll like it**
 - **Set it and forget it:** Start once, it runs quietly in the tray.
 - **Smart scheduling:** Work hours, pause windows, and one-click overrides.
 - **Profiles:** Switch configs for home, office, or on-call in seconds.
@@ -32,7 +32,7 @@ Download and run the single-file bootstrapper:
 3) Choose your install folder (default: `Documents\Teams Always Green`).
 
 The installer will:
-- Download `Teams Always Green.ps1`
+- Download `Script\Teams Always Green.ps1`
 - Create required folders (`Debug`, `Logs`, `Meta`, `Settings`)
 - Create Start Menu, Desktop, and Startup shortcuts
 
@@ -41,12 +41,12 @@ The installer will:
 ## Manual Install
 
 1) Create an install folder (example: `Documents\Teams Always Green`).
-2) Copy `Teams Always Green.ps1` into that folder.
-3) Create subfolders: `Debug`, `Logs`, `Meta`, `Settings`.
+2) Copy `Script\Teams Always Green.ps1` into that folder (create the Script folder if it doesn't exist).
+3) Create subfolders: `Script`, `Debug`, `Logs`, `Meta`, `Settings`.
 4) Run the script:
 
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File "Teams Always Green.ps1"
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "Script\Teams Always Green.ps1"
 ```
 
 ---
@@ -55,7 +55,8 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File "Teams Always Green.ps1"
 
 ```
 Teams Always Green\
-  Teams Always Green.ps1
+  Script
+    Teams Always Green.ps1
   QuickSetup.ps1
   QuickSetup.cmd
   Teams Always Green.VBS
@@ -140,7 +141,7 @@ Includes filters, search, copy, and export.
 
 ## Troubleshooting
 
-- **“Already running”** ? Check for a lingering PowerShell process for the script.
+- **?Already running?** ? Check for a lingering PowerShell process for the script.
 - **Startup issues** ? Check `Logs\Teams-Always-Green.bootstrap.log`.
 - **Settings not saving** ? Verify the `Settings` folder is writable.
 
@@ -160,7 +161,7 @@ Includes filters, search, copy, and export.
 ## Updating
 
 - Re-run `QuickSetup.cmd` to pull the latest script.
-- Or replace `Teams Always Green.ps1` manually.
+- Or replace `Script\Teams Always Green.ps1` manually.
 
 ---
 
@@ -175,4 +176,5 @@ Includes filters, search, copy, and export.
 ## License
 
 MIT License. See `LICENSE`.
+
 
