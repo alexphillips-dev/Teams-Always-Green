@@ -14,3 +14,5 @@ Meta/SettingsHost.cs
 # OS/editor junk
 .DS_Store
 Thumbs.db
+
+Meta/*.settings.lastgood.json

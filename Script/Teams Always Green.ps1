@@ -32,49 +32,154 @@ function Get-PathHash([string]$text) {
 # --- Paths, Meta folder, and locator files ---
 $scriptPath = $MyInvocation.MyCommand.Path
 $scriptDir = Split-Path -Parent $scriptPath
-$script:MetaDir = Join-Path $scriptDir "Meta"
-try {
-    if (-not (Test-Path $script:MetaDir)) {
-        New-Item -ItemType Directory -Path $script:MetaDir -Force | Out-Null
-    }
-} catch {
+$appRoot = if ((Split-Path -Leaf $scriptDir) -ieq "Script") { Split-Path -Parent $scriptDir } else { $scriptDir }
+$script:FolderNames = @{
+    Logs = "Logs"
+    Settings = "Settings"
+    Meta = "Meta"
+    Debug = "Debug"
+    Script = "Script"
 }
+$script:DataRoot = $appRoot
+$script:PathWarnings = @()
+
+function Add-PathWarning([string]$message) {
+    if (-not [string]::IsNullOrWhiteSpace($message)) {
+        $script:PathWarnings += $message
+    }
+}
+
+function Write-PathWarningNow([string]$message) {
+    if ([string]::IsNullOrWhiteSpace($message)) { return }
+    if (Get-Command -Name Write-Log -ErrorAction SilentlyContinue) {
+        Write-Log $message "WARN" $null "Paths"
+    } else {
+        Add-PathWarning $message
+    }
+}
+
+function Normalize-PathText([string]$path) {
+    if ([string]::IsNullOrWhiteSpace($path)) { return "" }
+    $trimmed = $path.Trim()
+    if ($trimmed.StartsWith('"') -and $trimmed.EndsWith('"')) {
+        $trimmed = $trimmed.Trim('"')
+    }
+    $expanded = [Environment]::ExpandEnvironmentVariables($trimmed)
+    try {
+        return [System.IO.Path]::GetFullPath($expanded)
+    } catch {
+        return $expanded
+    }
+}
+
+function Convert-FromRelativePath([string]$value) {
+    $normalized = Normalize-PathText $value
+    if ([string]::IsNullOrWhiteSpace($normalized)) { return "" }
+    if (-not [System.IO.Path]::IsPathRooted($normalized)) {
+        return (Join-Path $script:DataRoot $normalized)
+    }
+    return $normalized
+}
+
+function Convert-ToRelativePathIfUnderRoot([string]$path) {
+    if ([string]::IsNullOrWhiteSpace($path)) { return "" }
+    try {
+        $full = [System.IO.Path]::GetFullPath($path)
+        $root = [System.IO.Path]::GetFullPath($script:DataRoot)
+        if ($full.StartsWith($root, [System.StringComparison]::OrdinalIgnoreCase)) {
+            return $full.Substring($root.Length).TrimStart('\')
+        }
+    } catch {
+    }
+    return $path
+}
+
+function Test-DirectoryWritable([string]$path) {
+    if ([string]::IsNullOrWhiteSpace($path)) { return $false }
+    try {
+        if (-not (Test-Path $path)) {
+            New-Item -ItemType Directory -Path $path -Force | Out-Null
+        }
+        $testFile = Join-Path $path ("~write_test_{0}.tmp" -f ([Guid]::NewGuid().ToString("N")))
+        Set-Content -Path $testFile -Value "test" -Encoding ASCII
+        Remove-Item -Path $testFile -Force
+        return $true
+    } catch {
+        return $false
+    }
+}
+
+function Ensure-Directory([string]$path, [string]$label = "Directory") {
+    if ([string]::IsNullOrWhiteSpace($path)) { return $false }
+    try {
+        if (-not (Test-Path $path)) {
+            New-Item -ItemType Directory -Path $path -Force | Out-Null
+        }
+        return $true
+    } catch {
+        Write-PathWarningNow "$label missing and could not be created: $path"
+        return $false
+    }
+}
+
+function Resolve-DirectoryOrDefault([string]$input, [string]$defaultPath, [string]$label) {
+    $resolved = Convert-FromRelativePath $input
+    if ([string]::IsNullOrWhiteSpace($resolved)) { $resolved = $defaultPath }
+    $resolved = Normalize-PathText $resolved
+    Ensure-Directory $resolved $label | Out-Null
+    if (-not (Test-DirectoryWritable $resolved)) {
+        Write-PathWarningNow "$label directory not writable: $resolved. Falling back to $defaultPath."
+        $resolved = $defaultPath
+        Ensure-Directory $resolved $label | Out-Null
+    }
+    return $resolved
+}
+
+function Ensure-AppFolders {
+    $folders = @($script:FolderNames.Logs, $script:FolderNames.Settings, $script:FolderNames.Meta, $script:FolderNames.Debug, $script:FolderNames.Script)
+    foreach ($folder in $folders) {
+        $path = Join-Path $script:DataRoot $folder
+        Ensure-Directory $path $folder | Out-Null
+    }
+}
+
+$script:MetaDir = Join-Path $script:DataRoot $script:FolderNames.Meta
+try { Ensure-Directory $script:MetaDir "Meta" | Out-Null } catch { }
 $script:SettingsLocatorPath = Join-Path $script:MetaDir "Teams-Always-Green.settings.path.txt"
 $script:LogLocatorPath = Join-Path $script:MetaDir "Teams-Always-Green.log.path.txt"
 $script:CommandFilePath = Join-Path $script:MetaDir "Teams-Always-Green.commands.txt"
 $script:StatusFilePath = Join-Path $script:MetaDir "Teams-Always-Green.status.json"
-$oldSettingsLocator = Join-Path $scriptDir "Teams-Always-Green.settings.path.txt"
-$oldLogLocator = Join-Path $scriptDir "Teams-Always-Green.log.path.txt"
+$script:SettingsLastGoodPath = Join-Path $script:MetaDir "Teams-Always-Green.settings.lastgood.json"
+$script:SettingsCorruptDir = Join-Path $script:MetaDir "Corrupt"
+$oldSettingsLocator = Join-Path $script:DataRoot "Teams-Always-Green.settings.path.txt"
+$oldLogLocator = Join-Path $script:DataRoot "Teams-Always-Green.log.path.txt"
 if ((Test-Path $oldSettingsLocator) -and -not (Test-Path $script:SettingsLocatorPath)) {
     try { Move-Item -Path $oldSettingsLocator -Destination $script:SettingsLocatorPath -Force } catch { }
 }
 if ((Test-Path $oldLogLocator) -and -not (Test-Path $script:LogLocatorPath)) {
     try { Move-Item -Path $oldLogLocator -Destination $script:LogLocatorPath -Force } catch { }
 }
-$defaultSettingsDir = Join-Path $scriptDir "Settings"
-$defaultLogDir = Join-Path $scriptDir "Logs"
-$script:SettingsDirectory = if (Test-Path $defaultSettingsDir) { $defaultSettingsDir } else { $scriptDir }
-$script:LogDirectory = if (Test-Path $defaultLogDir) { $defaultLogDir } else { $scriptDir }
+$defaultSettingsDir = Join-Path $script:DataRoot $script:FolderNames.Settings
+$defaultLogDir = Join-Path $script:DataRoot $script:FolderNames.Logs
+$script:SettingsDirectory = Resolve-DirectoryOrDefault "" $defaultSettingsDir "Settings"
+$script:LogDirectory = Resolve-DirectoryOrDefault "" $defaultLogDir "Logs"
 if (Test-Path $script:SettingsLocatorPath) {
     try {
         $locatorValue = (Get-Content -Path $script:SettingsLocatorPath -Raw).Trim()
-        if (-not [string]::IsNullOrWhiteSpace($locatorValue) -and (Test-Path $locatorValue)) {
-            $script:SettingsDirectory = $locatorValue
-        }
+        $script:SettingsDirectory = Resolve-DirectoryOrDefault $locatorValue $defaultSettingsDir "Settings"
     } catch {
     }
 }
 if (Test-Path $script:LogLocatorPath) {
     try {
         $logLocatorValue = (Get-Content -Path $script:LogLocatorPath -Raw).Trim()
-        if (-not [string]::IsNullOrWhiteSpace($logLocatorValue) -and (Test-Path $logLocatorValue)) {
-            $script:LogDirectory = $logLocatorValue
-        }
+        $script:LogDirectory = Resolve-DirectoryOrDefault $logLocatorValue $defaultLogDir "Logs"
     } catch {
     }
 }
+Ensure-AppFolders | Out-Null
 $bootstrapLogFile = "Teams-Always-Green.bootstrap.log"
-$bootstrapLogRoot = Join-Path $scriptDir $bootstrapLogFile
+$bootstrapLogRoot = Join-Path $script:DataRoot $bootstrapLogFile
 $bootstrapLogTarget = Join-Path $script:LogDirectory $bootstrapLogFile
 if ((Test-Path $bootstrapLogRoot) -and ($bootstrapLogRoot -ne $bootstrapLogTarget)) {
     try {
@@ -92,6 +197,8 @@ $script:DateTimeFormatDefault = "yyyy-MM-dd HH:mm:ss"
 $script:DateTimeFormat = $script:DateTimeFormatDefault
 $script:UseSystemDateTimeFormat = $true
 $script:SystemDateTimeFormatMode = "Short"
+$script:SettingsLoadFailed = $false
+$script:SettingsRecovered = $false
 
 function Normalize-DateTimeFormat([string]$format) {
     if ([string]::IsNullOrWhiteSpace($format)) { return $script:DateTimeFormatDefault }
@@ -121,6 +228,28 @@ function Format-DateTime($value) {
     }
 }
 
+function Normalize-IntervalSeconds([int]$seconds) {
+    if ($seconds -lt 5) { return 5 }
+    if ($seconds -gt 86400) { return 86400 }
+    return $seconds
+}
+
+function Get-EnvironmentSummary {
+    try {
+        $culture = [System.Globalization.CultureInfo]::CurrentCulture.Name
+        $uiCulture = [System.Globalization.CultureInfo]::CurrentUICulture.Name
+        $is64 = [Environment]::Is64BitProcess
+        $dpi = $null
+        try {
+            $dpi = [System.Windows.Forms.Screen]::PrimaryScreen.DeviceDpi
+        } catch { }
+        $dpiText = if ($dpi) { $dpi } else { "Unknown" }
+        return ("Environment summary: Culture={0} UICulture={1} DPI={2} 64Bit={3}" -f $culture, $uiCulture, $dpiText, $is64)
+    } catch {
+        return "Environment summary: Unavailable"
+    }
+}
+
 # --- Bootstrap logging before full logger is initialized ---
 function Write-BootstrapLog([string]$message, [string]$level = "INFO") {
     try {
@@ -128,6 +257,52 @@ function Write-BootstrapLog([string]$message, [string]$level = "INFO") {
         $line = "[${timestamp}] [$level] [Bootstrap] $message"
         Add-Content -Path $script:BootstrapLogPath -Value $line
     } catch { }
+}
+
+Write-BootstrapLog ("Paths resolved: DataRoot={0} Logs={1} Settings={2}" -f $script:DataRoot, $script:LogDirectory, $script:SettingsDirectory) "INFO"
+
+function Save-LastGoodSettingsRaw([string]$rawJson) {
+    if ([string]::IsNullOrWhiteSpace($rawJson)) { return }
+    try {
+        Ensure-Directory $script:MetaDir "Meta" | Out-Null
+        Set-Content -Path $script:SettingsLastGoodPath -Value $rawJson -Encoding UTF8
+    } catch {
+    }
+}
+
+function Save-CorruptSettingsCopy([string]$rawJson) {
+    try {
+        Ensure-Directory $script:SettingsCorruptDir "Corrupt" | Out-Null
+        $stamp = (Get-Date).ToString("yyyyMMddHHmmss")
+        $target = Join-Path $script:SettingsCorruptDir ("Teams-Always-Green.settings.corrupt.{0}.json" -f $stamp)
+        if (-not [string]::IsNullOrWhiteSpace($rawJson)) {
+            Set-Content -Path $target -Value $rawJson -Encoding UTF8
+        } elseif (Test-Path $script:settingsPath) {
+            Copy-Item -Path $script:settingsPath -Destination $target -Force
+        }
+        Write-BootstrapLog "Corrupt settings saved to $target" "WARN"
+    } catch {
+    }
+}
+
+function Load-LastGoodSettings {
+    try {
+        if (Test-Path $script:SettingsLastGoodPath) {
+            $raw = Get-Content -Path $script:SettingsLastGoodPath -Raw
+            if (-not [string]::IsNullOrWhiteSpace($raw)) {
+                return $raw | ConvertFrom-Json
+            }
+        }
+    } catch {
+    }
+    return $null
+}
+
+if ($script:PathWarnings -and $script:PathWarnings.Count -gt 0) {
+    foreach ($msg in $script:PathWarnings) {
+        Write-BootstrapLog $msg "WARN"
+    }
+    $script:PathWarnings = @()
 }
 
 Write-BootstrapLog "Startup: ScriptPath=$scriptPath LogDir=$script:LogDirectory SettingsDir=$script:SettingsDirectory" "INFO"
@@ -162,7 +337,68 @@ if (-not (Get-Command -Name Write-LogEx -ErrorAction SilentlyContinue)) {
         Write-Log $message $level $exception $context -Force:$Force
     }
 }
+
+$script:LogThrottle = @{}
+
+function Write-LogThrottled([string]$key, [string]$message, [string]$level = "INFO", [int]$minSeconds = 10) {
+    if ([string]::IsNullOrWhiteSpace($key)) { return }
+    $now = Get-Date
+    $last = $null
+    if ($script:LogThrottle.ContainsKey($key)) {
+        $last = $script:LogThrottle[$key]
+    }
+    if ($last -and (($now - $last).TotalSeconds -lt $minSeconds)) {
+        return
+    }
+    $script:LogThrottle[$key] = $now
+    Write-Log $message $level $null $key
+}
+
+function Get-PathHealthSummary {
+    $logWritable = Test-DirectoryWritable $script:LogDirectory
+    $settingsWritable = Test-DirectoryWritable $script:SettingsDirectory
+    return ("Paths: DataRoot={0} LogDir={1} (Writable={2}) SettingsDir={3} (Writable={4})" -f `
+        $script:DataRoot, $script:LogDirectory, $logWritable, $script:SettingsDirectory, $settingsWritable)
+}
+
+function Validate-RequiredFiles {
+    if (-not (Test-Path $versionPath)) {
+        Write-LogThrottled "Missing-Version" "VERSION file missing; version display may be inaccurate." "WARN" 300
+    }
+    $iconFiles = @(
+        (Join-Path $script:DataRoot "Meta\\Icons\\Tray_Icon.ico"),
+        (Join-Path $script:DataRoot "Meta\\Icons\\Settings_Icon.ico")
+    )
+    foreach ($icon in $iconFiles) {
+        if (-not (Test-Path $icon)) {
+            Write-LogThrottled ("MissingIcon-" + (Split-Path -Leaf $icon)) ("Icon missing: {0}. Using fallback icon." -f $icon) "WARN" 300
+        }
+    }
+}
+
+function Validate-FolderPaths {
+    $results = @()
+    $paths = @(
+        @{ Name = "DataRoot"; Path = $script:DataRoot },
+        @{ Name = "Logs"; Path = $script:LogDirectory },
+        @{ Name = "Settings"; Path = $script:SettingsDirectory },
+        @{ Name = "Meta"; Path = $script:MetaDir },
+        @{ Name = "Debug"; Path = (Join-Path $script:DataRoot $script:FolderNames.Debug) }
+    )
+    foreach ($item in $paths) {
+        $exists = Test-Path $item.Path
+        $writable = if ($exists) { Test-DirectoryWritable $item.Path } else { $false }
+        $results += [pscustomobject]@{
+            Name     = $item.Name
+            Path     = $item.Path
+            Exists   = $exists
+            Writable = $writable
+        }
+    }
+    return $results
+}
 # --- Global state, caches, and UI references ---
+$notifyIcon = $null
 $hash = Get-PathHash $scriptPath
 $mutexName = "Local\TeamsAlwaysGreenPS_$($hash.Substring(0,16))"
 $script:SessionId = [Guid]::NewGuid().ToString("N").Substring(0, 8)
@@ -180,7 +416,7 @@ $script:isShuttingDown = $false
 $script:CleanupDone = $false
 $script:SettingsForm = $null
 $script:SettingsFormIcon = $null
-$script:SettingsSchemaVersion = 5
+$script:SettingsSchemaVersion = 6
 $script:SettingsToggleCurrentValue = $null
 $script:SettingsToggleLifetimeValue = $null
 $script:ScheduleWeekdayCacheText = $null
@@ -323,6 +559,8 @@ $script:LogBufferMax = 20
 $script:IsFlushingLog = $false
 $script:DebugForceAllCategories = $false
 $script:PreviousLogCategories = $null
+$script:MinLogFreeMB = 50
+$script:LastLowDiskWarnTime = $null
 $script:RunId = ([Guid]::NewGuid().ToString("N")).Substring(0, 8)
 $script:LastErrorId = $null
 $script:LastSettingsChangeSummary = $null
@@ -349,7 +587,7 @@ $script:DebugModeTimer.Add_Tick({
     }
 })
 # --- App metadata ---
-$versionPath = Join-Path $scriptDir "VERSION"
+$versionPath = Join-Path $script:DataRoot "VERSION"
 $appVersion = "1.0.0"
 $appLastUpdated = "Unknown"
 if (Test-Path $versionPath) {
@@ -447,7 +685,7 @@ function Invoke-UpdateCheck {
     }
     $owner = "alexphillips-dev"
     $repo = "Teams-Always-Green"
-    $assetName = "Teams-Always-Green.ps1"
+    $assetName = "Teams Always Green.ps1"
     $release = Get-LatestReleaseInfo $owner $repo
     if (-not $release) { return }
     $latestVersion = Get-ReleaseVersionString $release
@@ -478,7 +716,7 @@ function Invoke-UpdateCheck {
         return
     }
 
-    $tempPath = Join-Path $env:TEMP ("Teams-Always-Green.ps1." + [Guid]::NewGuid().ToString("N") + ".tmp")
+    $tempPath = Join-Path $env:TEMP ("Teams Always Green.ps1." + [Guid]::NewGuid().ToString("N") + ".tmp")
     try {
         Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $tempPath -UseBasicParsing -ErrorAction Stop
         $downloadInfo = Get-Item -Path $tempPath -ErrorAction Stop
@@ -486,10 +724,10 @@ function Invoke-UpdateCheck {
             throw "Downloaded file looks too small."
         }
 
-        $backupPath = Join-Path $script:MetaDir ("Teams-Always-Green.ps1.bak." + (Get-Date -Format "yyyyMMddHHmmss"))
+        $backupPath = Join-Path $script:MetaDir ("Teams Always Green.ps1.bak." + (Get-Date -Format "yyyyMMddHHmmss"))
         Copy-Item -Path $scriptPath -Destination $backupPath -Force
         Move-Item -Path $tempPath -Destination $scriptPath -Force
-        $versionPathLocal = Join-Path $scriptDir "VERSION"
+        $versionPathLocal = Join-Path $script:DataRoot "VERSION"
         try {
             Set-Content -Path $versionPathLocal -Value $latestVersion -Encoding ASCII
             if ($release.PSObject.Properties.Name -contains "published_at" -and $release.published_at) {
@@ -506,7 +744,7 @@ function Invoke-UpdateCheck {
         if (Get-Command -Name Flush-LogBuffer -ErrorAction SilentlyContinue) { Flush-LogBuffer }
         Release-MutexOnce
         $script:CleanupDone = $true
-        Start-Process -FilePath "powershell.exe" -WindowStyle Hidden -WorkingDirectory $scriptDir -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$scriptPath`""
+        Start-Process -FilePath "powershell.exe" -WindowStyle Hidden -WorkingDirectory $script:DataRoot -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$scriptPath`""
         [System.Windows.Forms.Application]::Exit()
     } catch {
         try { if (Test-Path $tempPath) { Remove-Item -Path $tempPath -Force } } catch { }
@@ -546,10 +784,35 @@ if (-not $script:HasMutex) {
 
 # --- Log/settings paths and logging defaults ---
 # Resolve paths (same folder as script)
-$scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$iconPath  = Join-Path $scriptDir "Meta\\Icons\\Tray_Icon.ico"
+$iconPath  = Join-Path $script:DataRoot "Meta\\Icons\\Tray_Icon.ico"
 $script:logPath   = Join-Path $script:LogDirectory "Teams-Always-Green.log"
 $script:settingsPath = Join-Path $script:SettingsDirectory "Teams-Always-Green.settings.json"
+# Ensure default folders exist
+try {
+    if (-not (Test-Path $script:LogDirectory)) {
+        New-Item -ItemType Directory -Path $script:LogDirectory -Force | Out-Null
+    }
+    if (-not (Test-Path $script:SettingsDirectory)) {
+        New-Item -ItemType Directory -Path $script:SettingsDirectory -Force | Out-Null
+    }
+} catch {
+}
+# Move root log/settings files into their folders if they were created in the script directory
+$rootLogPath = Join-Path $script:DataRoot "Teams-Always-Green.log"
+if ((Test-Path $rootLogPath) -and ($script:LogDirectory -ne $script:DataRoot)) {
+    try { Move-Item -Path $rootLogPath -Destination $script:logPath -Force } catch { }
+}
+$rootSettingsPath = Join-Path $script:DataRoot "Teams-Always-Green.settings.json"
+if ((Test-Path $rootSettingsPath) -and ($script:SettingsDirectory -ne $script:DataRoot)) {
+    try { Move-Item -Path $rootSettingsPath -Destination $script:settingsPath -Force } catch { }
+}
+foreach ($i in 1..3) {
+    $rootBak = Join-Path $script:DataRoot ("Teams-Always-Green.settings.json.bak{0}" -f $i)
+    $destBak = Join-Path $script:SettingsDirectory ("Teams-Always-Green.settings.json.bak{0}" -f $i)
+    if ((Test-Path $rootBak) -and ($script:SettingsDirectory -ne $script:DataRoot)) {
+        try { Move-Item -Path $rootBak -Destination $destBak -Force } catch { }
+    }
+}
 # --- Logging configuration defaults ---
 $script:LogLevel = "INFO"
 $script:LogMaxBytes = 1048576
@@ -751,6 +1014,7 @@ function Write-LogEx([string]$message, [string]$level = "ERROR", [Exception]$exc
 
 function Rotate-LogIfNeeded([int]$maxBytes = 1048576) {
     try {
+        if (Should-SkipLogWrite) { return }
         if (-not (Test-Path $logPath)) { return }
         $now = Get-Date
         if ($script:LastLogSizeCheckTime -and (($now - $script:LastLogSizeCheckTime).TotalSeconds -lt 1)) {
@@ -909,6 +1173,32 @@ function Scrub-LogLines([string[]]$lines) {
     return $lines | ForEach-Object { Scrub-LogText $_ }
 }
 
+function Get-DriveFreeMB([string]$path) {
+    try {
+        $normalized = Normalize-PathText $path
+        if ([string]::IsNullOrWhiteSpace($normalized)) { return -1 }
+        $root = [System.IO.Path]::GetPathRoot($normalized)
+        if ([string]::IsNullOrWhiteSpace($root)) { return -1 }
+        $drive = New-Object System.IO.DriveInfo($root)
+        return [math]::Floor($drive.AvailableFreeSpace / 1MB)
+    } catch {
+        return -1
+    }
+}
+
+function Should-SkipLogWrite {
+    $freeMb = Get-DriveFreeMB $script:LogDirectory
+    if ($freeMb -ge 0 -and $freeMb -lt $script:MinLogFreeMB) {
+        $now = Get-Date
+        if (-not $script:LastLowDiskWarnTime -or (($now - $script:LastLowDiskWarnTime).TotalSeconds -gt 60)) {
+            $script:LastLowDiskWarnTime = $now
+            Write-BootstrapLog "Low disk space (${freeMb} MB free). Skipping log writes." "WARN"
+        }
+        return $true
+    }
+    return $false
+}
+
 function Write-Log([string]$message, [string]$level = "INFO", [Exception]$exception = $null, [string]$context = $null, [switch]$Force) {
     $settingsVar = Get-Variable -Name settings -Scope Script -ErrorAction SilentlyContinue
     if ($settingsVar -and $settingsVar.Value -and ($settingsVar.Value.PSObject.Properties.Name -contains "LogLevel")) {
@@ -978,6 +1268,20 @@ function Write-Log([string]$message, [string]$level = "INFO", [Exception]$except
         $script:WarningCount++
     }
     $script:LogWriteCount++
+    if (-not $forceLine -and $levelKey -ne "FATAL") {
+        if (Should-SkipLogWrite) {
+            return
+        }
+    }
+    if (-not (Test-Path $script:LogDirectory)) {
+        if (-not (Ensure-Directory $script:LogDirectory "Logs")) {
+            Write-BootstrapLog "Log directory missing and could not be created: $script:LogDirectory" "WARN"
+            return
+        }
+    }
+    if ($script:logPath -and ((Split-Path -Parent $script:logPath) -ne $script:LogDirectory)) {
+        $script:logPath = Join-Path $script:LogDirectory "Teams-Always-Green.log"
+    }
     Rotate-LogIfNeeded
     $timestamp = Format-DateTime (Get-Date)
     $displayLevel = $levelKey
@@ -1062,16 +1366,13 @@ function Write-Log([string]$message, [string]$level = "INFO", [Exception]$except
 
 # --- Log/settings directory management ---
 function Set-LogDirectory([string]$directory, [switch]$SkipLog) {
-    $resolved = if ([string]::IsNullOrWhiteSpace($directory)) { $scriptDir } else { $directory }
-    try {
-        if (-not (Test-Path $resolved)) {
-            New-Item -ItemType Directory -Path $resolved -Force | Out-Null
+    $desired = Convert-FromRelativePath $directory
+    $resolved = Resolve-DirectoryOrDefault $directory $defaultLogDir "Logs"
+    if (-not $SkipLog -and -not [string]::IsNullOrWhiteSpace($desired)) {
+        $desiredNormalized = Normalize-PathText $desired
+        if ($resolved -ne $desiredNormalized) {
+            Write-Log "Log directory not usable; using $resolved" "WARN" $null "Logging"
         }
-    } catch {
-        if (-not $SkipLog) {
-            Write-Log "Failed to create log directory: $resolved" "ERROR" $_.Exception "Logging"
-        }
-        return
     }
 
     $oldLogPath = $script:logPath
@@ -1083,7 +1384,8 @@ function Set-LogDirectory([string]$directory, [switch]$SkipLog) {
 
     if ($oldDir -ne $script:LogDirectory) {
         try {
-            Set-Content -Path $script:LogLocatorPath -Value $script:LogDirectory -Encoding ASCII
+            $locatorValue = Convert-ToRelativePathIfUnderRoot $script:LogDirectory
+            Set-Content -Path $script:LogLocatorPath -Value $locatorValue -Encoding ASCII
         } catch {
             if (-not $SkipLog) {
                 Write-Log "Failed to write log locator file." "WARN" $_.Exception "Logging"
@@ -1107,16 +1409,13 @@ function Set-LogDirectory([string]$directory, [switch]$SkipLog) {
 }
 
 function Set-SettingsDirectory([string]$directory, [switch]$SkipLog) {
-    $resolved = if ([string]::IsNullOrWhiteSpace($directory)) { $scriptDir } else { $directory }
-    try {
-        if (-not (Test-Path $resolved)) {
-            New-Item -ItemType Directory -Path $resolved -Force | Out-Null
+    $desired = Convert-FromRelativePath $directory
+    $resolved = Resolve-DirectoryOrDefault $directory $defaultSettingsDir "Settings"
+    if (-not $SkipLog -and -not [string]::IsNullOrWhiteSpace($desired)) {
+        $desiredNormalized = Normalize-PathText $desired
+        if ($resolved -ne $desiredNormalized) {
+            Write-Log "Settings directory not usable; using $resolved" "WARN" $null "Settings"
         }
-    } catch {
-        if (-not $SkipLog) {
-            Write-Log "Failed to create settings directory: $resolved" "ERROR" $_.Exception "Settings"
-        }
-        return
     }
 
     $oldSettingsPath = $script:settingsPath
@@ -1126,7 +1425,8 @@ function Set-SettingsDirectory([string]$directory, [switch]$SkipLog) {
 
     if ($oldDir -ne $script:SettingsDirectory) {
         try {
-            Set-Content -Path $script:SettingsLocatorPath -Value $script:SettingsDirectory -Encoding ASCII
+            $locatorValue = Convert-ToRelativePathIfUnderRoot $script:SettingsDirectory
+            Set-Content -Path $script:SettingsLocatorPath -Value $locatorValue -Encoding ASCII
         } catch {
             if (-not $SkipLog) {
                 Write-Log "Failed to write settings locator file." "WARN" $_.Exception "Settings"
@@ -1173,6 +1473,9 @@ function Load-Settings {
     try {
         $raw = Get-Content -Path $settingsPath -Raw
         $loaded = $raw | ConvertFrom-Json
+        Save-LastGoodSettingsRaw $raw
+        $script:SettingsLoadFailed = $false
+        $script:SettingsRecovered = $false
         $info = Get-Item -Path $settingsPath -ErrorAction SilentlyContinue
         if ($info) {
             Write-Log ("Settings loaded from {0} (bytes={1} modified={2})" -f $settingsPath, $info.Length, (Format-DateTime $info.LastWriteTime)) "INFO" $null "Settings-Load"
@@ -1181,7 +1484,19 @@ function Load-Settings {
         }
         return $loaded
     } catch {
+        $script:SettingsLoadFailed = $true
         Write-Log "Failed to load settings." "ERROR" $_.Exception "Load-Settings"
+        try {
+            $rawFallback = if (Test-Path $settingsPath) { Get-Content -Path $settingsPath -Raw } else { "" }
+            Save-CorruptSettingsCopy $rawFallback
+        } catch {
+        }
+        $lastGood = Load-LastGoodSettings
+        if ($lastGood) {
+            Write-Log "Recovered settings from last known good snapshot." "WARN" $null "Load-Settings"
+            $script:SettingsRecovered = $true
+            return $lastGood
+        }
         return $null
     }
 }
@@ -1195,6 +1510,17 @@ function Rotate-SettingsBackups {
         if (Test-Path $src) {
             Copy-Item -Path $src -Destination $dst -Force
         }
+    }
+    try {
+        Get-ChildItem -Path $backupDir -Filter "Teams-Always-Green.settings.json.bak*" -ErrorAction SilentlyContinue | ForEach-Object {
+            if ($_.Name -match "bak(\\d+)$") {
+                $num = [int]$Matches[1]
+                if ($num -gt 3) {
+                    Remove-Item -Path $_.FullName -Force -ErrorAction SilentlyContinue
+                }
+            }
+        }
+    } catch {
     }
 }
 
@@ -1275,6 +1601,8 @@ function Normalize-Settings($settings) {
     if (-not ($settings.PSObject.Properties.Name -contains "SettingsFontSize")) { Set-SettingsPropertyValue $settings "SettingsFontSize" 12 }
     if (-not ($settings.PSObject.Properties.Name -contains "LogDirectory")) { Set-SettingsPropertyValue $settings "LogDirectory" "" }
     if (-not ($settings.PSObject.Properties.Name -contains "SettingsDirectory")) { Set-SettingsPropertyValue $settings "SettingsDirectory" "" }
+    if (-not ($settings.PSObject.Properties.Name -contains "DataRoot")) { Set-SettingsPropertyValue $settings "DataRoot" $script:DataRoot }
+    if ([string]::IsNullOrWhiteSpace([string]$settings.DataRoot)) { $settings.DataRoot = $script:DataRoot }
     if (-not ($settings.PSObject.Properties.Name -contains "DateTimeFormat")) { Set-SettingsPropertyValue $settings "DateTimeFormat" $script:DateTimeFormatDefault }
     if (-not ($settings.PSObject.Properties.Name -contains "UseSystemDateTimeFormat")) { Set-SettingsPropertyValue $settings "UseSystemDateTimeFormat" $true }
     if (-not ($settings.PSObject.Properties.Name -contains "SystemDateTimeFormatMode")) { Set-SettingsPropertyValue $settings "SystemDateTimeFormatMode" "Short" }
@@ -1324,6 +1652,10 @@ function Migrate-Settings($settings) {
         if (-not ($settings.PSObject.Properties.Name -contains "SystemDateTimeFormatMode")) { Set-SettingsPropertyValue $settings "SystemDateTimeFormatMode" "Short" }
         $current = 5
     }
+    if ($current -lt 6) {
+        if (-not ($settings.PSObject.Properties.Name -contains "DataRoot")) { Set-SettingsPropertyValue $settings "DataRoot" $script:DataRoot }
+        $current = 6
+    }
     Set-SettingsPropertyValue $settings "SchemaVersion" $current
     return $settings
 }
@@ -1349,11 +1681,22 @@ function Save-SettingsImmediate($settings) {
                 if ($oldVal -ne $newVal) { $changedKeys += $key }
             }
         }
+        if (-not (Test-Path $script:SettingsDirectory)) {
+            Ensure-Directory $script:SettingsDirectory "Settings" | Out-Null
+        }
+        if (-not (Test-DirectoryWritable $script:SettingsDirectory)) {
+            Write-Log "Settings directory not writable; falling back to default Settings folder." "WARN" $null "Settings-Save"
+            $fallbackSettingsDir = Join-Path $script:DataRoot $script:FolderNames.Settings
+            $script:SettingsDirectory = Resolve-DirectoryOrDefault $fallbackSettingsDir $fallbackSettingsDir "Settings"
+        }
+        $script:settingsPath = Join-Path $script:SettingsDirectory "Teams-Always-Green.settings.json"
         Rotate-SettingsBackups
-        $settings | ConvertTo-Json -Depth 4 | Set-Content -Path $settingsPath -Encoding UTF8
+        $settingsJson = $settings | ConvertTo-Json -Depth 4
+        $settingsJson | Set-Content -Path $settingsPath -Encoding UTF8
+        Save-LastGoodSettingsRaw $settingsJson
         if (@($changedKeys).Count -gt 0) {
             $categoryMap = @{
-                General     = @("IntervalSeconds", "StartWithWindows", "RememberChoice", "StartOnLaunch", "RunOnceOnLaunch", "QuietMode", "DisableBalloonTips", "OpenSettingsAtLastTab", "LastSettingsTab", "DateTimeFormat", "UseSystemDateTimeFormat", "SystemDateTimeFormatMode", "ToggleCount", "LastToggleTime", "PauseUntil", "PauseDurationsMinutes", "SettingsDirectory")
+                General     = @("IntervalSeconds", "StartWithWindows", "RememberChoice", "StartOnLaunch", "RunOnceOnLaunch", "QuietMode", "DisableBalloonTips", "OpenSettingsAtLastTab", "LastSettingsTab", "DateTimeFormat", "UseSystemDateTimeFormat", "SystemDateTimeFormatMode", "ToggleCount", "LastToggleTime", "PauseUntil", "PauseDurationsMinutes", "SettingsDirectory", "DataRoot")
                 Appearance  = @("TooltipStyle", "ThemeMode", "FontSize", "SettingsFontSize", "StatusColorRunning", "StatusColorPaused", "StatusColorStopped", "CompactMode", "MinimalTrayTooltip")
                 Schedule    = @("ScheduleEnabled", "ScheduleStart", "ScheduleEnd", "ScheduleWeekdays", "ScheduleSuspendUntil")
                 Hotkeys     = @("HotkeyToggle", "HotkeyStartStop", "HotkeyPauseResume")
@@ -1548,8 +1891,9 @@ $defaultSettings = [pscustomobject]@{
     LogLevel = "INFO"
     LogMaxBytes = 1048576
     LogRetentionDays = 14
-    LogDirectory = ""
-    SettingsDirectory = ""
+    DataRoot = $script:DataRoot
+    LogDirectory = $script:FolderNames.Logs
+    SettingsDirectory = $script:FolderNames.Settings
     AutoUpdateEnabled = $true
     ActiveProfile = "Default"
     Profiles = @{}
@@ -1588,6 +1932,9 @@ $defaultSettings = [pscustomobject]@{
 $settings = Load-Settings
 if (-not $settings) {
     $settings = $defaultSettings
+    if ($script:SettingsLoadFailed -and -not $script:SettingsRecovered) {
+        Write-Log "Settings corrupted; defaults loaded." "WARN" $null "Load-Settings"
+    }
 } else {
     $settings = Migrate-Settings $settings
     foreach ($prop in $defaultSettings.PSObject.Properties.Name) {
@@ -1695,13 +2042,17 @@ if ($profilesChanged) {
     Save-Settings $settings
 }
 
-if ($settings.PSObject.Properties.Name -contains "SettingsDirectory") {
-    Set-SettingsDirectory ([string]$settings.SettingsDirectory) -SkipLog
+if (-not ($settings.PSObject.Properties.Name -contains "DataRoot") -or [string]::IsNullOrWhiteSpace([string]$settings.DataRoot)) {
+    $settings.DataRoot = $script:DataRoot
+} elseif ($settings.DataRoot -ne $script:DataRoot) {
+    Write-Log "Settings DataRoot differs; using $script:DataRoot." "WARN" $null "Settings"
 }
 
-if ($settings.PSObject.Properties.Name -contains "LogDirectory") {
-    Set-LogDirectory ([string]$settings.LogDirectory) -SkipLog
-}
+$desiredSettingsDir = Resolve-DirectoryOrDefault ([string]$settings.SettingsDirectory) $defaultSettingsDir "Settings"
+Set-SettingsDirectory $desiredSettingsDir -SkipLog
+
+$desiredLogDir = Resolve-DirectoryOrDefault ([string]$settings.LogDirectory) $defaultLogDir "Logs"
+Set-LogDirectory $desiredLogDir -SkipLog
 
 $settings.DateTimeFormat = Normalize-DateTimeFormat ([string]$settings.DateTimeFormat)
 $script:DateTimeFormat = $settings.DateTimeFormat
@@ -1731,14 +2082,16 @@ Invoke-UpdateCheck
 # --- Global error trap and shutdown handling ---
 trap {
     try {
-        Write-BootstrapLog "Unhandled exception trapped." "ERROR"
+        if (Get-Command -Name Write-BootstrapLog -ErrorAction SilentlyContinue) {
+            Write-BootstrapLog "Unhandled exception trapped." "ERROR"
+        }
         if (Get-Command -Name Write-LogEx -ErrorAction SilentlyContinue) {
             Write-LogEx "Unhandled exception." "FATAL" $_.Exception "Trap" -Force
         } elseif (Get-Command -Name Write-Log -ErrorAction SilentlyContinue) {
             Write-Log "Unhandled exception." "FATAL" $_.Exception "Trap" -Force
         } else {
             try {
-                $fallback = Join-Path $scriptDir "Teams-Always-Green.fallback.log"
+                $fallback = Join-Path $script:LogDirectory "Teams-Always-Green.fallback.log"
                 $msg = "[{0}] [FATAL] [Trap] Unhandled exception: {1}" -f (Format-DateTime (Get-Date)), $_.Exception.Message
                 Add-Content -Path $fallback -Value $msg
             } catch { }
@@ -1776,6 +2129,8 @@ if ($script:LogLevel -eq "DEBUG") {
 }
 Write-Log "Boot: Init" "INFO" $null "Init"
 Write-Log "Boot: Paths" "INFO" $null "Init"
+Write-Log (Get-PathHealthSummary) "INFO" $null "Init"
+Validate-RequiredFiles
 Write-Log "Boot: Settings" "INFO" $null "Init"
 Write-Log "Boot: UI" "INFO" $null "Init"
 Write-Log "Boot: Tray" "INFO" $null "Init"
@@ -1829,6 +2184,7 @@ $psVersion = $PSVersionTable.PSVersion
 $osVersion = [Environment]::OSVersion.VersionString
 $pidValue = $PID
 Write-Log "Environment. PID=$pidValue PSVersion=$psVersion OS=$osVersion" "INFO" $null "Init"
+Write-Log (Get-EnvironmentSummary) "INFO" $null "Init"
 Write-Log ("Settings snapshot. IntervalSeconds={0} QuietMode={1} MinimalTooltip={2} DisableBalloonTips={3} StartWithWindows={4} RememberChoice={5} StartOnLaunch={6} RunOnceOnLaunch={7} PauseUntil={8} PauseDurations={9} ScheduleEnabled={10} ScheduleStart={11} ScheduleEnd={12} ScheduleWeekdays={13} ScheduleSuspendUntil={14} SafeModeEnabled={15} SafeModeFailureThreshold={16} HotkeyToggle={17} HotkeyStartStop={18} HotkeyPauseResume={19} ToggleCount={20} LogLevel={21} LogMaxBytes={22} LogIncludeStackTrace={23} LogToEventLog={24} LogCategories={25}" -f `
     $settings.IntervalSeconds, $settings.QuietMode, $settings.MinimalTrayTooltip, $settings.DisableBalloonTips, $settings.StartWithWindows, $settings.RememberChoice, $settings.StartOnLaunch, $settings.RunOnceOnLaunch, $settings.PauseUntil, $settings.PauseDurationsMinutes, $settings.ScheduleEnabled, $settings.ScheduleStart, $settings.ScheduleEnd, $settings.ScheduleWeekdays, $settings.ScheduleSuspendUntil, $settings.SafeModeEnabled, $settings.SafeModeFailureThreshold, $settings.HotkeyToggle, $settings.HotkeyStartStop, $settings.HotkeyPauseResume, $settings.ToggleCount, $settings.LogLevel, $settings.LogMaxBytes, $settings.LogIncludeStackTrace, $settings.LogToEventLog, ((Get-ObjectKeys $settings.LogCategories | Sort-Object | ForEach-Object { "$_=$($settings.LogCategories[$_])" }) -join ",")) "INFO" $null "Init"
 
@@ -1845,7 +2201,7 @@ function Set-StartupShortcut([bool]$enabled) {
         $shortcut = $shell.CreateShortcut($shortcutPath)
         $shortcut.TargetPath = "$env:WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe"
         $shortcut.Arguments = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$scriptPath`""
-        $shortcut.WorkingDirectory = $scriptDir
+    $shortcut.WorkingDirectory = $script:DataRoot
         $shortcut.WindowStyle = 7
         $shortcut.IconLocation = if (Test-Path $iconPath) { $iconPath } else { "$env:WINDIR\System32\shell32.dll,1" }
         $shortcut.Save()
@@ -2384,12 +2740,6 @@ function Format-PauseUntilText {
 }
 
 # --- Interval and schedule parsing helpers ---
-function Normalize-IntervalSeconds([int]$seconds) {
-    if ($seconds -lt 5) { return 5 }
-    if ($seconds -gt 86400) { return 86400 }
-    return $seconds
-}
-
 function Get-PauseDurations {
     $raw = [string]$settings.PauseDurationsMinutes
     if ([string]::IsNullOrWhiteSpace($raw)) { return @(5, 15, 30) }
@@ -2778,20 +3128,6 @@ function Apply-ThemeToMenu($menu, $palette) {
     foreach ($item in $menu.Items) {
         Apply-ThemeToMenuItem $item $palette
     }
-}
-
-function Write-LogThrottled([string]$key, [string]$message, [string]$level = "INFO", [int]$minSeconds = 10) {
-    if ([string]::IsNullOrWhiteSpace($key)) { return }
-    $now = Get-Date
-    $last = $null
-    if ($script:LogThrottle.ContainsKey($key)) {
-        $last = $script:LogThrottle[$key]
-    }
-    if ($last -and (($now - $last).TotalSeconds -lt $minSeconds)) {
-        return
-    }
-    $script:LogThrottle[$key] = $now
-    Write-Log $message $level $null $key
 }
 
 function Start-LogSummaryTimer {
@@ -4167,6 +4503,46 @@ function Show-SettingsDialog {
     $funStatsLayout.Controls.Add($funTotalRunValue, 1, 5)
     $funStatsGroup.Controls.Add($funStatsLayout)
 
+    $copyStatusButton = New-Object System.Windows.Forms.Button
+    $copyStatusButton.Text = "Copy Status"
+    $copyStatusButton.Width = 120
+    $copyStatusButton.Tag = "Copy Status"
+    $copyStatusButton.Add_Click({
+        $lines = @()
+        $lines += "Teams Always Green - Status"
+        $lines += "Status: $($statusValue.Text)"
+        $lines += "Next Toggle: $($nextValue.Text)"
+        $lines += "Last Toggle: $($lastToggleValue.Text)"
+        $lines += "Active Profile: $($profileStatusValue.Text)"
+        $lines += "Schedule: $($scheduleStatusValue.Text)"
+        $lines += "Safe Mode: $($safeModeStatusValue.Text)"
+        $lines += "Keyboard: $($keyboardValue.Text)"
+        $lines += "Current Toggles: $($toggleCurrentValue.Text)"
+        $lines += "Lifetime Toggles: $($toggleLifetimeValue.Text)"
+        $lines += "Today's Toggles: $($funDailyValue.Text)"
+        $lines += "Current Streak: $($funStreakCurrentValue.Text)"
+        $lines += "Best Streak: $($funStreakBestValue.Text)"
+        $lines += "Most Active Hour: $($funMostActiveValue.Text)"
+        $lines += "Longest Pause: $($funLongestPauseValue.Text)"
+        $lines += "Total Run Time: $($funTotalRunValue.Text)"
+        $text = ($lines -join "`r`n")
+        [System.Windows.Forms.Clipboard]::SetText($text)
+        [System.Windows.Forms.MessageBox]::Show(
+            $form,
+            "Status copied to clipboard.",
+            "Status",
+            [System.Windows.Forms.MessageBoxButtons]::OK,
+            [System.Windows.Forms.MessageBoxIcon]::Information
+        ) | Out-Null
+        Write-Log "Status copied to clipboard." "INFO" $null "Status"
+    })
+
+    $copyStatusPanel = New-Object System.Windows.Forms.FlowLayoutPanel
+    $copyStatusPanel.FlowDirection = "LeftToRight"
+    $copyStatusPanel.AutoSize = $true
+    $copyStatusPanel.WrapContents = $false
+    $copyStatusPanel.Controls.Add($copyStatusButton) | Out-Null
+
     $topPanel = New-Object System.Windows.Forms.Panel
     $topPanel.Dock = "Top"
     $topPanel.AutoSize = $true
@@ -4268,7 +4644,7 @@ function Show-SettingsDialog {
         $headerPanel.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::AutoSize)))
 
         $columnIndex = 0
-        $iconPath = Join-Path $scriptDir ("Meta\\Icons\\{0}_icon.ico" -f $title)
+        $iconPath = Join-Path $script:DataRoot ("Meta\\Icons\\{0}_icon.ico" -f $title)
         if (Test-Path $iconPath) {
             try {
                 $icon = New-Object System.Drawing.Icon($iconPath)
@@ -4995,7 +5371,8 @@ function Show-SettingsDialog {
 
     $script:logDirectoryBox = New-Object System.Windows.Forms.TextBox
     $script:logDirectoryBox.Width = 320
-    $script:logDirectoryBox.Text = if ([string]::IsNullOrWhiteSpace([string]$settings.LogDirectory)) { $script:LogDirectory } else { [string]$settings.LogDirectory }
+    $logDirValue = [string]$settings.LogDirectory
+    $script:logDirectoryBox.Text = if ([string]::IsNullOrWhiteSpace($logDirValue)) { $script:LogDirectory } else { Convert-FromRelativePath $logDirValue }
 
     $logDirectoryBrowseButton = New-Object System.Windows.Forms.Button
     $logDirectoryBrowseButton.Text = "Browse..."
@@ -5122,6 +5499,41 @@ $clearLogButton = New-Object System.Windows.Forms.Button
             ) | Out-Null
             Write-Log "Failed to open log folder." "ERROR" $_.Exception "Open-LogFolder"
         }
+    })
+
+    $validateFoldersButton = New-Object System.Windows.Forms.Button
+    $validateFoldersButton.Text = "Validate Folders"
+    $validateFoldersButton.Width = 120
+    $validateFoldersButton.Tag = "Validate Folders"
+    $validateFoldersButton.Add_Click({
+        $results = Validate-FolderPaths
+        $lines = @()
+        $lines += "Folder status:"
+        $lines += ""
+        foreach ($item in $results) {
+            $status = if (-not $item.Exists) { "Missing" } elseif ($item.Writable) { "OK" } else { "Read-only" }
+            $lines += ("{0}: {1}" -f $item.Name, $status)
+        }
+        $lines += ""
+        $lines += "If a folder is missing or read-only, the app will try to recreate it or fall back to a safe default."
+        $message = ($lines -join "`r`n")
+        [System.Windows.Forms.MessageBox]::Show(
+            $message,
+            "Folder Validation",
+            [System.Windows.Forms.MessageBoxButtons]::OK,
+            [System.Windows.Forms.MessageBoxIcon]::Information
+        ) | Out-Null
+        $issues = @($results | Where-Object { -not $_.Exists -or -not $_.Writable })
+        if ($issues.Count -eq 0) {
+            Write-Log "Folder validation: OK." "INFO" $null "Settings-Validation"
+        } else {
+            $issueText = ($issues | ForEach-Object {
+                $status = if (-not $_.Exists) { "Missing" } elseif (-not $_.Writable) { "Read-only" } else { "OK" }
+                "{0}={1}" -f $_.Name, $status
+            }) -join ", "
+            Write-Log ("Folder validation issues: " + $issueText) "WARN" $null "Settings-Validation"
+        }
+        Write-Log "Folder validation run from settings dialog." "INFO" $null "Settings-Validation"
     })
 
     $exportDiagnosticsButton = New-Object System.Windows.Forms.Button
@@ -5609,7 +6021,7 @@ $clearLogButton = New-Object System.Windows.Forms.Button
     $aboutTitlePanel.WrapContents = $false
     $aboutTitlePanel.FlowDirection = [System.Windows.Forms.FlowDirection]::LeftToRight
 
-    $aboutTitleIconPath = Join-Path $scriptDir "Meta\\Icons\\Tray_Icon.ico"
+    $aboutTitleIconPath = Join-Path $script:DataRoot "Meta\\Icons\\Tray_Icon.ico"
     if (Test-Path $aboutTitleIconPath) {
         try {
             $aboutTitleIcon = New-Object System.Drawing.Icon($aboutTitleIconPath)
@@ -5685,10 +6097,12 @@ $clearLogButton = New-Object System.Windows.Forms.Button
     $aboutLatestValue.AutoSize = $true
     $script:AboutLatestReleaseValue = $aboutLatestValue
 
-    $aboutLatestRefreshTimer = New-Object System.Windows.Forms.Timer
-    $aboutLatestRefreshTimer.Interval = 500
-    $aboutLatestRefreshTimer.Add_Tick({
-        $aboutLatestRefreshTimer.Stop()
+    $script:AboutLatestReleaseTimer = New-Object System.Windows.Forms.Timer
+    $script:AboutLatestReleaseTimer.Interval = 500
+    $script:AboutLatestReleaseTimer.Add_Tick({
+        if ($script:AboutLatestReleaseTimer) {
+            $script:AboutLatestReleaseTimer.Stop()
+        }
         try {
             $release = Get-LatestReleaseInfo "alexphillips-dev" "Teams-Always-Green"
             if ($release) {
@@ -5700,8 +6114,7 @@ $clearLogButton = New-Object System.Windows.Forms.Button
         } catch {
         }
     })
-    $script:AboutLatestReleaseTimer = $aboutLatestRefreshTimer
-    $aboutLatestRefreshTimer.Start()
+    $script:AboutLatestReleaseTimer.Start()
 
     $aboutCheckPanel = New-Object System.Windows.Forms.FlowLayoutPanel
     $aboutCheckLabel = New-Object System.Windows.Forms.Label
@@ -6296,7 +6709,8 @@ $clearLogButton = New-Object System.Windows.Forms.Button
 
     $script:settingsDirectoryBox = New-Object System.Windows.Forms.TextBox
     $script:settingsDirectoryBox.Width = 320
-    $script:settingsDirectoryBox.Text = if ([string]::IsNullOrWhiteSpace([string]$settings.SettingsDirectory)) { $script:SettingsDirectory } else { [string]$settings.SettingsDirectory }
+    $settingsDirValue = [string]$settings.SettingsDirectory
+    $script:settingsDirectoryBox.Text = if ([string]::IsNullOrWhiteSpace($settingsDirValue)) { $script:SettingsDirectory } else { Convert-FromRelativePath $settingsDirValue }
 
     $settingsDirectoryBrowseButton = New-Object System.Windows.Forms.Button
     $settingsDirectoryBrowseButton.Text = "Browse..."
@@ -6331,6 +6745,7 @@ $clearLogButton = New-Object System.Windows.Forms.Button
     & $addFullRow $statusPanel $statusGroup
     & $addFullRow $statusPanel $toggleGroup
     & $addFullRow $statusPanel $funStatsGroup
+    & $addFullRow $statusPanel $copyStatusPanel
 
     & $addFullRow $profilesPanel $profileGroup
 
@@ -6433,6 +6848,7 @@ $clearLogButton = New-Object System.Windows.Forms.Button
     & $addSpacerRow $advancedPanel
     & $addSettingRow $loggingPanel "Log Folder" $logDirectoryPanel | Out-Null
     & $addSettingRow $loggingPanel "Log Files" $logFilesLabel | Out-Null
+    & $addSettingRow $loggingPanel "Validate Folders" $validateFoldersButton | Out-Null
     & $addSpacerRow $loggingPanel
 
     $logMaxSizePanel = New-Object System.Windows.Forms.FlowLayoutPanel
@@ -6785,6 +7201,8 @@ $clearLogButton = New-Object System.Windows.Forms.Button
         "Debug Status" = "Shows whether temporary debug mode is active."
         "Log Folder" = "Folder where logs and settings backups are written. Leave blank to use the script folder."
         "Log Files" = "Files written in the log folder, including rotations and settings backup copies."
+        "Validate Folders" = "Check that app folders exist and are writable."
+        "Copy Status" = "Copy current status details to the clipboard."
         "Log Max Size (KB)" = "Rotate the log when it exceeds this size."
         "Log Retention (days)" = "Delete old log files after this many days. Set to 0 to keep indefinitely."
         "Log Size" = "Current log size compared to the max size threshold."
@@ -7355,17 +7773,22 @@ $clearLogButton = New-Object System.Windows.Forms.Button
         }
         $pending.LogMaxBytes = $logMaxKb * 1024
         $pending.LogRetentionDays = [int]$script:logRetentionBox.Value
-        $logDirText = [string]$script:logDirectoryBox.Text
-        if ([string]::IsNullOrWhiteSpace($logDirText) -or $logDirText -eq $scriptDir) {
-            $pending.LogDirectory = ""
+        $pending.DataRoot = $script:DataRoot
+        $logDirText = Normalize-PathText ([string]$script:logDirectoryBox.Text)
+        if ([string]::IsNullOrWhiteSpace($logDirText)) {
+            $pending.LogDirectory = $script:FolderNames.Logs
         } else {
-            $pending.LogDirectory = $logDirText.Trim()
+            $resolvedLogDir = Convert-FromRelativePath $logDirText
+            if ([string]::IsNullOrWhiteSpace($resolvedLogDir)) { $resolvedLogDir = $defaultLogDir }
+            $pending.LogDirectory = Convert-ToRelativePathIfUnderRoot $resolvedLogDir
         }
-        $settingsDirText = [string]$script:settingsDirectoryBox.Text
-        if ([string]::IsNullOrWhiteSpace($settingsDirText) -or $settingsDirText -eq $scriptDir) {
-            $pending.SettingsDirectory = ""
+        $settingsDirText = Normalize-PathText ([string]$script:settingsDirectoryBox.Text)
+        if ([string]::IsNullOrWhiteSpace($settingsDirText)) {
+            $pending.SettingsDirectory = $script:FolderNames.Settings
         } else {
-            $pending.SettingsDirectory = $settingsDirText.Trim()
+            $resolvedSettingsDir = Convert-FromRelativePath $settingsDirText
+            if ([string]::IsNullOrWhiteSpace($resolvedSettingsDir)) { $resolvedSettingsDir = $defaultSettingsDir }
+            $pending.SettingsDirectory = Convert-ToRelativePathIfUnderRoot $resolvedSettingsDir
         }
         $pending.LogIncludeStackTrace = $script:logIncludeStackTraceBox.Checked
         $pending.LogToEventLog = $script:logToEventLogBox.Checked
@@ -7489,23 +7912,13 @@ $clearLogButton = New-Object System.Windows.Forms.Button
         $logLevelChanged = ($settings.LogLevel -ne $pendingSettings.LogLevel)
         $script:settings = $pendingSettings
         $settings = $script:settings
-        if ($settings.PSObject.Properties.Name -contains "SettingsDirectory") {
-            $desiredSettingsDir = [string]$settings.SettingsDirectory
-            if ([string]::IsNullOrWhiteSpace($desiredSettingsDir) -or $desiredSettingsDir -eq $scriptDir) {
-                $desiredSettingsDir = $scriptDir
-            }
-            if ($desiredSettingsDir -ne $script:SettingsDirectory) {
-                Set-SettingsDirectory $desiredSettingsDir
-            }
+        $desiredSettingsDir = Resolve-DirectoryOrDefault ([string]$settings.SettingsDirectory) $defaultSettingsDir "Settings"
+        if ($desiredSettingsDir -ne $script:SettingsDirectory) {
+            Set-SettingsDirectory $desiredSettingsDir
         }
-        if ($settings.PSObject.Properties.Name -contains "LogDirectory") {
-            $desiredLogDir = [string]$settings.LogDirectory
-            if ([string]::IsNullOrWhiteSpace($desiredLogDir) -or $desiredLogDir -eq $scriptDir) {
-                $desiredLogDir = $scriptDir
-            }
-            if ($desiredLogDir -ne $script:LogDirectory) {
-                Set-LogDirectory $desiredLogDir
-            }
+        $desiredLogDir = Resolve-DirectoryOrDefault ([string]$settings.LogDirectory) $defaultLogDir "Logs"
+        if ($desiredLogDir -ne $script:LogDirectory) {
+            Set-LogDirectory $desiredLogDir
         }
         if ($script:LastSettingsSnapshot) {
             $pendingSnapshot = Get-SettingsSnapshot $pendingSettings
@@ -7918,6 +8331,32 @@ $openSettingsItem.Add_Click({
     }
     Ensure-SettingsDialogVisible
 })
+
+$openLogsFolderItem = New-Object System.Windows.Forms.ToolStripMenuItem("Open Logs Folder")
+$openLogsFolderItem.Add_Click({
+    try {
+        if (-not (Test-Path $script:LogDirectory)) {
+            Ensure-Directory $script:LogDirectory "Logs" | Out-Null
+        }
+        Start-Process -FilePath explorer.exe -ArgumentList ("`"{0}`"" -f $script:LogDirectory)
+        Write-Log "Tray action: Open Logs Folder" "INFO" $null "Tray-Action"
+    } catch {
+        Write-Log "Failed to open Logs folder." "ERROR" $_.Exception "Tray-Action"
+    }
+})
+
+$openSettingsFolderItem = New-Object System.Windows.Forms.ToolStripMenuItem("Open Settings Folder")
+$openSettingsFolderItem.Add_Click({
+    try {
+        if (-not (Test-Path $script:SettingsDirectory)) {
+            Ensure-Directory $script:SettingsDirectory "Settings" | Out-Null
+        }
+        Start-Process -FilePath explorer.exe -ArgumentList ("`"{0}`"" -f $script:SettingsDirectory)
+        Write-Log "Tray action: Open Settings Folder" "INFO" $null "Tray-Action"
+    } catch {
+        Write-Log "Failed to open Settings folder." "ERROR" $_.Exception "Tray-Action"
+    }
+})
 function Show-LogTailDialog {
     $form = New-Object System.Windows.Forms.Form
     $form.Text = "Log (Tail)"
@@ -8301,7 +8740,7 @@ $restartItem.Add_Click({
     Release-MutexOnce
     try {
         Write-Log "Restart spawn: launching new instance." "INFO" $null "Restart"
-        $proc = Start-Process -FilePath "powershell.exe" -WindowStyle Hidden -WorkingDirectory $scriptDir -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$scriptPath`"" -PassThru
+        $proc = Start-Process -FilePath "powershell.exe" -WindowStyle Hidden -WorkingDirectory $script:DataRoot -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$scriptPath`"" -PassThru
         if ($proc -and $proc.Id) { Write-Log ("Restart new PID={0}" -f $proc.Id) "INFO" $null "Restart" }
     } catch {
         Write-LogEx "Failed to restart app." "ERROR" $_.Exception "Restart" -Force
@@ -8364,6 +8803,8 @@ $contextMenu.Items.AddRange(@(
     (New-Object System.Windows.Forms.ToolStripSeparator),
     $statusItem,
     $openSettingsItem,
+    $openLogsFolderItem,
+    $openSettingsFolderItem,
     $historyItem,
     (New-Object System.Windows.Forms.ToolStripSeparator),
     $restartItem,
