@@ -5685,6 +5685,24 @@ $clearLogButton = New-Object System.Windows.Forms.Button
     $aboutLatestValue.AutoSize = $true
     $script:AboutLatestReleaseValue = $aboutLatestValue
 
+    $aboutLatestRefreshTimer = New-Object System.Windows.Forms.Timer
+    $aboutLatestRefreshTimer.Interval = 500
+    $aboutLatestRefreshTimer.Add_Tick({
+        $aboutLatestRefreshTimer.Stop()
+        try {
+            $release = Get-LatestReleaseInfo "alexphillips-dev" "Teams-Always-Green"
+            if ($release) {
+                $latestVersion = Get-ReleaseVersionString $release
+                if (-not [string]::IsNullOrWhiteSpace($latestVersion) -and $script:AboutLatestReleaseValue) {
+                    $script:AboutLatestReleaseValue.Text = $latestVersion
+                }
+            }
+        } catch {
+        }
+    })
+    $script:AboutLatestReleaseTimer = $aboutLatestRefreshTimer
+    $aboutLatestRefreshTimer.Start()
+
     $aboutCheckPanel = New-Object System.Windows.Forms.FlowLayoutPanel
     $aboutCheckLabel = New-Object System.Windows.Forms.Label
     $aboutCheckLabel.Text = "Check Updates"
