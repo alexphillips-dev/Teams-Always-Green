@@ -1,0 +1,16 @@
+﻿# Runtime outputs
+Logs/
+Debug/*.log
+Meta/*.status.json
+Meta/*.shutdown.state.txt
+Meta/*.log.path.txt
+Meta/*.settings.path.txt
+Settings/
+
+# Deprecated settings host (no longer used)
+Meta/SettingsApp/
+Meta/SettingsHost.cs
+
+# OS/editor junk
+.DS_Store
+Thumbs.db
