@@ -1,7 +1,46 @@
-﻿# Teams-Always-Green.ps1
-# Teams Always Green - tray-based status helper with settings, profiles, scheduling, hotkeys, and logging.
 
-# --- Runtime setup and WinForms initialization ---
+# Teams Always Green
+# Main entry script for the app. This file owns startup, tray menu, timers,
+# settings UI, profiles, logging, scheduling, and shutdown/cleanup.
+#
+# Files and folders (relative to app root):
+# - Script\Teams Always Green.ps1      Main script (this file)
+# - Teams Always Green.VBS             Launches the script hidden (no console)
+# - QuickSetup.cmd / QuickSetup.ps1    Installer/bootstrapper
+# - Logs\                              Runtime logs (main + bootstrap)
+# - Settings\                          Settings JSON and backups
+# - Meta\                              App metadata and icons
+# - Meta\Icons\                        App/UI icon assets (.ico)
+# - Debug\                             Debug launcher logs
+# - VERSION                            Current app version (used by updates)
+#
+# Settings and state:
+# - Settings JSON is validated and migrated on load.
+# - Profile snapshots are cached as “last known good” for safe rollback.
+# - Runtime counters and status are persisted separately from user settings.
+#
+# Logging:
+# - Log level/category filtering is respected everywhere.
+# - Debug mode can temporarily override verbosity.
+# - Log rotation and retention are enforced by size and age.
+#
+# Tray menu (high level):
+# - Start/Stop/Toggle/Pause and interval control
+# - Quick Options, Profiles, Status, Logs, History
+# - Settings, Restart, Exit
+#
+# Troubleshooting:
+# - If the app does not appear, check Debug\*.vbs.log and Logs\*.log
+# - If settings fail to load, the script will preserve the last good copy
+# - If UI feels stale, use Restart to rebuild the tray/menu state
+#
+# Run modes:
+# - -SettingsOnly opens the settings window without starting the tray loop
+#
+# Folder integrity:
+# - Keep the folder structure intact (Script/Logs/Settings/Meta/Debug)
+
+# --- Runtime setup and WinForms initialization (load assemblies, set UI defaults) ---
 param(
     [switch]$SettingsOnly
 )
@@ -19,8 +58,7 @@ Add-Type -AssemblyName Microsoft.VisualBasic
 [System.Windows.Forms.Application]::EnableVisualStyles()
 [System.Windows.Forms.Application]::SetCompatibleTextRenderingDefault($false)
 
-# --- Single-instance protection (unique per script path + abandoned mutex safe) ---
-# Purpose: Get value.
+# --- Single-instance protection (per-script mutex, abandon-safe) ---
 function Get-PathHash([string]$text) {
     $sha = [System.Security.Cryptography.SHA256]::Create()
     try {
@@ -31,7 +69,7 @@ function Get-PathHash([string]$text) {
     }
 }
 
-# --- Paths, Meta folder, and locator files ---
+# --- Paths, Meta folder, and locator files (resolve root, ensure dirs) ---
 $scriptPath = $MyInvocation.MyCommand.Path
 $scriptDir = Split-Path -Parent $scriptPath
 $appRoot = if ((Split-Path -Leaf $scriptDir) -ieq "Script") { Split-Path -Parent $scriptDir } else { $scriptDir }
@@ -45,14 +83,12 @@ $script:FolderNames = @{
 $script:DataRoot = $appRoot
 $script:PathWarnings = @()
 
-# Purpose: Add value.
 function Add-PathWarning([string]$message) {
     if (-not [string]::IsNullOrWhiteSpace($message)) {
         $script:PathWarnings += $message
     }
 }
 
-# Purpose: Write value.
 function Write-PathWarningNow([string]$message) {
     if ([string]::IsNullOrWhiteSpace($message)) { return }
     if (Get-Command -Name Write-Log -ErrorAction SilentlyContinue) {
@@ -62,7 +98,6 @@ function Write-PathWarningNow([string]$message) {
     }
 }
 
-# Purpose: Normalize value.
 function Normalize-PathText([string]$path) {
     if ([string]::IsNullOrWhiteSpace($path)) { return "" }
     $trimmed = $path.Trim()
@@ -77,7 +112,6 @@ function Normalize-PathText([string]$path) {
     }
 }
 
-# Purpose: Convert value.
 function Convert-FromRelativePath([string]$value) {
     $normalized = Normalize-PathText $value
     if ([string]::IsNullOrWhiteSpace($normalized)) { return "" }
@@ -87,7 +121,6 @@ function Convert-FromRelativePath([string]$value) {
     return $normalized
 }
 
-# Purpose: Convert value.
 function Convert-ToRelativePathIfUnderRoot([string]$path) {
     if ([string]::IsNullOrWhiteSpace($path)) { return "" }
     try {
@@ -101,7 +134,6 @@ function Convert-ToRelativePathIfUnderRoot([string]$path) {
     return $path
 }
 
-# Purpose: Test value.
 function Test-DirectoryWritable([string]$path) {
     if ([string]::IsNullOrWhiteSpace($path)) { return $false }
     try {
@@ -117,7 +149,6 @@ function Test-DirectoryWritable([string]$path) {
     }
 }
 
-# Purpose: Ensure value.
 function Ensure-Directory([string]$path, [string]$label = "Directory") {
     if ([string]::IsNullOrWhiteSpace($path)) { return $false }
     try {
@@ -131,9 +162,8 @@ function Ensure-Directory([string]$path, [string]$label = "Directory") {
     }
 }
 
-# Purpose: Resolve value.
-function Resolve-DirectoryOrDefault([string]$input, [string]$defaultPath, [string]$label) {
-    $resolved = Convert-FromRelativePath $input
+function Resolve-DirectoryOrDefault([string]$inputPath, [string]$defaultPath, [string]$label) {
+    $resolved = Convert-FromRelativePath $inputPath
     if ([string]::IsNullOrWhiteSpace($resolved)) { $resolved = $defaultPath }
     $resolved = Normalize-PathText $resolved
     Ensure-Directory $resolved $label | Out-Null
@@ -145,7 +175,6 @@ function Resolve-DirectoryOrDefault([string]$input, [string]$defaultPath, [strin
     return $resolved
 }
 
-# Purpose: Ensure value.
 function Ensure-AppFolders {
     $folders = @($script:FolderNames.Logs, $script:FolderNames.Settings, $script:FolderNames.Meta, $script:FolderNames.Debug, $script:FolderNames.Script)
     foreach ($folder in $folders) {
@@ -209,7 +238,7 @@ if ((Test-Path $bootstrapLogRoot) -and ($bootstrapLogRoot -ne $bootstrapLogTarge
 }
 $script:BootstrapLogPath = Join-Path $script:LogDirectory "Teams-Always-Green.bootstrap.log"
 $script:ShutdownMarkerPath = Join-Path $script:MetaDir "Teams-Always-Green.shutdown.state.txt"
-# --- Date/time formatting helpers ---
+# --- Date/time formatting helpers (presets + locale) ---
 $script:DateTimeFormatDefault = "yyyy-MM-dd HH:mm:ss"
 $script:DateTimeFormat = $script:DateTimeFormatDefault
 $script:UseSystemDateTimeFormat = $true
@@ -217,7 +246,6 @@ $script:SystemDateTimeFormatMode = "Short"
 $script:SettingsLoadFailed = $false
 $script:SettingsRecovered = $false
 
-# Purpose: Format value.
 function Normalize-DateTimeFormat([string]$format) {
     if ([string]::IsNullOrWhiteSpace($format)) { return $script:DateTimeFormatDefault }
     try {
@@ -228,7 +256,6 @@ function Normalize-DateTimeFormat([string]$format) {
     }
 }
 
-# Purpose: Format value.
 function Format-DateTime($value) {
     if ($null -eq $value) { return "N/A" }
     if ($script:UseSystemDateTimeFormat) {
@@ -247,14 +274,12 @@ function Format-DateTime($value) {
     }
 }
 
-# Purpose: Normalize value.
 function Normalize-IntervalSeconds([int]$seconds) {
     if ($seconds -lt 5) { return 5 }
     if ($seconds -gt 86400) { return 86400 }
     return $seconds
 }
 
-# Purpose: Get value.
 function Get-EnvironmentSummary {
     try {
         $culture = [System.Globalization.CultureInfo]::CurrentCulture.Name
@@ -271,8 +296,7 @@ function Get-EnvironmentSummary {
     }
 }
 
-# --- Bootstrap logging before full logger is initialized ---
-# Purpose: Write value.
+# --- Bootstrap logging before full logger is initialized (early file log) ---
 function Write-BootstrapLog([string]$message, [string]$level = "INFO") {
     try {
         $timestamp = (Get-Date).ToString($script:DateTimeFormatDefault)
@@ -283,7 +307,6 @@ function Write-BootstrapLog([string]$message, [string]$level = "INFO") {
 
 Write-BootstrapLog ("Paths resolved: DataRoot={0} Logs={1} Settings={2}" -f $script:DataRoot, $script:LogDirectory, $script:SettingsDirectory) "INFO"
 
-# Purpose: Save value.
 function Save-LastGoodSettingsRaw([string]$rawJson) {
     if ([string]::IsNullOrWhiteSpace($rawJson)) { return }
     try {
@@ -293,7 +316,6 @@ function Save-LastGoodSettingsRaw([string]$rawJson) {
     }
 }
 
-# Purpose: Save value.
 function Save-CorruptSettingsCopy([string]$rawJson) {
     try {
         Ensure-Directory $script:SettingsCorruptDir "Corrupt" | Out-Null
@@ -309,7 +331,6 @@ function Save-CorruptSettingsCopy([string]$rawJson) {
     }
 }
 
-# Purpose: Load value.
 function Load-LastGoodSettings {
     try {
         if (Test-Path $script:SettingsLastGoodPath) {
@@ -335,8 +356,7 @@ if ($script:PathWarnings -and $script:PathWarnings.Count -gt 0) {
 
 Write-BootstrapLog "Startup: ScriptPath=$scriptPath LogDir=$script:LogDirectory SettingsDir=$script:SettingsDirectory" "INFO"
 
-# --- Shutdown marker for crash detection ---
-# Purpose: Set value.
+# --- Shutdown marker for crash detection (clean-exit flag) ---
 function Set-ShutdownMarker([string]$state) {
     try {
         Set-Content -Path $script:ShutdownMarkerPath -Value $state -Encoding ASCII
@@ -345,7 +365,6 @@ function Set-ShutdownMarker([string]$state) {
     }
 }
 
-# Purpose: Get value.
 function Get-ShutdownMarker {
     try {
         if (Test-Path $script:ShutdownMarkerPath) {
@@ -355,7 +374,7 @@ function Get-ShutdownMarker {
     return $null
 }
 
-# --- Logging stubs for early startup ---
+# --- Logging stubs for early startup (safe logging pre-settings) ---
 if (-not (Get-Command -Name Write-Log -ErrorAction SilentlyContinue)) {
     function Write-Log([string]$message, [string]$level = "INFO", [Exception]$exception = $null, [string]$context = $null, [switch]$Force) {
         Write-BootstrapLog $message $level
@@ -370,7 +389,6 @@ if (-not (Get-Command -Name Write-LogEx -ErrorAction SilentlyContinue)) {
 
 $script:LogThrottle = @{}
 
-# Purpose: Write value.
 function Write-LogThrottled([string]$key, [string]$message, [string]$level = "INFO", [int]$minSeconds = 10) {
     if ([string]::IsNullOrWhiteSpace($key)) { return }
     $now = Get-Date
@@ -385,7 +403,6 @@ function Write-LogThrottled([string]$key, [string]$message, [string]$level = "IN
     Write-Log $message $level $null $key
 }
 
-# Purpose: Invoke value.
 function Invoke-SafeTimerAction([string]$name, [ScriptBlock]$action) {
     $guardsVar = Get-Variable -Name TimerGuards -Scope Script -ErrorAction SilentlyContinue
     if (-not $guardsVar -or -not $guardsVar.Value) { $script:TimerGuards = @{} }
@@ -401,7 +418,6 @@ function Invoke-SafeTimerAction([string]$name, [ScriptBlock]$action) {
     }
 }
 
-# Purpose: Clear value.
 function Clear-StaleRuntimeState([string]$reason) {
     try {
         $targets = @(
@@ -425,7 +441,6 @@ function Clear-StaleRuntimeState([string]$reason) {
     }
 }
 
-# Purpose: Get value.
 function Get-PathHealthSummary {
     $logWritable = Test-DirectoryWritable $script:LogDirectory
     $settingsWritable = Test-DirectoryWritable $script:SettingsDirectory
@@ -433,7 +448,6 @@ function Get-PathHealthSummary {
         $script:DataRoot, $script:LogDirectory, $logWritable, $script:SettingsDirectory, $settingsWritable)
 }
 
-# Purpose: Validate value.
 function Validate-RequiredFiles {
     if (-not (Test-Path $versionPath)) {
         Write-LogThrottled "Missing-Version" "VERSION file missing; version display may be inaccurate." "WARN" 300
@@ -449,7 +463,6 @@ function Validate-RequiredFiles {
     }
 }
 
-# Purpose: Validate value.
 function Validate-FolderPaths {
     $results = @()
     $paths = @(
@@ -472,7 +485,6 @@ function Validate-FolderPaths {
     return $results
 }
 
-# Purpose: Validate settings schema and shape.
 function Test-SettingsSchema($settings) {
     $issues = @()
     $isCritical = $false
@@ -563,7 +575,6 @@ function Test-SettingsSchema($settings) {
     }
 }
 
-# Purpose: Capture extra fields so future versions are preserved.
 function Get-SettingsExtraFields($settings) {
     $extras = @{}
     if (-not $settings) { return $extras }
@@ -586,7 +597,6 @@ function Get-SettingsExtraFields($settings) {
     return $extras
 }
 
-# Purpose: Strip runtime fields from settings and return them.
 function Extract-RuntimeFromSettings($settings) {
     $runtime = @{}
     if (-not $settings) { return $runtime }
@@ -604,7 +614,6 @@ function Extract-RuntimeFromSettings($settings) {
     return $runtime
 }
 
-# Purpose: Apply migrated runtime values to state if needed.
 function Apply-RuntimeOverridesToState($state, $runtime) {
     if (-not $state -or -not $runtime -or $runtime.Count -eq 0) { return $false }
     $changed = $false
@@ -632,7 +641,6 @@ function Apply-RuntimeOverridesToState($state, $runtime) {
     return $changed
 }
 
-# Purpose: Summarize changes between two settings objects.
 function Get-SettingsDiffSummary($before, $after, [int]$maxKeys = 12) {
     if (-not $before) { $before = $defaultSettings }
     if (-not $after) { $after = $defaultSettings }
@@ -659,7 +667,7 @@ function Get-SettingsDiffSummary($before, $after, [int]$maxKeys = 12) {
         Summary = $summary
     }
 }
-# --- Global state, caches, and UI references ---
+# --- Global state, caches, and UI references (script-wide) ---
 $notifyIcon = $null
 $hash = Get-PathHash $scriptPath
 $mutexName = "Local\TeamsAlwaysGreenPS_$($hash.Substring(0,16))"
@@ -687,6 +695,15 @@ $script:SettingsExtraFields = @{}
 $script:SettingsLoadIssues = @()
 $script:DefaultSettingsKeys = @()
 $script:PendingRuntimeFromSettings = @{}
+$script:ProfileSchemaVersion = 1
+$script:ProfileMetadataKeys = @("ProfileSchemaVersion", "ReadOnly")
+$script:ProfilesLastGoodPath = $null
+$script:ProfilesLastGood = @{}
+$script:ProfileSnapshotCacheKey = $null
+$script:ProfileSnapshotCache = $null
+$script:UpdateProfileDirtyIndicator = $null
+$script:LastSettingsSaveOk = $true
+$script:LastSettingsSaveMessage = ""
 $script:AppState = $null
 $script:LastStateSnapshot = $null
 $script:LastStateSnapshotHash = $null
@@ -702,7 +719,7 @@ $script:ScheduleStatusCacheValue = $null
 $script:NextInfoCacheKey = $null
 $script:NextInfoCacheValue = $null
 $script:HotkeyStatusText = "Unknown"
-# --- Debounced timers and periodic tasks ---
+# --- Debounced timers and periodic tasks (reduce churn) ---
 $script:SaveSettingsPending = $null
 $script:SaveSettingsDebounceMs = 400
 $script:SaveSettingsTimer = New-Object System.Windows.Forms.Timer
@@ -869,7 +886,7 @@ $script:DebugModeTimer.Add_Tick({
         }
     }
 })
-# --- App metadata ---
+# --- App metadata (version/build/release) ---
 $versionPath = Join-Path $script:DataRoot "VERSION"
 $appVersion = "1.0.0"
 $appLastUpdated = "Unknown"
@@ -897,7 +914,6 @@ try {
     $appScriptHash = $null
 }
 
-# Purpose: Get value.
 function Get-StartupSource {
     try {
         $proc = Get-CimInstance Win32_Process -Filter ("ProcessId={0}" -f $PID) -ErrorAction Stop
@@ -916,7 +932,6 @@ function Get-StartupSource {
     return "Unknown"
 }
 
-# Purpose: Get value.
 function Get-LatestReleaseInfo([string]$owner, [string]$repo) {
     $uri = "https://api.github.com/repos/$owner/$repo/releases/latest"
     $headers = @{ "User-Agent" = "TeamsAlwaysGreen" }
@@ -932,7 +947,6 @@ function Get-LatestReleaseInfo([string]$owner, [string]$repo) {
     }
 }
 
-# Purpose: Get value.
 function Get-ReleaseVersionString($release) {
     if (-not $release) { return $null }
     $tag = $null
@@ -946,7 +960,6 @@ function Get-ReleaseVersionString($release) {
     return $tag
 }
 
-# Purpose: Compare value.
 function Compare-VersionString([string]$left, [string]$right) {
     $leftVersion = $null
     $rightVersion = $null
@@ -955,7 +968,6 @@ function Compare-VersionString([string]$left, [string]$right) {
     return $leftVersion.CompareTo($rightVersion)
 }
 
-# Purpose: Get value.
 function Get-ReleaseAsset($release, [string]$assetName) {
     if (-not $release -or -not $release.assets) { return $null }
     foreach ($asset in $release.assets) {
@@ -964,7 +976,6 @@ function Get-ReleaseAsset($release, [string]$assetName) {
     return $null
 }
 
-# Purpose: Get value.
 function Get-ReleaseAssetHash([object]$release, [string]$assetName) {
     if (-not $release) { return $null }
     $hashAsset = Get-ReleaseAsset $release ($assetName + ".sha256")
@@ -987,7 +998,6 @@ function Get-ReleaseAssetHash([object]$release, [string]$assetName) {
     return $null
 }
 
-# Purpose: Update value.
 function Invoke-UpdateCheck {
     param(
         [switch]$Force
@@ -1084,7 +1094,7 @@ function Invoke-UpdateCheck {
     }
 }
 
-# --- Single-instance mutex acquisition ---
+# --- Single-instance mutex acquisition (acquire/retry) ---
 $createdNew = $false
 $mutex = New-Object System.Threading.Mutex($false, $mutexName, [ref]$createdNew)
 $script:SingleInstanceMutex = $mutex
@@ -1109,7 +1119,7 @@ if (-not $script:HasMutex) {
     exit
 }
 
-# --- Log/settings paths and logging defaults ---
+# --- Log/settings paths and logging defaults (resolve + create) ---
 # Resolve paths (same folder as script)
 $iconPath  = Join-Path $script:DataRoot "Meta\\Icons\\Tray_Icon.ico"
 $script:logPath   = Join-Path $script:LogDirectory "Teams-Always-Green.log"
@@ -1140,7 +1150,7 @@ foreach ($i in 1..3) {
         try { Move-Item -Path $rootBak -Destination $destBak -Force } catch { }
     }
 }
-# --- Logging configuration defaults ---
+# --- Logging configuration defaults (levels/limits) ---
 $script:LogLevel = "INFO"
 $script:LogMaxBytes = 1048576
 $script:LogLevels = @{
@@ -1156,8 +1166,7 @@ $script:LogCategories = @{}
 $script:EventLogSource = "TeamsAlwaysGreen"
 $script:EventLogReady = $false
 
-# --- Logging categorization and filtering ---
-# Purpose: Get value.
+# --- Logging categorization and filtering (categories) ---
 function Get-LogCategory([string]$context) {
     if ([string]::IsNullOrWhiteSpace($context)) { return "General" }
     if ($context -match "Startup") { return "Startup" }
@@ -1171,7 +1180,6 @@ function Get-LogCategory([string]$context) {
     return "General"
 }
 
-# Purpose: Get value.
 function Get-RecommendedLogLevel([string]$context, [string]$message) {
     if ($context -match "Settings-UI") { return "DEBUG" }
     if ($context -match "Timer|Watchdog") { return "DEBUG" }
@@ -1181,7 +1189,6 @@ function Get-RecommendedLogLevel([string]$context, [string]$message) {
     return $null
 }
 
-# Purpose: Update value.
 function Update-LogCategorySettings {
     $script:LogCategories = @{}
     foreach ($name in $script:LogCategoryNames) {
@@ -1197,7 +1204,6 @@ function Update-LogCategorySettings {
     }
 }
 
-# Purpose: Log value.
 function Log-StateSummary([string]$reason) {
     $scheduleStatus = Format-ScheduleStatus
     Write-Log ("State: Running={0} Paused={1} ScheduleEnabled={2} ScheduleBlocked={3} ScheduleStatus={4} Interval={5}s Profile={6}" -f `
@@ -1205,14 +1211,12 @@ function Log-StateSummary([string]$reason) {
         "INFO" $null ($reason)
 }
 
-# Purpose: Log value.
 function Log-StartupSummary {
     Write-Log ("Startup summary: Profile={0} Interval={1}s LogLevel={2} QuietMode={3} StartOnLaunch={4} RunOnceOnLaunch={5} ScheduleEnabled={6} Paused={7}" -f `
         $settings.ActiveProfile, $settings.IntervalSeconds, $settings.LogLevel, $settings.QuietMode, $settings.StartOnLaunch, $settings.RunOnceOnLaunch, $settings.ScheduleEnabled, $script:isPaused) `
         "DEBUG" $null "Startup"
 }
 
-# Purpose: Log value.
 function Log-ShutdownSummary([string]$reason) {
     $uptimeMinutes = [Math]::Round(((Get-Date) - $script:AppStartTime).TotalMinutes, 1)
     Write-Log ("Shutdown summary: Reason={0} Profile={1} Interval={2}s LogLevel={3} Running={4} Paused={5} ScheduleEnabled={6} Warns={7} Errors={8}" -f `
@@ -1223,7 +1227,6 @@ function Log-ShutdownSummary([string]$reason) {
     Update-FunStatsOnShutdown $uptimeMinutes
 }
 
-# Purpose: Set value.
 function Set-LastUserAction([string]$name, [string]$context = $null) {
     if ([string]::IsNullOrWhiteSpace($name)) { return }
     $script:LastUserAction = $name
@@ -1233,7 +1236,6 @@ function Set-LastUserAction([string]$name, [string]$context = $null) {
     Add-RecentAction $name $context $script:LastUserActionId
 }
 
-# Purpose: Get value.
 function Get-LastUserActionLabel([int]$maxMinutes = 10) {
     if (-not $script:LastUserActionTime -or -not $script:LastUserAction) { return $null }
     $age = (Get-Date) - $script:LastUserActionTime
@@ -1244,7 +1246,6 @@ function Get-LastUserActionLabel([int]$maxMinutes = 10) {
     return $script:LastUserAction
 }
 
-# Purpose: Add value.
 function Add-RecentAction([string]$name, [string]$context, [string]$actionId) {
     if ([string]::IsNullOrWhiteSpace($name)) { return }
     $entry = [pscustomobject]@{
@@ -1259,7 +1260,6 @@ function Add-RecentAction([string]$name, [string]$context, [string]$actionId) {
     }
 }
 
-# Purpose: Get value.
 function Get-RecentActionsLines {
     $lines = New-Object System.Collections.Generic.List[string]
     if (-not $script:RecentActions -or $script:RecentActions.Count -eq 0) {
@@ -1278,7 +1278,6 @@ function Get-RecentActionsLines {
     return $lines
 }
 
-# Purpose: Add value.
 function Add-RecentError([string]$message, [string]$context, [Exception]$exception) {
     $entry = [pscustomobject]@{
         Time = Get-Date
@@ -1292,8 +1291,7 @@ function Add-RecentError([string]$message, [string]$context, [Exception]$excepti
     }
 }
 
-# --- Logging formatting and error helpers ---
-# Purpose: Format value.
+# --- Logging formatting and error helpers (tags/stack) ---
 function Format-Exception([Exception]$ex) {
     if ($null -eq $ex) { return "" }
     $lines = @(
@@ -1316,7 +1314,6 @@ function Format-Exception([Exception]$ex) {
     return ($lines -join " | ")
 }
 
-# Purpose: Release value.
 function Release-MutexOnce {
     if ($script:HasMutex -and $script:SingleInstanceMutex) {
         try {
@@ -1327,12 +1324,10 @@ function Release-MutexOnce {
     }
 }
 
-# Purpose: New value.
 function New-ErrorId {
     return ([Guid]::NewGuid().ToString("N")).Substring(0, 6)
 }
 
-# Purpose: Write value.
 function Write-LogEx([string]$message, [string]$level = "ERROR", [Exception]$exception = $null, [string]$context = $null, [switch]$Force) {
     $errorId = New-ErrorId
     $script:LastErrorId = $errorId
@@ -1343,8 +1338,8 @@ function Write-LogEx([string]$message, [string]$level = "ERROR", [Exception]$exc
         try { $win32 = [Runtime.InteropServices.Marshal]::GetLastWin32Error() } catch { }
     }
     $parts = @()
-    if ($hresult -ne $null) { $parts += ("HResult=0x{0:X8}" -f $hresult) }
-    if ($win32 -ne $null -and $win32 -ne 0) { $parts += ("Win32Error={0}" -f $win32) }
+    if ($null -ne $hresult) { $parts += ("HResult=0x{0:X8}" -f $hresult) }
+    if ($null -ne $win32 -and $win32 -ne 0) { $parts += ("Win32Error={0}" -f $win32) }
     if ($script:LastUserActionId) { $parts += ("ActionId={0}" -f $script:LastUserActionId) }
     if ($script:LastUserAction) { $parts += ("LastAction={0}" -f $script:LastUserAction) }
     if ($script:LastSettingsChangeSummary) { $parts += ("LastSettings={0}" -f $script:LastSettingsChangeSummary) }
@@ -1354,7 +1349,6 @@ function Write-LogEx([string]$message, [string]$level = "ERROR", [Exception]$exc
     Write-Log $message $level $exception $context -Force:$Force
 }
 
-# Purpose: Log value.
 function Rotate-LogIfNeeded([int]$maxBytes = 1048576) {
     try {
         if (Should-SkipLogWrite) { return }
@@ -1396,7 +1390,6 @@ function Rotate-LogIfNeeded([int]$maxBytes = 1048576) {
     }
 }
 
-# Purpose: Purge value.
 function Purge-OldLogs {
     $days = 0
     try { $days = [int]$settings.LogRetentionDays } catch { $days = 0 }
@@ -1418,7 +1411,6 @@ function Purge-OldLogs {
     }
 }
 
-# Purpose: Log value.
 function Flush-LogBuffer {
     if ($script:IsFlushingLog) { return }
     if ($script:LogBuffer.Count -eq 0) { return }
@@ -1447,7 +1439,6 @@ function Flush-LogBuffer {
 }
 $script:LogFlushTimer.Start()
 
-# Purpose: Log value.
 function Is-EventLogLevelEnabled([string]$level) {
     $settingsVar = Get-Variable -Name settings -Scope Script -ErrorAction SilentlyContinue
     if (-not $settingsVar -or -not $settingsVar.Value) { return $false }
@@ -1466,7 +1457,6 @@ function Is-EventLogLevelEnabled([string]$level) {
     return ($upper -eq "ERROR" -or $upper -eq "FATAL")
 }
 
-# Purpose: Write value.
 function Write-EventLogSafe([string]$message, [string]$level) {
     if (-not (Is-EventLogLevelEnabled $level)) { return }
     try {
@@ -1485,7 +1475,6 @@ function Write-EventLogSafe([string]$message, [string]$level) {
     }
 }
 
-# Purpose: Log value.
 function Add-RecentLogLine([string]$line) {
     if ([string]::IsNullOrWhiteSpace($line)) { return }
     [void]$script:RecentLogLines.Add($line)
@@ -1494,7 +1483,6 @@ function Add-RecentLogLine([string]$line) {
     }
 }
 
-# Purpose: Dump value.
 function Dump-RecentLogs([string]$reason) {
     if (-not $script:RecentLogLines -or $script:RecentLogLines.Count -eq 0) { return }
     $timestamp = Format-DateTime (Get-Date)
@@ -1517,7 +1505,6 @@ function Dump-RecentLogs([string]$reason) {
     }
 }
 
-# Purpose: Log value.
 function Scrub-LogText([string]$text) {
     if ([string]::IsNullOrEmpty($text)) { return $text }
     $scrubbed = $text
@@ -1530,13 +1517,11 @@ function Scrub-LogText([string]$text) {
     return $scrubbed
 }
 
-# Purpose: Log value.
 function Scrub-LogLines([string[]]$lines) {
     if (-not $lines) { return $lines }
     return $lines | ForEach-Object { Scrub-LogText $_ }
 }
 
-# Purpose: Write diagnostics report.
 function Write-DiagnosticsReport([string]$targetPath) {
     if ([string]::IsNullOrWhiteSpace($targetPath)) { return $null }
     $lines = @()
@@ -1606,7 +1591,6 @@ function Write-DiagnosticsReport([string]$targetPath) {
     return $targetPath
 }
 
-# Purpose: Get value.
 function Get-DriveFreeMB([string]$path) {
     try {
         $normalized = Normalize-PathText $path
@@ -1620,7 +1604,6 @@ function Get-DriveFreeMB([string]$path) {
     }
 }
 
-# Purpose: Write value.
 function Should-SkipLogWrite {
     $freeMb = Get-DriveFreeMB $script:LogDirectory
     if ($freeMb -ge 0 -and $freeMb -lt $script:MinLogFreeMB) {
@@ -1634,7 +1617,6 @@ function Should-SkipLogWrite {
     return $false
 }
 
-# Purpose: Ensure value.
 function Ensure-LogDirectoryWritable {
     if (Test-DirectoryWritable $script:LogDirectory) { return }
     $fallback = Join-Path $script:DataRoot $script:FolderNames.Logs
@@ -1653,7 +1635,6 @@ function Ensure-LogDirectoryWritable {
     }
 }
 
-# Purpose: Write value.
 function Write-Log([string]$message, [string]$level = "INFO", [Exception]$exception = $null, [string]$context = $null, [switch]$Force) {
     $settingsVar = Get-Variable -Name settings -Scope Script -ErrorAction SilentlyContinue
     if ($settingsVar -and $settingsVar.Value -and ($settingsVar.Value.PSObject.Properties.Name -contains "LogLevel")) {
@@ -1820,8 +1801,7 @@ function Write-Log([string]$message, [string]$level = "INFO", [Exception]$except
     Write-EventLogSafe $line $levelKey
 }
 
-# --- Log/settings directory management ---
-# Purpose: Set value.
+# --- Log/settings directory management (validate/repair) ---
 function Set-LogDirectory([string]$directory, [switch]$SkipLog) {
     $desired = Convert-FromRelativePath $directory
     $resolved = Resolve-DirectoryOrDefault $directory $defaultLogDir "Logs"
@@ -1865,7 +1845,6 @@ function Set-LogDirectory([string]$directory, [switch]$SkipLog) {
     }
 }
 
-# Purpose: Set value.
 function Set-SettingsDirectory([string]$directory, [switch]$SkipLog) {
     $desired = Convert-FromRelativePath $directory
     $resolved = Resolve-DirectoryOrDefault $directory $defaultSettingsDir "Settings"
@@ -1878,10 +1857,12 @@ function Set-SettingsDirectory([string]$directory, [switch]$SkipLog) {
 
     $oldSettingsPath = $script:settingsPath
     $oldStatePath = $script:StatePath
+    $oldProfilesLastGoodPath = $script:ProfilesLastGoodPath
     $oldDir = $script:SettingsDirectory
     $script:SettingsDirectory = $resolved
     $script:settingsPath = Join-Path $script:SettingsDirectory "Teams-Always-Green.settings.json"
     $script:StatePath = Join-Path $script:SettingsDirectory "Teams-Always-Green.state.json"
+    $script:ProfilesLastGoodPath = Join-Path $script:SettingsDirectory "Teams-Always-Green.profiles.lastgood.json"
 
     if ($oldDir -ne $script:SettingsDirectory) {
         try {
@@ -1909,6 +1890,15 @@ function Set-SettingsDirectory([string]$directory, [switch]$SkipLog) {
         } catch {
             if (-not $SkipLog) {
                 Write-Log "Failed to move state file to new directory." "WARN" $_.Exception "Settings"
+            }
+        }
+    }
+    if ($oldProfilesLastGoodPath -and $oldProfilesLastGoodPath -ne $script:ProfilesLastGoodPath -and (Test-Path $oldProfilesLastGoodPath) -and -not (Test-Path $script:ProfilesLastGoodPath)) {
+        try {
+            Move-Item -Path $oldProfilesLastGoodPath -Destination $script:ProfilesLastGoodPath -Force
+        } catch {
+            if (-not $SkipLog) {
+                Write-Log "Failed to move profile last-good file to new directory." "WARN" $_.Exception "Settings"
             }
         }
     }
@@ -1947,8 +1937,7 @@ function Set-SettingsDirectory([string]$directory, [switch]$SkipLog) {
     }
 }
 
-# --- Settings load/save and schema migration ---
-# Purpose: Load value.
+# --- Settings load/save and schema migration (read/validate/migrate) ---
 function Load-Settings {
     if (-not (Test-Path $settingsPath)) {
         return $null
@@ -2001,7 +1990,6 @@ function Load-Settings {
     }
 }
 
-# Purpose: Rotate value.
 function Rotate-SettingsBackups {
     if (-not (Test-Path $settingsPath)) { return }
     $backupDir = Split-Path -Path $settingsPath -Parent
@@ -2025,7 +2013,6 @@ function Rotate-SettingsBackups {
     }
 }
 
-# Purpose: Save value.
 function Save-LastGoodStateRaw([string]$rawJson) {
     if ([string]::IsNullOrWhiteSpace($rawJson)) { return }
     try {
@@ -2034,7 +2021,6 @@ function Save-LastGoodStateRaw([string]$rawJson) {
     }
 }
 
-# Purpose: Save value.
 function Save-CorruptStateCopy([string]$rawJson) {
     if ([string]::IsNullOrWhiteSpace($rawJson)) { return }
     try {
@@ -2046,7 +2032,6 @@ function Save-CorruptStateCopy([string]$rawJson) {
     }
 }
 
-# Purpose: Load value.
 function Load-LastGoodState {
     try {
         if (Test-Path $script:StateLastGoodPath) {
@@ -2060,7 +2045,6 @@ function Load-LastGoodState {
     return $null
 }
 
-# Purpose: Normalize value.
 function Normalize-State($state) {
     if (-not $state) { return $state }
     if ($null -eq (Get-SettingsPropertyValue $state "SchemaVersion")) {
@@ -2086,7 +2070,6 @@ function Normalize-State($state) {
     return $state
 }
 
-# Purpose: Convert value.
 function Convert-ToHashtable($obj) {
     if ($obj -is [hashtable]) { return $obj }
     if ($obj -is [pscustomobject]) {
@@ -2099,7 +2082,6 @@ function Convert-ToHashtable($obj) {
     return @{}
 }
 
-# Purpose: Load value.
 function Load-State {
     if (-not (Test-Path $script:StatePath)) {
         return $null
@@ -2125,7 +2107,6 @@ function Load-State {
     }
 }
 
-# Purpose: Rotate value.
 function Rotate-StateBackups {
     if (-not (Test-Path $script:StatePath)) { return }
     $backupDir = Split-Path -Path $script:StatePath -Parent
@@ -2138,7 +2119,6 @@ function Rotate-StateBackups {
     }
 }
 
-# Purpose: Get value.
 function Get-StateSnapshot($state) {
     $snapshot = @{}
     foreach ($prop in $state.PSObject.Properties) {
@@ -2148,13 +2128,11 @@ function Get-StateSnapshot($state) {
     return $snapshot
 }
 
-# Purpose: Get value.
 function Get-StateSnapshotHash($snapshot) {
     $pairs = $snapshot.GetEnumerator() | Sort-Object Name | ForEach-Object { "$($_.Name)=$($_.Value)" }
     return ($pairs -join "|")
 }
 
-# Purpose: Apply value.
 function Apply-StateToSettings($settings, $state) {
     if (-not $settings -or -not $state) { return }
     if ($state.PSObject.Properties.Name -contains "ToggleCount") {
@@ -2168,7 +2146,6 @@ function Apply-StateToSettings($settings, $state) {
     }
 }
 
-# Purpose: Apply value.
 function Sync-StateFromSettings($settings) {
     if (-not $settings) { return }
     if (-not $script:AppState) { $script:AppState = [pscustomobject]@{} }
@@ -2184,7 +2161,6 @@ function Sync-StateFromSettings($settings) {
     $script:AppState = Normalize-State $script:AppState
 }
 
-# Purpose: Save value.
 function Save-StateImmediate($state) {
     if (-not $state) { return }
     try {
@@ -2221,12 +2197,10 @@ function Save-StateImmediate($state) {
     }
 }
 
-# Purpose: Save value.
 function Save-State($state) {
     Save-StateImmediate $state
 }
 
-# Purpose: Get value.
 function Get-SettingsForSave($settings) {
     if (-not $settings) { return $null }
     $copy = Copy-SettingsValue $settings
@@ -2253,7 +2227,6 @@ function Get-SettingsForSave($settings) {
     return [pscustomobject]$ordered
 }
 
-# Purpose: Get value.
 function Get-SettingsPropertyValue($settings, [string]$name) {
     if (-not $settings) { return $null }
     if ($settings -is [hashtable]) {
@@ -2264,7 +2237,6 @@ function Get-SettingsPropertyValue($settings, [string]$name) {
     return $null
 }
 
-# Purpose: Set value.
 function Set-SettingsPropertyValue($settings, [string]$name, $value) {
     if (-not $settings) { return }
     if ($settings -is [hashtable]) {
@@ -2278,7 +2250,6 @@ function Set-SettingsPropertyValue($settings, [string]$name, $value) {
     $settings | Add-Member -MemberType NoteProperty -Name $name -Value $value -Force
 }
 
-# Purpose: Copy value.
 function Copy-SettingsValue($value) {
     if ($null -eq $value) { return $null }
     if ($value -is [hashtable]) {
@@ -2312,22 +2283,19 @@ function Copy-SettingsValue($value) {
     return $value
 }
 
-# Purpose: Get value.
 function Get-ObjectKeys($obj) {
     if ($obj -is [hashtable]) { return @($obj.Keys) }
     if ($obj -is [pscustomobject]) { return @($obj.PSObject.Properties.Name) }
     return @()
 }
 
-# --- Settings UI state helpers ---
-# Purpose: Set value.
+# --- Settings UI state helpers (dirty tracking) ---
 function Set-SettingsDirty([bool]$value) {
     if ($script:SetDirty -is [scriptblock]) {
         & $script:SetDirty $value
     }
 }
 
-# Purpose: Show value.
 function Show-SettingsSaveToast([string]$message = "Settings saved") {
     if (-not $script:SettingsSaveLabel) { return }
     if (-not $script:SettingsForm -or $script:SettingsForm.IsDisposed) { return }
@@ -2348,14 +2316,12 @@ function Show-SettingsSaveToast([string]$message = "Settings saved") {
     $script:SettingsSaveTimer.Start()
 }
 
-# Purpose: Clear value.
 function Clear-SettingsFieldErrors {
     if ($script:ClearFieldErrors -is [scriptblock]) {
         & $script:ClearFieldErrors
     }
 }
 
-# Purpose: Set value.
 function Set-SettingsFieldError([string]$key, [string]$message) {
     if ($script:SetFieldError -is [scriptblock]) {
         return (& $script:SetFieldError $key $message)
@@ -2363,8 +2329,7 @@ function Set-SettingsFieldError([string]$key, [string]$message) {
     return $message
 }
 
-# --- Settings normalization and migration ---
-# Purpose: Normalize value.
+# --- Settings normalization and migration (sanitize defaults) ---
 function Normalize-Settings($settings) {
     if (-not $settings) { return $settings }
     $settings.IntervalSeconds = Normalize-IntervalSeconds ([int]$settings.IntervalSeconds)
@@ -2415,7 +2380,6 @@ function Normalize-Settings($settings) {
     return $settings
 }
 
-# Purpose: migrate settings helper.
 function Migrate-Settings($settings) {
     if (-not $settings) { return $settings }
     $current = 1
@@ -2456,7 +2420,6 @@ function Migrate-Settings($settings) {
     return $settings
 }
 
-# Purpose: Save value.
 function Save-SettingsImmediate($settings) {
     $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
     try {
@@ -2472,6 +2435,8 @@ function Save-SettingsImmediate($settings) {
             $stopwatch.Stop()
             Save-StateImmediate $script:AppState
             Write-Log "UI: Settings unchanged; skip save." "DEBUG" $null "Settings-Save"
+            $script:LastSettingsSaveOk = $true
+            $script:LastSettingsSaveMessage = ""
             return
         }
         $changedKeys = @()
@@ -2546,14 +2511,18 @@ function Save-SettingsImmediate($settings) {
         Show-SettingsSaveToast
         $script:LastSettingsSnapshot = $newSnapshot
         $script:LastSettingsSnapshotHash = $newHash
+        $script:LastSettingsSaveOk = $true
+        $script:LastSettingsSaveMessage = ""
         Save-StateImmediate $script:AppState
     } catch {
         $stopwatch.Stop()
+        $script:LastSettingsSaveOk = $false
+        $script:LastSettingsSaveMessage = [string]$_.Exception.Message
         Write-Log "Failed to save settings." "ERROR" $_.Exception "Save-Settings"
+        if ($script:UpdateLastSavedLabel) { & $script:UpdateLastSavedLabel $null }
     }
 }
 
-# Purpose: Save value.
 function Save-Settings($settings, [switch]$Immediate) {
     if ($Immediate) {
         Save-SettingsImmediate $settings
@@ -2566,7 +2535,6 @@ function Save-Settings($settings, [switch]$Immediate) {
     $script:SaveSettingsTimer.Start()
 }
 
-# Purpose: Save value.
 function Flush-SettingsSave {
     if ($script:SaveSettingsPending) {
         Save-SettingsImmediate $script:SaveSettingsPending
@@ -2574,7 +2542,6 @@ function Flush-SettingsSave {
     }
 }
 
-# Purpose: Get value.
 function Get-SettingsSnapshot($settings) {
     $snapshot = @{}
     foreach ($prop in $settings.PSObject.Properties) {
@@ -2585,13 +2552,11 @@ function Get-SettingsSnapshot($settings) {
     return $snapshot
 }
 
-# Purpose: Get value.
 function Get-SettingsSnapshotHash($snapshot) {
     $pairs = $snapshot.GetEnumerator() | Sort-Object Name | ForEach-Object { "$($_.Name)=$($_.Value)" }
     return ($pairs -join "|")
 }
 
-# Purpose: Get value.
 function Get-SettingsDiff($oldSnapshot, $newSnapshot) {
     $changes = @()
     $allKeys = @($oldSnapshot.Keys + $newSnapshot.Keys) | Sort-Object -Unique
@@ -2605,7 +2570,7 @@ function Get-SettingsDiff($oldSnapshot, $newSnapshot) {
     return $changes
 }
 
-# --- Profile snapshots and sync ---
+# --- Profile snapshots and sync (last-good/diff) ---
 $script:ProfilePropertyNames = @(
     "IntervalSeconds",
     "RememberChoice",
@@ -2637,19 +2602,197 @@ $script:ProfilePropertyNames = @(
     "CompactMode"
 )
 
-# Purpose: Get value.
+function Load-ProfilesLastGood {
+    $script:ProfilesLastGood = @{}
+    if (-not $script:ProfilesLastGoodPath) { return }
+    if (-not (Test-Path $script:ProfilesLastGoodPath)) { return }
+    try {
+        $raw = Get-Content -Path $script:ProfilesLastGoodPath -Raw
+        if ([string]::IsNullOrWhiteSpace($raw)) { return }
+        $loaded = $raw | ConvertFrom-Json
+        if ($loaded -is [pscustomobject]) {
+            $table = @{}
+            foreach ($prop in $loaded.PSObject.Properties) {
+                $table[$prop.Name] = $prop.Value
+            }
+            $script:ProfilesLastGood = $table
+        } elseif ($loaded -is [hashtable]) {
+            $script:ProfilesLastGood = $loaded
+        }
+    } catch {
+        Write-Log "Failed to load profile last-good file." "WARN" $_.Exception "Profiles"
+    }
+}
+
+function Save-ProfilesLastGood {
+    if (-not $script:ProfilesLastGoodPath) { return }
+    try {
+        $json = ($script:ProfilesLastGood | ConvertTo-Json -Depth 6)
+        $tmp = Join-Path $script:SettingsDirectory ("Teams-Always-Green.profiles.lastgood.json.tmp.{0}" -f ([Guid]::NewGuid().ToString("N")))
+        $json | Set-Content -Path $tmp -Encoding UTF8
+        try {
+            Move-Item -Path $tmp -Destination $script:ProfilesLastGoodPath -Force
+        } catch {
+            Copy-Item -Path $tmp -Destination $script:ProfilesLastGoodPath -Force
+            try { Remove-Item -Path $tmp -Force -ErrorAction SilentlyContinue } catch { }
+        }
+    } catch {
+        Write-Log "Failed to save profile last-good file." "WARN" $_.Exception "Profiles"
+    }
+}
+
+function Update-ProfileLastGood([string]$name, $snapshot) {
+    if ([string]::IsNullOrWhiteSpace($name) -or -not $snapshot) { return }
+    if (-not $script:ProfilesLastGood) { $script:ProfilesLastGood = @{} }
+    $script:ProfilesLastGood[$name] = $snapshot
+    Save-ProfilesLastGood
+}
+
+function Remove-ProfileLastGood([string]$name) {
+    if (-not $script:ProfilesLastGood) { return }
+    if ($script:ProfilesLastGood.ContainsKey($name)) {
+        $script:ProfilesLastGood.Remove($name) | Out-Null
+        Save-ProfilesLastGood
+    }
+}
+
+function Get-ProfileLastGood([string]$name) {
+    if (-not $script:ProfilesLastGood) { return $null }
+    if ($script:ProfilesLastGood.ContainsKey($name)) { return $script:ProfilesLastGood[$name] }
+    return $null
+}
+
+function Migrate-ProfileSnapshot($profile) {
+    if (-not $profile) { return $profile }
+    if ($profile -is [hashtable]) {
+        if (-not $profile.ContainsKey("ProfileSchemaVersion")) { $profile["ProfileSchemaVersion"] = $script:ProfileSchemaVersion }
+        if (-not $profile.ContainsKey("ReadOnly")) { $profile["ReadOnly"] = $false }
+        return $profile
+    }
+    if (-not ($profile.PSObject.Properties.Name -contains "ProfileSchemaVersion")) {
+        $profile | Add-Member -MemberType NoteProperty -Name "ProfileSchemaVersion" -Value $script:ProfileSchemaVersion -Force
+    }
+    if (-not ($profile.PSObject.Properties.Name -contains "ReadOnly")) {
+        $profile | Add-Member -MemberType NoteProperty -Name "ReadOnly" -Value $false -Force
+    }
+    return $profile
+}
+
+function Test-ProfileSnapshot($profile) {
+    $issues = @()
+    if (-not $profile) {
+        $issues += "Profile is null."
+        return [pscustomobject]@{ IsValid = $false; Issues = $issues }
+    }
+    if (-not ($profile -is [hashtable] -or $profile -is [pscustomobject])) {
+        $issues += "Profile is not an object."
+        return [pscustomobject]@{ IsValid = $false; Issues = $issues }
+    }
+    $required = @("IntervalSeconds", "HotkeyToggle", "HotkeyStartStop", "HotkeyPauseResume")
+    foreach ($key in $required) {
+        $hasKey = if ($profile -is [hashtable]) { $profile.ContainsKey($key) } else { $profile.PSObject.Properties.Name -contains $key }
+        if (-not $hasKey) { $issues += "Missing $key" }
+    }
+    return [pscustomobject]@{ IsValid = ($issues.Count -eq 0); Issues = $issues }
+}
+
+function Get-ProfileReadOnly($profile) {
+    if (-not $profile) { return $false }
+    if ($profile -is [hashtable]) {
+        if ($profile.ContainsKey("ReadOnly")) { return [bool]$profile["ReadOnly"] }
+        return $false
+    }
+    if ($profile.PSObject.Properties.Name -contains "ReadOnly") { return [bool]$profile.ReadOnly }
+    return $false
+}
+
+function Get-ProfileSnapshotHashFromSettings($source) {
+    $pairs = @()
+    foreach ($name in $script:ProfilePropertyNames) {
+        if ($source.PSObject.Properties.Name -contains $name) {
+            $pairs += ("{0}={1}" -f $name, $source.$name)
+        }
+    }
+    try {
+        if ($source -and $source.Profiles -and $source.ActiveProfile) {
+            $activeName = [string]$source.ActiveProfile
+            if (-not [string]::IsNullOrWhiteSpace($activeName) -and (Get-ObjectKeys $source.Profiles) -contains $activeName) {
+                $pairs += ("ReadOnly={0}" -f (Get-ProfileReadOnly $source.Profiles[$activeName]))
+            }
+        }
+    } catch { }
+    return ($pairs -join "|")
+}
+
+function Get-ProfileDiffSummary($currentSettings, $profile, [int]$maxKeys = 10) {
+    $current = Get-ProfileSnapshot $currentSettings
+    $target = Migrate-ProfileSnapshot $profile
+    $changed = @()
+    foreach ($name in $script:ProfilePropertyNames) {
+        if ($script:ProfileMetadataKeys -contains $name) { continue }
+        $oldVal = if ($current.PSObject.Properties.Name -contains $name) { $current.$name } else { "<missing>" }
+        $newVal = if ($target -is [hashtable]) { if ($target.ContainsKey($name)) { $target[$name] } else { "<missing>" } } else { if ($target.PSObject.Properties.Name -contains $name) { $target.$name } else { "<missing>" } }
+        if ($oldVal -ne $newVal) { $changed += $name }
+    }
+    $summaryKeys = if ($changed.Count -gt 0) { ($changed | Select-Object -First $maxKeys) -join ", " } else { "" }
+    $tail = if ($changed.Count -gt $maxKeys) { " (and $($changed.Count - $maxKeys) more)" } else { "" }
+    $summary = if ($changed.Count -eq 0) { "No changes." } else { "Changes ($($changed.Count)): $summaryKeys$tail" }
+    return [pscustomobject]@{
+        Count = $changed.Count
+        Keys = $changed
+        Summary = $summary
+    }
+}
+
+function Confirm-ProfileSwitch([string]$name, $profile) {
+    $diff = Get-ProfileDiffSummary $settings $profile
+    if ($diff.Count -le 0) { return $true }
+    $message = "Switch to profile '$name'?`n$($diff.Summary)"
+    $result = [System.Windows.Forms.MessageBox]::Show(
+        $message,
+        "Confirm Profile Switch",
+        [System.Windows.Forms.MessageBoxButtons]::YesNo,
+        [System.Windows.Forms.MessageBoxIcon]::Question
+    )
+    return ($result -eq [System.Windows.Forms.DialogResult]::Yes)
+}
+
 function Get-ProfileSnapshot($source) {
-    $snapshot = [pscustomobject]@{}
+    $cacheKey = Get-ProfileSnapshotHashFromSettings $source
+    if ($script:ProfileSnapshotCacheKey -and $script:ProfileSnapshotCacheKey -eq $cacheKey -and $script:ProfileSnapshotCache) {
+        return $script:ProfileSnapshotCache
+    }
+    $readOnly = $false
+    try {
+        if ($source -and $source.Profiles -and $source.ActiveProfile) {
+            $activeName = [string]$source.ActiveProfile
+            if (-not [string]::IsNullOrWhiteSpace($activeName) -and (Get-ObjectKeys $source.Profiles) -contains $activeName) {
+                $readOnly = Get-ProfileReadOnly $source.Profiles[$activeName]
+            }
+        }
+    } catch { }
+    $snapshot = [pscustomobject]@{
+        ProfileSchemaVersion = $script:ProfileSchemaVersion
+        ReadOnly = $readOnly
+    }
     foreach ($name in $script:ProfilePropertyNames) {
         if ($source.PSObject.Properties.Name -contains $name) {
             $snapshot | Add-Member -MemberType NoteProperty -Name $name -Value $source.$name
         }
     }
+    $script:ProfileSnapshotCacheKey = $cacheKey
+    $script:ProfileSnapshotCache = $snapshot
     return $snapshot
 }
 
-# Purpose: Apply value.
 function Apply-ProfileSnapshot($target, $profile) {
+    $profile = Migrate-ProfileSnapshot $profile
+    $validation = Test-ProfileSnapshot $profile
+    if (-not $validation.IsValid) {
+        $msg = "Profile is invalid: " + (($validation.Issues | Select-Object -First 4) -join ", ")
+        Write-Log $msg "WARN" $null "Profiles"
+        return $target
+    }
     $overrideSchedule = $true
     $hasOverrideFlag = $false
     if ($profile -is [hashtable]) {
@@ -2679,7 +2822,6 @@ function Apply-ProfileSnapshot($target, $profile) {
     return $target
 }
 
-# Purpose: Sync value.
 function Sync-ActiveProfileSnapshot($settings) {
     if (-not $settings) { return }
     if (-not ($settings.PSObject.Properties.Name -contains "Profiles")) { return }
@@ -2690,7 +2832,7 @@ function Sync-ActiveProfileSnapshot($settings) {
     $settings.Profiles[$name] = Get-ProfileSnapshot $settings
 }
 
-# --- Default settings and initial load ---
+# --- Default settings and initial load (first-run) ---
 $defaultSettings = [pscustomobject]@{
     SchemaVersion = $script:SettingsSchemaVersion
     IntervalSeconds = 60
@@ -2963,6 +3105,25 @@ if (@(Get-ObjectKeys $settings.Profiles).Count -eq 0) {
     $settings.Profiles["Home"] = Get-ProfileSnapshot $settings
     $profilesChanged = $true
 }
+
+foreach ($name in @(Get-ObjectKeys $settings.Profiles)) {
+    $profile = $settings.Profiles[$name]
+    $profile = Migrate-ProfileSnapshot $profile
+    $validation = Test-ProfileSnapshot $profile
+    if (-not $validation.IsValid) {
+        $lastGood = Get-ProfileLastGood $name
+        if ($lastGood) {
+            $settings.Profiles[$name] = Migrate-ProfileSnapshot $lastGood
+            $profilesChanged = $true
+            Write-Log "Profile '$name' recovered from last known good snapshot." "WARN" $null "Profiles"
+        } else {
+            Write-Log ("Profile '$name' failed validation: {0}" -f (($validation.Issues | Select-Object -First 4) -join ", ")) "WARN" $null "Profiles"
+        }
+    } else {
+        $settings.Profiles[$name] = $profile
+        Update-ProfileLastGood $name $profile
+    }
+}
 if ($profilesChanged) {
     Save-Settings $settings
 }
@@ -2975,6 +3136,7 @@ if (-not ($settings.PSObject.Properties.Name -contains "DataRoot") -or [string]:
 
 $desiredSettingsDir = Resolve-DirectoryOrDefault ([string]$settings.SettingsDirectory) $defaultSettingsDir "Settings"
 Set-SettingsDirectory $desiredSettingsDir -SkipLog
+Load-ProfilesLastGood
 
 $desiredLogDir = Resolve-DirectoryOrDefault ([string]$settings.LogDirectory) $defaultLogDir "Logs"
 Set-LogDirectory $desiredLogDir -SkipLog
@@ -3043,7 +3205,7 @@ if ($script:LogMaxBytes -le 0) { $script:LogMaxBytes = 1048576 }
 
 Invoke-UpdateCheck
 
-# --- Global error trap and shutdown handling ---
+# --- Global error trap and shutdown handling (cleanup) ---
 trap {
     try {
         if (Get-Command -Name Write-BootstrapLog -ErrorAction SilentlyContinue) {
@@ -3166,14 +3328,12 @@ Write-Log (Get-EnvironmentSummary) "DEBUG" $null "Init"
 Write-Log ("Settings snapshot. IntervalSeconds={0} QuietMode={1} MinimalTooltip={2} DisableBalloonTips={3} StartWithWindows={4} RememberChoice={5} StartOnLaunch={6} RunOnceOnLaunch={7} PauseUntil={8} PauseDurations={9} ScheduleEnabled={10} ScheduleStart={11} ScheduleEnd={12} ScheduleWeekdays={13} ScheduleSuspendUntil={14} SafeModeEnabled={15} SafeModeFailureThreshold={16} HotkeyToggle={17} HotkeyStartStop={18} HotkeyPauseResume={19} ToggleCount={20} LogLevel={21} LogMaxBytes={22} LogIncludeStackTrace={23} LogToEventLog={24} LogCategories={25}" -f `
     $settings.IntervalSeconds, $settings.QuietMode, $settings.MinimalTrayTooltip, $settings.DisableBalloonTips, $settings.StartWithWindows, $settings.RememberChoice, $settings.StartOnLaunch, $settings.RunOnceOnLaunch, $settings.PauseUntil, $settings.PauseDurationsMinutes, $settings.ScheduleEnabled, $settings.ScheduleStart, $settings.ScheduleEnd, $settings.ScheduleWeekdays, $settings.ScheduleSuspendUntil, $settings.SafeModeEnabled, $settings.SafeModeFailureThreshold, $settings.HotkeyToggle, $settings.HotkeyStartStop, $settings.HotkeyPauseResume, $settings.ToggleCount, $settings.LogLevel, $settings.LogMaxBytes, $settings.LogIncludeStackTrace, $settings.LogToEventLog, ((Get-ObjectKeys $settings.LogCategories | Sort-Object | ForEach-Object { "$_=$($settings.LogCategories[$_])" }) -join ",")) "DEBUG" $null "Init"
 
-# --- Startup shortcut management ---
-# Purpose: Get value.
+# --- Startup shortcut management (create/remove) ---
 function Get-StartupShortcutPath {
     $startupDir = [Environment]::GetFolderPath("Startup")
     return Join-Path $startupDir "Teams-Always-Green.lnk"
 }
 
-# Purpose: Set value.
 function Set-StartupShortcut([bool]$enabled) {
     $shortcutPath = Get-StartupShortcutPath
     if ($enabled) {
@@ -3203,7 +3363,7 @@ try {
     Write-Log "Failed to read startup shortcut." "ERROR" $_.Exception "Startup"
 }
 
-# --- Key simulation (SendInput) ---
+# --- Key simulation (SendInput) for toggling ---
 Add-Type @"
 using System;
 using System.Runtime.InteropServices;
@@ -3347,14 +3507,12 @@ public class HotKeyMessageFilter : IMessageFilter {
 }
 "@
 
-# Purpose: Invoke value.
 function Invoke-ScrollLockToggleInternal {
     [KeyboardSimulator]::keybd_event(0x91, 0, 0, 0)
     Start-Sleep -Milliseconds 50
     [KeyboardSimulator]::keybd_event(0x91, 0, 2, 0)
 }
 
-# Purpose: Set value.
 function Set-FormTaskbarIcon($form, [string]$iconPath) {
     if (-not $form -or $form.IsDisposed) { return }
     if ([string]::IsNullOrWhiteSpace($iconPath) -or -not (Test-Path $iconPath)) { return }
@@ -3370,8 +3528,8 @@ function Set-FormTaskbarIcon($form, [string]$iconPath) {
     }
 }
 
-# --- App state ---
-# --- Runtime state and scheduling helpers ---
+# --- App state (running/paused flags) ---
+# --- Runtime state and scheduling helpers (next toggle) ---
 $script:isRunning = $false
 $script:isToggling = $false
 $script:isTicking = $false
@@ -3430,8 +3588,7 @@ if ($settings.PauseUntil) {
         Write-Log "Failed to parse PauseUntil." "ERROR" $_.Exception "Parse-Settings"
     }
 }
-# --- Fun stats tracking ---
-# Purpose: Convert value.
+# --- Fun stats tracking (streaks/counters) ---
 function Convert-ToHashtable($obj) {
     if ($obj -is [hashtable]) { return $obj }
     if ($obj -is [pscustomobject]) {
@@ -3444,7 +3601,6 @@ function Convert-ToHashtable($obj) {
     return @{}
 }
 
-# Purpose: Ensure value.
 function Ensure-FunStats($settings) {
     if (-not $settings) { return @{} }
     $stats = Convert-ToHashtable (Get-SettingsPropertyValue $settings "Stats")
@@ -3466,7 +3622,6 @@ function Ensure-FunStats($settings) {
     return $stats
 }
 
-# Purpose: Update value.
 function Update-FunStatsOnToggle([DateTime]$when) {
     if (-not $when) { return }
     $stats = Ensure-FunStats $settings
@@ -3487,7 +3642,6 @@ function Update-FunStatsOnToggle([DateTime]$when) {
     Set-SettingsPropertyValue $settings "Stats" $stats
 }
 
-# Purpose: Update value.
 function Update-FunStatsOnPause([int]$minutes) {
     if ($minutes -le 0) { return }
     $stats = Ensure-FunStats $settings
@@ -3500,7 +3654,6 @@ function Update-FunStatsOnPause([int]$minutes) {
     }
 }
 
-# Purpose: Update value.
 function Update-FunStatsOnShutdown([double]$uptimeMinutes) {
     if ($script:StatsShutdownUpdated) { return }
     if ($uptimeMinutes -le 0) { return }
@@ -3515,7 +3668,6 @@ function Update-FunStatsOnShutdown([double]$uptimeMinutes) {
     $script:StatsShutdownUpdated = $true
 }
 
-# Purpose: Get value.
 function Get-DailyToggleCount($stats, [DateTime]$when) {
     if (-not $stats) { return 0 }
     $daily = Convert-ToHashtable $stats["DailyToggles"]
@@ -3524,7 +3676,6 @@ function Get-DailyToggleCount($stats, [DateTime]$when) {
     return 0
 }
 
-# Purpose: Get value.
 function Get-MostActiveHourLabel($stats) {
     if (-not $stats) { return "N/A" }
     $hourly = Convert-ToHashtable $stats["HourlyToggles"]
@@ -3542,7 +3693,6 @@ function Get-MostActiveHourLabel($stats) {
     return ("{0:00}:00" -f $topHour)
 }
 
-# Purpose: Get value.
 function Get-ToggleStreaks($stats) {
     $result = @{ Current = 0; Best = 0 }
     if (-not $stats) { return $result }
@@ -3587,7 +3737,6 @@ function Get-ToggleStreaks($stats) {
     return $result
 }
 
-# Purpose: Format value.
 function Format-TotalRunTime([double]$minutes) {
     if ($minutes -le 0) { return "0m" }
     $span = [TimeSpan]::FromMinutes($minutes)
@@ -3605,7 +3754,6 @@ Sync-StateFromSettings $settings
 Apply-StateToSettings $settings $script:AppState
 Save-StateImmediate $script:AppState
 # --- Stats persistence and next-toggle calculations ---
-# Purpose: Save value.
 function Save-Stats {
     if ($null -eq $settings.ToggleCount) { $settings.ToggleCount = 0 }
     $settings.LastToggleTime = if ($script:lastToggleTime) { $script:lastToggleTime.ToString("o") } else { $null }
@@ -3615,7 +3763,6 @@ function Save-Stats {
     Save-State $script:AppState
 }
 
-# Purpose: Update value.
 function Update-NextToggleTime {
     if ($script:isRunning -and -not $script:isScheduleBlocked) {
         $script:nextToggleTime = (Get-Date).AddSeconds([int]$settings.IntervalSeconds)
@@ -3624,13 +3771,11 @@ function Update-NextToggleTime {
     }
 }
 
-# Purpose: Get value.
 function Get-Now {
     if ($script:Now) { return $script:Now }
     return Get-Date
 }
 
-# Purpose: Format value.
 function Format-LocalTime($value, [string]$format = $null) {
     if ($null -eq $value) { return "N/A" }
     if ($script:UseSystemDateTimeFormat -and [string]::IsNullOrWhiteSpace($format)) {
@@ -3645,7 +3790,6 @@ function Format-LocalTime($value, [string]$format = $null) {
     }
 }
 
-# Purpose: Get value.
 function Get-DebugModeStatusText {
     if (-not $script:DebugModeUntil) { return "Off" }
     $remaining = [int][Math]::Ceiling(($script:DebugModeUntil - (Get-Date)).TotalSeconds)
@@ -3654,7 +3798,6 @@ function Get-DebugModeStatusText {
     $secs = $remaining % 60
     return ("On ({0}m {1}s)" -f $mins, $secs)
 }
-# Purpose: Convert value.
 function Convert-ColorString([string]$value, [System.Drawing.Color]$fallback) {
     if ([string]::IsNullOrWhiteSpace($value)) { return $fallback }
     try {
@@ -3671,12 +3814,10 @@ function Convert-ColorString([string]$value, [System.Drawing.Color]$fallback) {
     }
 }
 
-# Purpose: Convert value.
 function Convert-ColorToString([System.Drawing.Color]$color) {
     return "#$($color.R.ToString("X2"))$($color.G.ToString("X2"))$($color.B.ToString("X2"))"
 }
 
-# Purpose: Apply value.
 function Apply-MenuFontSize([int]$size) {
     if ($size -le 0) { $size = 12 }
     $baseFont = [System.Windows.Forms.SystemInformation]::MenuFont
@@ -3686,7 +3827,6 @@ function Apply-MenuFontSize([int]$size) {
     }
 }
 
-# Purpose: Apply value.
 function Apply-SettingsFontSize([int]$size) {
     if ($size -le 0) { $size = 12 }
     $baseFont = [System.Windows.Forms.SystemInformation]::MenuFont
@@ -3697,13 +3837,11 @@ function Apply-SettingsFontSize([int]$size) {
 Apply-MenuFontSize ([int]$settings.FontSize)
 Apply-SettingsFontSize ([int]$settings.SettingsFontSize)
 
-# Purpose: Format value.
 function Format-TimeOrNever($time, [bool]$showSeconds) {
     if ($null -eq $time) { return "Never" }
     return Format-DateTime $time
 }
 
-# Purpose: Format value.
 function Format-PauseRemaining {
     if (-not $script:isPaused -or $null -eq $script:pauseUntil) { return $null }
     $remaining = [int][Math]::Max(0, ($script:pauseUntil - (Get-Now)).TotalSeconds)
@@ -3712,7 +3850,6 @@ function Format-PauseRemaining {
     return "{0}m {1}s" -f $mins, $secs
 }
 
-# Purpose: Format value.
 function Format-NextInfo {
     $now = Get-Now
     $nowKey = $now.ToString("yyyyMMddHHmmss")
@@ -3739,14 +3876,12 @@ function Format-NextInfo {
     return $result
 }
 
-# Purpose: Format value.
 function Format-PauseUntilText {
     if (-not $script:isPaused -or $null -eq $script:pauseUntil) { return "N/A" }
     return Format-TimeOrNever $script:pauseUntil $false
 }
 
 # --- Interval and schedule parsing helpers ---
-# Purpose: Get value.
 function Get-PauseDurations {
     $raw = [string]$settings.PauseDurationsMinutes
     if ([string]::IsNullOrWhiteSpace($raw)) { return @(5, 15, 30) }
@@ -3761,7 +3896,6 @@ function Get-PauseDurations {
     return $values | Sort-Object -Unique
 }
 
-# Purpose: Get value.
 function Get-ScheduleWeekdaySet([string]$text) {
     if ($script:ScheduleWeekdayCacheText -eq $text -and $script:ScheduleWeekdayCacheSet) {
         return $script:ScheduleWeekdayCacheSet
@@ -3787,7 +3921,6 @@ function Get-ScheduleWeekdaySet([string]$text) {
     return $set
 }
 
-# Purpose: Parse value.
 function Try-ParseTime([string]$text, [ref]$result) {
     $result.Value = [TimeSpan]::Zero
     if ([string]::IsNullOrWhiteSpace($text)) { return $false }
@@ -3797,7 +3930,6 @@ function Try-ParseTime([string]$text, [ref]$result) {
     return $ok
 }
 
-# Purpose: Get value.
 function Get-ScheduleSuspendUntil {
     $raw = [string]$settings.ScheduleSuspendUntil
     if ([string]::IsNullOrWhiteSpace($raw)) { return $null }
@@ -3808,7 +3940,6 @@ function Get-ScheduleSuspendUntil {
     }
 }
 
-# Purpose: is within schedule helper.
 function Is-WithinSchedule {
     if (-not [bool]$settings.ScheduleEnabled) { return $true }
     $days = Get-ScheduleWeekdaySet $settings.ScheduleWeekdays
@@ -3832,7 +3963,6 @@ function Is-WithinSchedule {
     return ($now -ge $start -or $now -le $end)
 }
 
-# Purpose: Update value.
 function Update-ScheduleBlock {
     $script:isScheduleSuspended = $false
     if ([bool]$settings.ScheduleEnabled) {
@@ -3867,7 +3997,6 @@ function Update-ScheduleBlock {
 $null = Update-ScheduleBlock
 Log-StartupSummary
 
-# Purpose: Format value.
 function Format-ScheduleStatus {
     $key = "{0}|{1}|{2}|{3}|{4}|{5}" -f $settings.ScheduleEnabled, $settings.ScheduleStart, $settings.ScheduleEnd, $settings.ScheduleWeekdays, $settings.ScheduleSuspendUntil, $script:isScheduleSuspended
     if ($script:ScheduleStatusCacheKey -eq $key -and $script:ScheduleStatusCacheValue) {
@@ -3888,7 +4017,6 @@ function Format-ScheduleStatus {
     return $value
 }
 
-# Purpose: Update value.
 function Update-NotifyIconText([string]$state) {
     if ($script:isShuttingDown -or -not $notifyIcon) { return }
     $tooltipStyle = "Standard"
@@ -3944,7 +4072,6 @@ function Update-NotifyIconText([string]$state) {
     $notifyIcon.Text = $short
 }
 
-# Purpose: Parse value.
 function Parse-Hotkey([string]$text) {
     if ([string]::IsNullOrWhiteSpace($text)) { return $null }
     $mods = 0
@@ -3968,13 +4095,11 @@ function Parse-Hotkey([string]$text) {
     return @{ Modifiers = $mods; Vk = [int]$key }
 }
 
-# Purpose: Validate value.
 function Validate-HotkeyString([string]$text) {
     if ([string]::IsNullOrWhiteSpace($text)) { return $true }
     return ($null -ne (Parse-Hotkey $text))
 }
 
-# Purpose: Test value.
 function Run-SelfTest {
     $issues = @()
     if (-not (Validate-HotkeyString $settings.HotkeyToggle)) { $issues += "HotkeyToggle invalid" }
@@ -4003,7 +4128,6 @@ Write-Log ("Health Summary: Hotkeys={0} Schedule={1} Profiles={2} EventLog={3} S
 
 $script:HotkeyStatusText = "Unknown"
 
-# Purpose: Register value.
 function Register-Hotkeys {
     if ($script:isShuttingDown) { return }
     Unregister-Hotkeys
@@ -4056,7 +4180,6 @@ function Register-Hotkeys {
     Write-Log ("Metadata: Hotkeys={0}" -f $script:HotkeyStatusText) "DEBUG" $null "Hotkey"
 }
 
-# Purpose: Unregister value.
 function Unregister-Hotkeys {
     foreach ($id in 1001, 1002, 1003) {
         [HotKeyNative]::UnregisterHotKey([IntPtr]::Zero, $id) | Out-Null
@@ -4065,7 +4188,6 @@ function Unregister-Hotkeys {
     $script:HotkeyStatusText = "Unregistered"
 }
 
-# Purpose: Get value.
 function Get-SystemThemeIsDark {
     $path = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize"
     try {
@@ -4082,7 +4204,6 @@ function Get-SystemThemeIsDark {
     return $false
 }
 
-# Purpose: Get value.
 function Get-ThemePalette([bool]$useDark) {
     if ($useDark) {
         return @{
@@ -4116,7 +4237,6 @@ function Get-ThemePalette([bool]$useDark) {
     }
 }
 
-# Purpose: Apply value.
 function Apply-ThemeToMenuItem($item, $palette) {
     if ($null -eq $item) { return }
     $item.BackColor = $palette.MenuBack
@@ -4138,7 +4258,6 @@ function Apply-ThemeToMenuItem($item, $palette) {
     }
 }
 
-# Purpose: Apply value.
 function Apply-ThemeToMenu($menu, $palette) {
     if ($null -eq $menu) { return }
     $table = New-Object ThemeColorTable
@@ -4157,7 +4276,6 @@ function Apply-ThemeToMenu($menu, $palette) {
     }
 }
 
-# Purpose: Log value.
 function Start-LogSummaryTimer {
     if ($script:LogLevel -ne "DEBUG") {
         Stop-LogSummaryTimer
@@ -4190,14 +4308,12 @@ function Start-LogSummaryTimer {
     }
 }
 
-# Purpose: Log value.
 function Stop-LogSummaryTimer {
     if ($script:LogSummaryTimer -and $script:LogSummaryTimer.Enabled) {
         $script:LogSummaryTimer.Stop()
     }
 }
 
-# Purpose: Apply value.
 function Apply-ThemeToControl($control, $palette, [bool]$useDark) {
     if ($null -eq $control) { return }
     if (-not $useDark -and -not $script:ForceThemeApply) { return }
@@ -4229,7 +4345,6 @@ function Apply-ThemeToControl($control, $palette, [bool]$useDark) {
     }
 }
 
-# Purpose: Update value.
 function Update-ThemePreference {
     $mode = "Auto"
     if (Get-Variable -Name settings -Scope Script -ErrorAction SilentlyContinue) {
@@ -4279,7 +4394,6 @@ function Update-ThemePreference {
     }
 }
 
-# Purpose: New value.
 function New-StateIcon([System.Drawing.Icon]$baseIcon, [System.Drawing.Color]$stateColor) {
     if ($null -eq $baseIcon) { return $null }
     $bitmap = $baseIcon.ToBitmap()
@@ -4307,7 +4421,6 @@ function New-StateIcon([System.Drawing.Icon]$baseIcon, [System.Drawing.Color]$st
     }
 }
 
-# Purpose: Update value.
 function Update-NotifyIconState {
     if ($script:isShuttingDown) { return }
     if ($null -eq $notifyIcon) { return }
@@ -4323,7 +4436,6 @@ function Update-NotifyIconState {
     }
 }
 
-# Purpose: Process value.
 function Process-CommandFile {
     if (-not (Test-Path $script:CommandFilePath)) { return }
     $commands = @()
@@ -4401,7 +4513,6 @@ function Process-CommandFile {
     }
 }
 
-# Purpose: Enable value.
 function Enable-DebugMode {
     $script:PreviousLogLevel = $script:LogLevel
     $script:LogLevel = "DEBUG"
@@ -4423,7 +4534,6 @@ function Enable-DebugMode {
     Write-Log "Debug mode enabled for 10 minutes (all categories forced on)." "INFO" $null "Logging"
 }
 
-# Purpose: Disable value.
 function Disable-DebugMode {
     $script:DebugModeUntil = $null
     if ($script:PreviousLogLevel) {
@@ -4445,20 +4555,17 @@ function Disable-DebugMode {
     try { Request-StatusUpdate } catch { }
 }
 
-# Purpose: Write value.
 function Write-LogSnapshot {
     $summary = "[STATE] Running=$script:isRunning Paused=$script:isPaused Schedule=$(Format-ScheduleStatus) Interval=$($settings.IntervalSeconds)s Profile=$($settings.ActiveProfile)"
     Write-Log $summary "INFO" $null "Log-Snapshot"
 }
 
-# Purpose: Log value.
 function Clear-LogFile {
     if (-not $script:LogPath) { return }
     "" | Set-Content -Path $script:LogPath -Encoding UTF8
     Write-Log "Log file cleared." "INFO" $null "Clear-Log"
 }
 
-# Purpose: reset safe mode helper.
 function Reset-SafeMode {
     $script:safeModeActive = $false
     $script:toggleFailCount = 0
@@ -4466,7 +4573,6 @@ function Reset-SafeMode {
     Write-Log "Safe Mode reset." "INFO" $null "SafeMode"
 }
 
-# Purpose: Invoke value.
 function Invoke-SettingsShownStep([string]$name, [ScriptBlock]$action) {
     try {
         & $action
@@ -4475,7 +4581,6 @@ function Invoke-SettingsShownStep([string]$name, [ScriptBlock]$action) {
     }
 }
 
-# Purpose: Recover value.
 function Recover-Now {
     $script:safeModeActive = $false
     $script:toggleFailCount = 0
@@ -4489,7 +4594,6 @@ function Recover-Now {
     }
 }
 
-# Purpose: Update value.
 function Update-LogLevelMenuChecks {
     if ($null -eq $logLevelMenu) { return }
     foreach ($item in $logLevelMenu.DropDownItems) {
@@ -4499,7 +4603,6 @@ function Update-LogLevelMenuChecks {
     }
 }
 
-# Purpose: Set value.
 function Set-LogLevel([string]$level, [string]$source = "tray") {
     if ([string]::IsNullOrWhiteSpace($level)) { return }
     $upper = $level.ToUpperInvariant()
@@ -4521,7 +4624,6 @@ function Set-LogLevel([string]$level, [string]$source = "tray") {
     if (Get-Command -Name Start-LogSummaryTimer -ErrorAction SilentlyContinue) { Start-LogSummaryTimer }
 }
 
-# Purpose: Get value.
 function Get-StatusStateColor([string]$state) {
     $runningColor = Convert-ColorString ([string]$settings.StatusColorRunning) ([System.Drawing.Color]::Green)
     $pausedColor = Convert-ColorString ([string]$settings.StatusColorPaused) ([System.Drawing.Color]::DarkGoldenrod)
@@ -4531,7 +4633,6 @@ function Get-StatusStateColor([string]$state) {
     return $stoppedColor
 }
 
-# Purpose: Update value.
 function Update-StatusText {
     if ($script:isShuttingDown -or $script:StatusUpdateInProgress) { return }
     $script:StatusUpdateInProgress = $true
@@ -4606,7 +4707,6 @@ function Update-StatusText {
     }
 }
 
-# Purpose: Update settings status badges.
 function Update-StatusBadges {
     $badgesVar = Get-Variable -Name SettingsStatusBadges -Scope Script -ErrorAction SilentlyContinue
     if (-not $badgesVar -or -not $badgesVar.Value) { return }
@@ -4642,7 +4742,6 @@ function Update-StatusBadges {
     & $applyBadge $badges.SafeMode $showSafeMode $safeModeColor
 }
 
-# Purpose: Get value.
 function Get-StatusBalloonText {
     $state = if ([string]::IsNullOrWhiteSpace($script:StatusStateText)) { "Unknown" } else { $script:StatusStateText }
     $showSeconds = ([int]$settings.IntervalSeconds -lt 60)
@@ -4654,7 +4753,6 @@ function Get-StatusBalloonText {
     return "Status: $state`nInterval: $($settings.IntervalSeconds)s`nToggles: $($script:tickCount)`nLast: $lastText`nNext: $nextText`nPaused Until: $pauseUntilText`nSchedule: $scheduleText`nSafe Mode: $safeModeText"
 }
 
-# Purpose: Get value.
 function Get-KeyboardStatus {
     try {
         $caps = [System.Windows.Forms.Control]::IsKeyLocked([System.Windows.Forms.Keys]::CapsLock)
@@ -4666,7 +4764,6 @@ function Get-KeyboardStatus {
     }
 }
 
-# Purpose: Write value.
 function Write-StatusSnapshot([string]$state, [string]$lastText, [string]$nextText, [string]$pauseUntilText, [string]$scheduleText) {
     try {
         if (-not (Test-Path $script:MetaDir)) {
@@ -4701,14 +4798,12 @@ function Write-StatusSnapshot([string]$state, [string]$lastText, [string]$nextTe
     }
 }
 
-# Purpose: Update value.
 function Request-StatusUpdate {
     if ($script:StatusUpdatePending) { return }
     $script:StatusUpdatePending = $true
     $script:StatusUpdateDebounceTimer.Start()
 }
 
-# Purpose: Apply value.
 function Apply-SettingsRuntime {
     $settings.IntervalSeconds = Normalize-IntervalSeconds ([int]$settings.IntervalSeconds)
     $timer.Interval = [int]$settings.IntervalSeconds * 1000
@@ -4739,7 +4834,6 @@ function Apply-SettingsRuntime {
     if ($updateProfilesMenu) { & $updateProfilesMenu }
 }
 
-# Purpose: Show value.
 function Show-Balloon([string]$title, [string]$text, [System.Windows.Forms.ToolTipIcon]$icon) {
     if ($script:isShuttingDown) { return }
     if (-not $settings.QuietMode -and -not $settings.DisableBalloonTips) {
@@ -4747,7 +4841,6 @@ function Show-Balloon([string]$title, [string]$text, [System.Windows.Forms.ToolT
     }
 }
 
-# Purpose: Show first-run tip.
 function Show-FirstRunToast {
     if (-not $settings.ShowFirstRunToast) { return }
     if ($settings.FirstRunToastShown) { return }
@@ -4757,7 +4850,6 @@ function Show-FirstRunToast {
     Show-Balloon "Teams-Always-Green" "Tip: Right-click the tray icon to start, pause, or open Settings." ([System.Windows.Forms.ToolTipIcon]::Info)
 }
 
-# Purpose: Toggle value.
 function Do-Toggle([string]$source) {
     if ($script:isToggling) { return }
     $script:isToggling = $true
@@ -4825,7 +4917,6 @@ $timer.Add_Tick({
     }
 })
 
-# Purpose: Start value.
 function Start-Toggling {
     if ($script:isRunning -and -not $script:isPaused) { return }
     if ($script:safeModeActive) {
@@ -4861,7 +4952,6 @@ function Start-Toggling {
     Update-TrayLabels
 }
 
-# Purpose: Stop value.
 function Stop-Toggling {
     if (-not $script:isRunning -and -not $script:isPaused) { return }
     $timer.Stop()
@@ -4880,7 +4970,6 @@ function Stop-Toggling {
     Update-TrayLabels
 }
 
-# Purpose: Pause value.
 function Pause-Toggling([int]$minutes) {
     if (-not $script:isRunning) {
         [System.Windows.Forms.MessageBox]::Show(
@@ -4904,7 +4993,6 @@ function Pause-Toggling([int]$minutes) {
     Show-Balloon "Teams-Always-Green" "Paused for $minutes minutes." ([System.Windows.Forms.ToolTipIcon]::Info)
 }
 
-# Purpose: Pause value.
 function Pause-UntilDate([DateTime]$until) {
     if (-not $script:isRunning) {
         [System.Windows.Forms.MessageBox]::Show(
@@ -4938,7 +5026,7 @@ function Pause-UntilDate([DateTime]$until) {
     Show-Balloon "Teams-Always-Green" ("Paused until {0}." -f (Format-DateTime $script:pauseUntil)) ([System.Windows.Forms.ToolTipIcon]::Info)
 }
 
-# --- Tray icon + context menu ---
+# --- Tray icon + context menu (build + handlers) ---
 $contextMenu = New-Object System.Windows.Forms.ContextMenuStrip
 $contextMenu.ShowItemToolTips = $false
 $script:TrayMenuOpening = $false
@@ -4961,7 +5049,6 @@ $script:TrayTooltipTimer.Add_Tick({
     } catch { }
 })
 
-# Purpose: Set value.
 function Set-MenuTooltip([System.Windows.Forms.ToolStripItem]$item, [string]$text) {
     if (-not $item) { return }
     $item.ToolTipText = $text
@@ -4979,7 +5066,6 @@ function Set-MenuTooltip([System.Windows.Forms.ToolStripItem]$item, [string]$tex
     })
 }
 
-# Purpose: Update value.
 function Update-TrayLabels {
     $startLabel = if ($script:isRunning -or $script:isPaused) { "Stop" } else { "Start" }
     if ($startStopItem) { $startStopItem.Text = $startLabel }
@@ -5000,7 +5086,6 @@ function Update-TrayLabels {
     }
 }
 
-# Purpose: Invoke value.
 function Invoke-TrayAction([string]$name, [ScriptBlock]$action) {
     try {
         & $action
@@ -5067,7 +5152,6 @@ $statusUpdateTimer.Add_Tick({
     }
 })
 
-# Purpose: Set value.
 function Set-StatusUpdateTimerEnabled([bool]$enabled) {
     if ($enabled) {
         if (-not $statusUpdateTimer.Enabled) { $statusUpdateTimer.Start() }
@@ -5079,7 +5163,6 @@ function Set-StatusUpdateTimerEnabled([bool]$enabled) {
 $intervalMenu = New-Object System.Windows.Forms.ToolStripMenuItem("Interval")
 Set-MenuTooltip $intervalMenu "Change the toggle interval."
 
-# Purpose: Set value.
 function Set-Interval([int]$seconds) {
     $oldInterval = [int]$settings.IntervalSeconds
     $settings.IntervalSeconds = Normalize-IntervalSeconds $seconds
@@ -5090,22 +5173,20 @@ function Set-Interval([int]$seconds) {
     Write-Log "Interval changed from $oldInterval to $($settings.IntervalSeconds) seconds (running=$script:isRunning)." "INFO" $null "Set-Interval"
 }
 
-# Purpose: prompt custom interval seconds helper.
 function Prompt-CustomIntervalSeconds {
     $current = [string]$settings.IntervalSeconds
-    $input = [Microsoft.VisualBasic.Interaction]::InputBox(
+$inputText = [Microsoft.VisualBasic.Interaction]::InputBox(
         "Enter custom interval in seconds (5-86400).",
         "Custom Interval",
         $current
     )
-    if ([string]::IsNullOrWhiteSpace($input)) { return $null }
+if ([string]::IsNullOrWhiteSpace($inputText)) { return $null }
     $value = 0
-    if (-not [int]::TryParse($input, [ref]$value)) { return $null }
+if (-not [int]::TryParse($inputText, [ref]$value)) { return $null }
     if ($value -le 0) { return $null }
     return (Normalize-IntervalSeconds $value)
 }
 
-# Purpose: New value.
 function New-IntervalItem([string]$label, [int]$seconds) {
     $item = New-Object System.Windows.Forms.ToolStripMenuItem($label)
     $item.Tag = $seconds
@@ -5153,7 +5234,6 @@ $pauseMenu = New-Object System.Windows.Forms.ToolStripMenuItem("Pause")
 Set-MenuTooltip $pauseMenu "Pause toggling for a duration or until a time."
 $script:pauseResumeItem = $null
 
-# Purpose: Show value.
 function Show-PauseUntilDialog {
     $form = New-Object System.Windows.Forms.Form
     $form.Text = "Pause Until"
@@ -5204,7 +5284,6 @@ function Show-PauseUntilDialog {
     $form.ShowDialog() | Out-Null
 }
 
-# Purpose: Pause value.
 function Rebuild-PauseMenu {
     $pauseMenu.DropDownItems.Clear()
     foreach ($mins in Get-PauseDurations) {
@@ -5328,11 +5407,24 @@ $applyRunOnceOnLaunch = {
 $profilesMenu = New-Object System.Windows.Forms.ToolStripMenuItem("Profiles")
 Set-MenuTooltip $profilesMenu "Switch between profiles."
 
-# Purpose: Switch value.
 function Switch-ToProfile([string]$name) {
     if (-not ((Get-ObjectKeys $settings.Profiles) -contains $name)) { return }
+    if (-not (Confirm-ProfileSwitch $name $settings.Profiles[$name])) { return }
+    $profile = Migrate-ProfileSnapshot $settings.Profiles[$name]
+    $validation = Test-ProfileSnapshot $profile
+    if (-not $validation.Ok) {
+        $lastGood = Get-ProfileLastGood $name
+        if ($null -ne $lastGood) {
+            Write-Log "Profile '$name' invalid; using last known good snapshot." "WARN" $null "Profiles"
+            $profile = Migrate-ProfileSnapshot $lastGood
+        } else {
+            Write-Log ("Profile switch aborted: {0}" -f $validation.Message) "WARN" $null "Profiles"
+            return
+        }
+    }
     $settings.ActiveProfile = $name
-    $settings = Apply-ProfileSnapshot $settings $settings.Profiles[$name]
+    $settings = Apply-ProfileSnapshot $settings $profile
+    Update-ProfileLastGood $name $profile
     Save-Settings $settings
     Apply-SettingsRuntime
     if ($updateProfilesMenu) { & $updateProfilesMenu }
@@ -5365,26 +5457,31 @@ $runOnceNowItem.Add_Click({
 })
 Update-TrayLabels
 
-# --- Settings dialog creation and event wiring ---
-# Purpose: Show value.
+# --- Settings dialog creation and event wiring (build/bind) ---
 function Show-SettingsDialog {
     Write-Log "UI: Settings open requested." "DEBUG" $null "Settings-Dialog"
     try {
         $script:SettingsDialogStart = Get-Date
         if ($script:SettingsForm -and -not $script:SettingsForm.IsDisposed) {
+            $reuseOk = $true
             try {
+                $settingsIconPath = Join-Path (Split-Path -Path $scriptPath -Parent) "Meta\\Icons\\Settings_Icon.ico"
+                Set-FormTaskbarIcon $script:SettingsForm $settingsIconPath
                 if (-not $script:SettingsForm.Visible) {
                     $script:SettingsForm.Show()
                 }
                 $script:SettingsForm.WindowState = [System.Windows.Forms.FormWindowState]::Normal
                 $script:SettingsForm.BringToFront()
                 $script:SettingsForm.Activate()
-                $settingsIconPath = Join-Path (Split-Path -Path $scriptPath -Parent) "Meta\\Icons\\Settings_Icon.ico"
-                Set-FormTaskbarIcon $script:SettingsForm $settingsIconPath
             } catch {
                 Write-Log "UI: Settings open failed while reusing existing form." "ERROR" $_.Exception "Settings-Dialog"
+                try {
+                    $script:SettingsForm.Dispose()
+                } catch { }
+                $script:SettingsForm = $null
+                $reuseOk = $false
             }
-            return
+            if ($reuseOk) { return }
         }
         $form = New-Object System.Windows.Forms.Form
         $script:SettingsForm = $form
@@ -7707,7 +7804,7 @@ $clearLogButton = New-Object System.Windows.Forms.Button
 
     $profileLayout = New-Object System.Windows.Forms.TableLayoutPanel
     $profileLayout.ColumnCount = 2
-    $profileLayout.RowCount = 3
+    $profileLayout.RowCount = 5
     $profileLayout.AutoSize = $true
     $profileLayout.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::AutoSize)))
     $profileLayout.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Percent, 100)))
@@ -7725,6 +7822,18 @@ $clearLogButton = New-Object System.Windows.Forms.Button
     $profileHintLabel.Text = "Changes apply to the selected profile."
     $profileHintLabel.AutoSize = $true
     $profileHintLabel.ForeColor = [System.Drawing.Color]::Gray
+
+    $script:profileReadOnlyBox = New-Object System.Windows.Forms.CheckBox
+    $script:profileReadOnlyBox.Text = "Read-only"
+    $script:profileReadOnlyBox.AutoSize = $true
+    $script:profileReadOnlyBox.Tag = "Profile Read-only"
+
+    $script:profileDirtyLabel = New-Object System.Windows.Forms.Label
+    $script:profileDirtyLabel.Text = "Unsaved profile changes"
+    $script:profileDirtyLabel.AutoSize = $true
+    $script:profileDirtyLabel.ForeColor = [System.Drawing.Color]::DarkOrange
+    $script:profileDirtyLabel.Visible = $false
+    $script:profileDirtyLabel.Tag = "Profile Dirty"
 
     $profileActionsLayout = New-Object System.Windows.Forms.TableLayoutPanel
     $profileActionsLayout.ColumnCount = 1
@@ -7813,7 +7922,9 @@ $clearLogButton = New-Object System.Windows.Forms.Button
     $profileLayout.Controls.Add($profileLabel, 0, 0)
     $profileLayout.Controls.Add($script:profileBox, 1, 0)
     $profileLayout.Controls.Add($profileHintLabel, 1, 1)
-    $profileLayout.Controls.Add($profileActionsLayout, 1, 2)
+    $profileLayout.Controls.Add($script:profileReadOnlyBox, 1, 2)
+    $profileLayout.Controls.Add($script:profileDirtyLabel, 1, 3)
+    $profileLayout.Controls.Add($profileActionsLayout, 1, 4)
     $profileGroup.Controls.Add($profileLayout)
 
     $script:refreshProfileList = {
@@ -7826,6 +7937,14 @@ $clearLogButton = New-Object System.Windows.Forms.Button
         } elseif ($script:profileBox.Items.Count -gt 0) {
             $script:profileBox.SelectedIndex = 0
         }
+        if ($script:profileReadOnlyBox) {
+            $profile = $null
+            if (-not [string]::IsNullOrWhiteSpace($selected) -and (Get-ObjectKeys $settings.Profiles) -contains $selected) {
+                $profile = $settings.Profiles[$selected]
+            }
+            $script:profileReadOnlyBox.Checked = (Get-ProfileReadOnly $profile)
+        }
+        if ($script:UpdateProfileDirtyIndicator) { & $script:UpdateProfileDirtyIndicator }
     }
 
     & $script:refreshProfileList
@@ -7836,6 +7955,15 @@ $clearLogButton = New-Object System.Windows.Forms.Button
         $newName = [string]$script:profileBox.SelectedItem
         if (-not ((Get-ObjectKeys $settings.Profiles) -contains $newName)) { return }
         if ($settings.ActiveProfile -eq $newName) { return }
+        $previousName = [string]$settings.ActiveProfile
+        if (-not (Confirm-ProfileSwitch $newName $settings.Profiles[$newName])) {
+            $script:SettingsIsApplying = $true
+            if (-not [string]::IsNullOrWhiteSpace($previousName) -and $script:profileBox.Items.Contains($previousName)) {
+                $script:profileBox.SelectedItem = $previousName
+            }
+            $script:SettingsIsApplying = $false
+            return
+        }
         $sw = [System.Diagnostics.Stopwatch]::StartNew()
         if (-not ($settings.Profiles -is [hashtable])) {
             $table = @{}
@@ -7846,6 +7974,7 @@ $clearLogButton = New-Object System.Windows.Forms.Button
         $settings.ActiveProfile = $newName
         $settings = Apply-ProfileSnapshot $settings $settings.Profiles[$newName]
         if ($script:ApplySettingsToControls) { & $script:ApplySettingsToControls $settings }
+        if ($script:profileReadOnlyBox) { $script:profileReadOnlyBox.Checked = (Get-ProfileReadOnly $settings.Profiles[$newName]) }
         Set-SettingsDirty $false
         Save-Settings $settings
         if ($updateProfilesMenu) { & $updateProfilesMenu }
@@ -7882,15 +8011,39 @@ $clearLogButton = New-Object System.Windows.Forms.Button
         $profile["HotkeyStartStop"] = [string]$script:hotkeyStartStopBox.Text
         $profile["HotkeyPauseResume"] = [string]$script:hotkeyPauseResumeBox.Text
         $profile["LogMaxBytes"] = [int]($script:logMaxBox.Value * 1024)
+        $profile["ProfileSchemaVersion"] = $script:ProfileSchemaVersion
+        $profile["ReadOnly"] = if ($script:profileReadOnlyBox) { [bool]$script:profileReadOnlyBox.Checked } else { $false }
         return $profile
+    }
+
+    $confirmProfileWritable = {
+        param([string]$name, [string]$action)
+        if ([string]::IsNullOrWhiteSpace($name)) { return $false }
+        if (-not ((Get-ObjectKeys $settings.Profiles) -contains $name)) { return $true }
+        $isReadOnly = Get-ProfileReadOnly $settings.Profiles[$name]
+        if ($isReadOnly -and ($action -eq "Save" -or $action -eq "Overwrite")) {
+            if ($script:profileReadOnlyBox -and -not $script:profileReadOnlyBox.Checked) { return $true }
+        }
+        if ($isReadOnly) {
+            [System.Windows.Forms.MessageBox]::Show(
+                "Profile '$name' is read-only and cannot be modified ($action).",
+                "Read-only Profile",
+                [System.Windows.Forms.MessageBoxButtons]::OK,
+                [System.Windows.Forms.MessageBoxIcon]::Information
+            ) | Out-Null
+            return $false
+        }
+        return $true
     }
 
     $saveProfileButton.Add_Click({
         if ($script:profileBox.SelectedItem -eq $null) { return }
         $sw = [System.Diagnostics.Stopwatch]::StartNew()
         $name = [string]$script:profileBox.SelectedItem
+        if (-not (& $confirmProfileWritable $name "Save")) { return }
         $settings.Profiles[$name] = & $script:getProfileFromControls
         $settings.ActiveProfile = $name
+        Update-ProfileLastGood $name (Migrate-ProfileSnapshot $settings.Profiles[$name])
         Save-Settings $settings
         if ($updateProfilesMenu) { & $updateProfilesMenu }
         $sw.Stop()
@@ -7904,6 +8057,7 @@ $clearLogButton = New-Object System.Windows.Forms.Button
         $sw = [System.Diagnostics.Stopwatch]::StartNew()
         $name = $name.Trim()
         if ((Get-ObjectKeys $settings.Profiles) -contains $name) {
+            if (-not (& $confirmProfileWritable $name "Overwrite")) { return }
             $result = [System.Windows.Forms.MessageBox]::Show(
                 "Profile '$name' exists. Overwrite?",
                 "Overwrite Profile",
@@ -7914,6 +8068,7 @@ $clearLogButton = New-Object System.Windows.Forms.Button
         }
         $settings.Profiles[$name] = & $script:getProfileFromControls
         $settings.ActiveProfile = $name
+        Update-ProfileLastGood $name (Migrate-ProfileSnapshot $settings.Profiles[$name])
         Save-Settings $settings
         if ($updateProfilesMenu) { & $updateProfilesMenu }
         $sw.Stop()
@@ -7946,6 +8101,7 @@ $clearLogButton = New-Object System.Windows.Forms.Button
         $profileCopy = $sourceProfile | ConvertTo-Json -Depth 6 | ConvertFrom-Json
         $settings.Profiles[$name] = $profileCopy
         $settings.ActiveProfile = $name
+        Update-ProfileLastGood $name (Migrate-ProfileSnapshot $settings.Profiles[$name])
         Save-Settings $settings
         & $script:refreshProfileList
         if ($updateProfilesMenu) { & $updateProfilesMenu }
@@ -7958,6 +8114,7 @@ $clearLogButton = New-Object System.Windows.Forms.Button
         $sw = [System.Diagnostics.Stopwatch]::StartNew()
         $name = [string]$script:profileBox.SelectedItem
         if (-not ((Get-ObjectKeys $settings.Profiles) -contains $name)) { return }
+        if (-not (Confirm-ProfileSwitch $name $settings.Profiles[$name])) { return }
         Write-Log "UI: ---------- Profile Load ----------" "DEBUG" $null "Profiles"
         $merged = [pscustomobject]@{}
         foreach ($prop in $settings.PSObject.Properties.Name) {
@@ -7966,6 +8123,7 @@ $clearLogButton = New-Object System.Windows.Forms.Button
         $merged = Apply-ProfileSnapshot $merged $settings.Profiles[$name]
         & $applySettingsToControls $merged
         $settings.ActiveProfile = $name
+        if ($script:profileReadOnlyBox) { $script:profileReadOnlyBox.Checked = (Get-ProfileReadOnly $settings.Profiles[$name]) }
         Set-SettingsDirty $true
         if ($updateProfilesMenu) { & $updateProfilesMenu }
         $sw.Stop()
@@ -7988,6 +8146,7 @@ $clearLogButton = New-Object System.Windows.Forms.Button
         }
         $settings.Profiles[$name] = & $script:getProfileFromControls
         $settings.ActiveProfile = $name
+        Update-ProfileLastGood $name (Migrate-ProfileSnapshot $settings.Profiles[$name])
         Save-Settings $settings
         & $script:refreshProfileList
         if ($updateProfilesMenu) { & $updateProfilesMenu }
@@ -7999,6 +8158,7 @@ $clearLogButton = New-Object System.Windows.Forms.Button
         if ($script:profileBox.SelectedItem -eq $null) { return }
         $sw = [System.Diagnostics.Stopwatch]::StartNew()
         $oldName = [string]$script:profileBox.SelectedItem
+        if (-not (& $confirmProfileWritable $oldName "Rename")) { return }
         $name = [Microsoft.VisualBasic.Interaction]::InputBox("Enter a new name for '$oldName':", "Rename Profile", $oldName)
         if ([string]::IsNullOrWhiteSpace($name)) { return }
         $name = $name.Trim()
@@ -8019,6 +8179,11 @@ $clearLogButton = New-Object System.Windows.Forms.Button
         }
         $settings.Profiles[$name] = $settings.Profiles[$oldName]
         $settings.Profiles.Remove($oldName)
+        $lastGood = Get-ProfileLastGood $oldName
+        if ($null -ne $lastGood) {
+            Update-ProfileLastGood $name $lastGood
+            Remove-ProfileLastGood $oldName
+        }
         if ($settings.ActiveProfile -eq $oldName) { $settings.ActiveProfile = $name }
         Save-Settings $settings
         & $script:refreshProfileList
@@ -8031,6 +8196,7 @@ $clearLogButton = New-Object System.Windows.Forms.Button
         if ($script:profileBox.SelectedItem -eq $null) { return }
         $sw = [System.Diagnostics.Stopwatch]::StartNew()
         $name = [string]$script:profileBox.SelectedItem
+        if (-not (& $confirmProfileWritable $name "Delete")) { return }
         if ((Get-ObjectKeys $settings.Profiles).Count -le 1) {
             [System.Windows.Forms.MessageBox]::Show(
                 "At least one profile must remain.",
@@ -8053,6 +8219,7 @@ $clearLogButton = New-Object System.Windows.Forms.Button
             $settings.Profiles = $table
         }
         $settings.Profiles.Remove($name)
+        Remove-ProfileLastGood $name
         if ($settings.ActiveProfile -eq $name) {
             $profileKeys = @(Get-ObjectKeys $settings.Profiles)
             if ($profileKeys.Count -gt 0) { $settings.ActiveProfile = $profileKeys[0] }
@@ -8107,10 +8274,14 @@ $clearLogButton = New-Object System.Windows.Forms.Button
                 $importProfile = $raw
             }
             if ($null -eq $importProfile) { throw "Invalid profile file." }
+            $importProfile = Migrate-ProfileSnapshot $importProfile
+            $validation = Test-ProfileSnapshot $importProfile
+            if (-not $validation.Ok) { throw ("Profile validation failed: {0}" -f $validation.Message) }
             $name = [Microsoft.VisualBasic.Interaction]::InputBox("Profile name:", "Import Profile", $defaultName)
             if ([string]::IsNullOrWhiteSpace($name)) { return }
             $name = $name.Trim()
             if ((Get-ObjectKeys $settings.Profiles) -contains $name) {
+                if (-not (& $confirmProfileWritable $name "Overwrite")) { return }
                 $result = [System.Windows.Forms.MessageBox]::Show(
                     "Profile '$name' exists. Overwrite?",
                     "Overwrite Profile",
@@ -8121,6 +8292,7 @@ $clearLogButton = New-Object System.Windows.Forms.Button
             }
             $settings.Profiles[$name] = $importProfile
             $settings.ActiveProfile = $name
+            Update-ProfileLastGood $name (Migrate-ProfileSnapshot $settings.Profiles[$name])
             Save-Settings $settings
             & $script:refreshProfileList
             if ($updateProfilesMenu) { & $updateProfilesMenu }
@@ -8417,17 +8589,21 @@ $clearLogButton = New-Object System.Windows.Forms.Button
 
     $script:UpdateLastSavedLabel = {
         param($time)
+        $suffix = ""
+        if ($script:LastSettingsSaveOk -eq $false -and -not [string]::IsNullOrWhiteSpace($script:LastSettingsSaveMessage)) {
+            $suffix = " (last save failed: $script:LastSettingsSaveMessage)"
+        }
         if ($time -is [DateTime]) {
-            $script:LastSavedLabel.Text = "Last saved: $(Format-DateTime $time)"
+            $script:LastSavedLabel.Text = "Last saved: $(Format-DateTime $time)$suffix"
             return
         }
         if (Test-Path $settingsPath) {
             try {
-                $script:LastSavedLabel.Text = "Last saved: $(Format-DateTime (Get-Item -Path $settingsPath).LastWriteTime)"
+                $script:LastSavedLabel.Text = "Last saved: $(Format-DateTime (Get-Item -Path $settingsPath).LastWriteTime)$suffix"
                 return
             } catch { }
         }
-        $script:LastSavedLabel.Text = "Last saved: Never"
+        $script:LastSavedLabel.Text = "Last saved: Never$suffix"
     }
     $script:SetDirty = {
         param([bool]$value)
@@ -8437,6 +8613,20 @@ $clearLogButton = New-Object System.Windows.Forms.Button
         if ($script:SettingsOkButton) { $script:SettingsOkButton.Enabled = $value }
         if ($script:SettingsDirtyLabel) { $script:SettingsDirtyLabel.Visible = $value }
         if ($value -and $script:SettingsSaveLabel) { $script:SettingsSaveLabel.Visible = $false }
+        $dirtyVar = Get-Variable -Name UpdateProfileDirtyIndicator -Scope Script -ErrorAction SilentlyContinue
+        if ($dirtyVar -and $dirtyVar.Value -is [scriptblock]) { & $dirtyVar.Value }
+    }
+
+    $script:UpdateProfileDirtyIndicator = {
+        if (-not $script:profileDirtyLabel) { return }
+        if (-not $settings) { $script:profileDirtyLabel.Visible = $false; return }
+        $name = [string]$settings.ActiveProfile
+        if ([string]::IsNullOrWhiteSpace($name)) { $script:profileDirtyLabel.Visible = $false; return }
+        if (-not ((Get-ObjectKeys $settings.Profiles) -contains $name)) { $script:profileDirtyLabel.Visible = $false; return }
+        $current = Get-ProfileSnapshot $settings
+        $stored = Migrate-ProfileSnapshot $settings.Profiles[$name]
+        $diff = Get-ProfileDiffSummary $current $stored
+        $script:profileDirtyLabel.Visible = (-not [string]::IsNullOrWhiteSpace($diff))
     }
 
     $runSettingsAction = {
@@ -8577,6 +8767,7 @@ $clearLogButton = New-Object System.Windows.Forms.Button
 
     foreach ($ctrl in @(
         $script:profileBox,
+        $script:profileReadOnlyBox,
         $script:intervalBox, $script:startWithWindowsBox, $script:openSettingsLastTabBox, $script:rememberChoiceBox, $script:showFirstRunToastBox, $script:startOnLaunchBox, $script:quietModeBox, $script:dateTimeFormatBox, $script:dateTimeFormatPresetBox, $script:useSystemDateTimeFormatBox, $script:systemDateTimeFormatModeBox,
         $script:tooltipStyleBox, $script:disableBalloonBox, $script:themeModeBox, $script:fontSizeBox, $script:settingsFontSizeBox, $script:compactModeBox, $script:toggleCountBox, $script:LastTogglePicker, $script:runOnceOnLaunchBox, $script:pauseUntilBox,
         $script:pauseDurationsBox, $script:scheduleOverrideBox, $script:scheduleEnabledBox, $script:scheduleStartBox, $script:scheduleEndBox, $script:scheduleWeekdaysBox,
@@ -8672,6 +8863,7 @@ $clearLogButton = New-Object System.Windows.Forms.Button
         "Scrub Diagnostics" = "Redact usernames and local paths in diagnostics outputs."
         "Report Issue" = "Export diagnostics plus the last 200 log lines."
         "Export/Import Settings" = "Save settings to a file or load settings from a file."
+        "Profile Read-only" = "Lock a profile to prevent edits. Turn off to allow changes."
     }
 
     $applyTooltips = {
@@ -9791,7 +9983,6 @@ $clearLogButton = New-Object System.Windows.Forms.Button
     }
 }
 
-# Purpose: Ensure value.
 function Ensure-SettingsDialogVisible {
     Write-Log "UI: Ensure settings visible called." "DEBUG" $null "Settings-Dialog"
     if ($script:SettingsForm -and -not $script:SettingsForm.IsDisposed -and $script:SettingsForm.Visible) {
@@ -9830,7 +10021,6 @@ function Ensure-SettingsDialogVisible {
     $script:DeferredSettingsTimer.Start()
 }
 
-# Purpose: Show value.
 function Show-SettingsAlreadyOpenNotice {
     $topForm = New-Object System.Windows.Forms.Form
     $topForm.StartPosition = "Manual"
@@ -9944,7 +10134,6 @@ $logsMenu.DropDownItems.Add($logLevelMenu) | Out-Null
 $logsMenu.DropDownItems.Add($clearLogItem) | Out-Null
 $logsMenu.DropDownItems.Add($diagnosticsReportItem) | Out-Null
 $logsMenu.DropDownItems.Add($openLogsFolderItem) | Out-Null
-# Purpose: Show value.
 function Show-LogTailDialog {
     $form = New-Object System.Windows.Forms.Form
     $form.Text = "Log (Tail)"
@@ -10007,7 +10196,6 @@ function Show-LogTailDialog {
     [void]$form.ShowDialog()
 }
 
-# Purpose: Show value.
 function Show-HistoryDialog {
     $form = New-Object System.Windows.Forms.Form
     $form.Text = "History"
@@ -10228,7 +10416,6 @@ function Show-HistoryDialog {
     [void]$form.ShowDialog()
 }
 
-# Purpose: soft restart helper.
 function Soft-Restart {
     if ($script:CleanupDone -or $script:isShuttingDown) { return }
     Write-Log "Tray action: Soft Restart" "DEBUG" $null "Tray-Action"
@@ -10469,7 +10656,6 @@ $contextMenu.Add_Closed({
     try { $script:TrayMenuToolTip.Hide($contextMenu) } catch { }
 })
 
-# Purpose: Refresh value.
 function Refresh-TrayMenu {
     try { Rebuild-PauseMenu } catch { }
     try { if ($updateQuickSettingsChecks) { & $updateQuickSettingsChecks } } catch { }
@@ -10531,7 +10717,6 @@ $notifyIcon.Visible = $true
 Write-Log "Tray icon visible (startup complete)." "INFO" $null "Tray"
 try { Show-FirstRunToast } catch { }
 
-# Purpose: Show value.
 function Show-StartPrompt {
     $form = New-Object System.Windows.Forms.Form
     $form.Text = "Teams-Always-Green"
@@ -10629,4 +10814,55 @@ try {
 } catch {
     Write-Log "Cleanup failed." "ERROR" $_.Exception "Cleanup"
 }
+
+function Test-DirectoryWritable([string]$path) {
+    if ([string]::IsNullOrWhiteSpace($path)) { return $false }
+    try {
+        if (-not (Test-Path $path)) {
+            New-Item -ItemType Directory -Path $path -Force | Out-Null
+        }
+        $testFile = Join-Path $path ("~write_test_{0}.tmp" -f ([Guid]::NewGuid().ToString("N")))
+        Set-Content -Path $testFile -Value "test" -Encoding ASCII
+        Remove-Item -Path $testFile -Force
+        return $true
+    } catch {
+        return $false
+    }
+}
+
+function Ensure-Directory([string]$path, [string]$label = "Directory") {
+    if ([string]::IsNullOrWhiteSpace($path)) { return $false }
+    try {
+        if (-not (Test-Path $path)) {
+            New-Item -ItemType Directory -Path $path -Force | Out-Null
+        }
+        return $true
+    } catch {
+        Write-PathWarningNow "$label missing and could not be created: $path"
+        return $false
+    }
+}
+
+function Resolve-DirectoryOrDefault([string]$inputPath, [string]$defaultPath, [string]$label) {
+    $resolved = Convert-FromRelativePath $inputPath
+    if ([string]::IsNullOrWhiteSpace($resolved)) { $resolved = $defaultPath }
+    $resolved = Normalize-PathText $resolved
+    Ensure-Directory $resolved $label | Out-Null
+    if (-not (Test-DirectoryWritable $resolved)) {
+        Write-PathWarningNow "$label directory not writable: $resolved. Falling back to $defaultPath."
+        $resolved = $defaultPath
+        Ensure-Directory $resolved $label | Out-Null
+    }
+    return $resolved
+}
+
+function Ensure-AppFolders {
+    $folders = @($script:FolderNames.Logs, $script:FolderNames.Settings, $script:FolderNames.Meta, $script:FolderNames.Debug, $script:FolderNames.Script)
+    foreach ($folder in $folders) {
+        $path = Join-Path $script:DataRoot $folder
+        Ensure-Directory $path $folder | Out-Null
+    }
+}
+
+$script:MetaDir = Join-Path $script:DataRoot $script:FolderNames.Meta
 
