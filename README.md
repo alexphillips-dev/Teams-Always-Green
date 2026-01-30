@@ -1,11 +1,11 @@
-# <img src="https://raw.githubusercontent.com/alexphillips-dev/Teams-Always-Green/refs/heads/main/Meta/Icons/Tray_Icon.ico" alt="Teams Always Green" width="28" height="28"> Teams Always Green
+﻿# <img src="https://raw.githubusercontent.com/alexphillips-dev/Teams-Always-Green/refs/heads/main/Meta/Icons/Tray_Icon.ico" alt="Teams Always Green" width="28" height="28"> Teams Always Green
 
 [![Release](https://img.shields.io/github/v/release/alexphillips-dev/Teams-Always-Green?label=release&sort=semver)](https://github.com/alexphillips-dev/Teams-Always-Green/releases/latest)
 
-Keep your Microsoft Teams status active without babysitting your keyboard. Teams Always Green is a lightweight Windows tray app that gently toggles Scroll Lock on a schedule you control — so your status stays green while you focus on real work.
+Keep your Microsoft Teams status active without babysitting your keyboard. Teams Always Green is a lightweight Windows tray app that gently toggles Scroll Lock on a schedule you control -- so your status stays green while you focus on real work.
 
-**Why you’ll like it**
-- **Set‑and‑forget:** Runs quietly in the tray.
+**Why you'll like it**
+- **Set-and-forget:** Runs quietly in the tray.
 - **Smart scheduling:** Work hours, pauses, and quick overrides.
 - **Profiles:** Switch configurations in seconds.
 - **Helpful logging:** Debug detail when you need it.
@@ -14,11 +14,34 @@ Keep your Microsoft Teams status active without babysitting your keyboard. Teams
 
 ## Quick Setup (Recommended)
 
+**One-line install (PowerShell):**
+
+```powershell
+irm https://raw.githubusercontent.com/alexphillips-dev/Teams-Always-Green/main/QuickSetup.ps1 | iex
+```
+
 1) Download `QuickSetup.cmd` from the repo.  
-2) Double‑click it.  
+2) Double-click it.  
 3) Choose your install folder (default: `Documents\Teams Always Green`).
 
 The installer will download the main script and create required folders and shortcuts.
+
+---
+
+## Quick Start (3 steps)
+
+1) **Install** with Quick Setup.  
+2) **Start** from the tray icon.  
+3) **Customize** in Settings (schedule, profiles, hotkeys, logging).
+
+---
+
+## Common Setups
+
+- **Work hours only:** Enable Schedule and set Start/End time.
+- **No distractions:** Disable balloon tips + use Quiet Mode.
+- **Multiple profiles:** Create "Office" and "Off-hours" profiles and switch from tray.
+- **Hands-free:** Use hotkeys to Start/Stop or Pause without opening Settings.
 
 ---
 
@@ -37,7 +60,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File "Script\Teams Always Gre
 
 ## Usage
 
-- Right‑click the tray icon for Start/Stop, Settings, History, Restart, and more.
+- Right-click the tray icon for Start/Stop, Settings, History, Restart, and more.
 - Use **Settings** for profiles, scheduling, hotkeys, appearance, and logging.
 
 ---
@@ -67,9 +90,17 @@ Key files:
 
 ## Troubleshooting
 
-- **App won’t appear:** Check `Debug\*.vbs.log` and `Logs\*.log`.  
+- **App won't appear:** Check `Debug\*.vbs.log` and `Logs\*.log`.  
 - **Settings not saving:** Ensure the `Settings` folder is writable.  
 - **Weird behavior after updates:** Use **Restart** from the tray.
+
+---
+
+## Security & Privacy
+
+- **Local-only behavior:** No data collection.
+- **Network access:** Used only for update checks (if enabled).
+- **Files created:** Logs and settings remain inside your install folder.
 
 ---
 
