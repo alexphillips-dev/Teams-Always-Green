@@ -398,8 +398,11 @@ foreach ($file in $filesToDownload) {
         if ($expected) {
             $actual = Get-FileHashHex $targetPath
             if (-not $actual -or ($actual.ToLowerInvariant() -ne [string]$expected.ToLowerInvariant())) {
+                Write-SetupLog ("Integrity expected: {0}" -f $expected)
+                Write-SetupLog ("Integrity actual:   {0}" -f $actual)
                 $matched = $false
                 if (Is-TextFile $file.Path) {
+                    Write-SetupLog ("Integrity text file: {0}" -f $file.Path)
                     $altLf = Get-NormalizedBytesHash $targetPath "LF"
                     if ($altLf -and ($altLf.ToLowerInvariant() -eq [string]$expected.ToLowerInvariant())) {
                         $matched = $true
@@ -409,9 +412,13 @@ foreach ($file in $filesToDownload) {
                             $matched = $true
                         }
                     }
+                    Write-SetupLog ("Integrity alt LF:   {0}" -f $altLf)
+                    Write-SetupLog ("Integrity alt CRLF: {0}" -f $altCrLf)
+                } else {
+                    Write-SetupLog ("Integrity binary file: {0}" -f $file.Path)
                 }
                 if (-not $matched) {
-                    Show-SetupError ("Integrity check failed for {0}." -f $file.Path)
+                    Show-SetupError ("Integrity check failed for {0}. See log for hash details." -f $file.Path)
                     exit 1
                 }
                 Write-SetupLog ("Integrity check matched after line-ending normalization: {0}" -f $file.Path)
