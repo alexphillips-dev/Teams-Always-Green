@@ -4,7 +4,10 @@
 Add-Type -AssemblyName System.Windows.Forms
 $ErrorActionPreference = 'Stop'
 
-$logPath = Join-Path $env:TEMP "TeamsAlwaysGreen-QuickSetup.log"
+$tempRoot = $env:TEMP
+if ([string]::IsNullOrWhiteSpace($tempRoot)) { $tempRoot = $env:TMP }
+if ([string]::IsNullOrWhiteSpace($tempRoot)) { $tempRoot = [System.IO.Path]::GetTempPath() }
+$logPath = Join-Path $tempRoot "TeamsAlwaysGreen-QuickSetup.log"
 function Write-SetupLog([string]$message) {
     try {
         $line = "[{0}] {1}" -f (Get-Date).ToString("yyyy-MM-dd HH:mm:ss"), $message
