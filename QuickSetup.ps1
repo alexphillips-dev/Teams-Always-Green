@@ -655,10 +655,26 @@ if (-not $portableMode) {
 Write-Host "Installed Teams Always Green to: $installPath"
 Write-Host "Setup log: $logPath"
 
-    $action = Show-SetupSummary -installPath $installPath -integrityStatus $integrityStatus -portableMode $portableMode -shortcutsCreated $shortcutsCreated -logPath $logPath
-    if ($action -eq "Launch") {
-        Start-Process "$env:WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe" -ArgumentList "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$targetScript`"" -WorkingDirectory $installPath
-    } elseif ($action -eq "Settings") {
+$action = Show-SetupSummary -installPath $installPath -integrityStatus $integrityStatus -portableMode $portableMode -shortcutsCreated $shortcutsCreated -logPath $logPath
+if ($action -eq "Launch") {
+    if (-not (Test-Path $targetScript)) {
+        Show-SetupError "Launch failed: app script not found at $targetScript"
+    } else {
+        $launchArgs = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$targetScript`""
+        try {
+            $proc = Start-Process "$env:WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe" -ArgumentList $launchArgs -WorkingDirectory $installPath -PassThru -ErrorAction Stop
+            Write-SetupLog ("Launch started. PID={0}" -f $proc.Id)
+        } catch {
+            Write-SetupLog ("Launch failed (hidden): {0}" -f $_.Exception.Message)
+            try {
+                $proc = Start-Process "$env:WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe" -ArgumentList ("-NoProfile -ExecutionPolicy Bypass -File `"$targetScript`"") -WorkingDirectory $installPath -PassThru -ErrorAction Stop
+                Write-SetupLog ("Launch started (visible). PID={0}" -f $proc.Id)
+            } catch {
+                Show-SetupError ("Launch failed: {0}" -f $_.Exception.Message)
+            }
+        }
+    }
+} elseif ($action -eq "Settings") {
         Start-Process "$env:WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe" -ArgumentList "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$targetScript`" -SettingsOnly" -WorkingDirectory $installPath
     } elseif ($action -eq "Folder") {
         Start-Process "explorer.exe" $installPath
