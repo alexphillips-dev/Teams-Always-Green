@@ -286,11 +286,12 @@ Setup Log: $logPath
     $buttonClose.Width = 90
     $buttonClose.Location = New-Object System.Drawing.Point(446, 175)
 
-    $form.Tag = "Close"
-    $buttonLaunch.Add_Click({ $form.Tag = "Launch"; $form.Close() })
-    $buttonSettings.Add_Click({ $form.Tag = "Settings"; $form.Close() })
-    $buttonFolder.Add_Click({ $form.Tag = "Folder"; $form.Close() })
-    $buttonClose.Add_Click({ $form.Tag = "Close"; $form.Close() })
+    $buttonLaunch.DialogResult = [System.Windows.Forms.DialogResult]::Yes
+    $buttonSettings.DialogResult = [System.Windows.Forms.DialogResult]::Retry
+    $buttonFolder.DialogResult = [System.Windows.Forms.DialogResult]::Ignore
+    $buttonClose.DialogResult = [System.Windows.Forms.DialogResult]::Cancel
+    $form.AcceptButton = $buttonLaunch
+    $form.CancelButton = $buttonClose
 
     $form.Controls.Add($title)
     $form.Controls.Add($summary)
@@ -299,8 +300,13 @@ Setup Log: $logPath
     $form.Controls.Add($buttonFolder)
     $form.Controls.Add($buttonClose)
     $form.TopMost = $true
-    $form.ShowDialog() | Out-Null
-    return [string]$form.Tag
+    $result = $form.ShowDialog()
+    switch ($result) {
+        ([System.Windows.Forms.DialogResult]::Yes) { return "Launch" }
+        ([System.Windows.Forms.DialogResult]::Retry) { return "Settings" }
+        ([System.Windows.Forms.DialogResult]::Ignore) { return "Folder" }
+        default { return "Close" }
+    }
 }
 
 Write-SetupLog "Quick setup started."
