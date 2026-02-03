@@ -554,9 +554,11 @@ function New-Shortcut([string]$shortcutPath, [string]$targetScriptPath, [string]
     $shortcut.WindowStyle = 7
     $iconPath = Join-Path $workingDir "Meta\Icons\Tray_Icon.ico"
     if (Test-Path $iconPath) {
-        $shortcut.IconLocation = $iconPath
+        $shortcut.IconLocation = "$iconPath,0"
+        Write-SetupLog "Shortcut icon set: $iconPath"
     } else {
         $shortcut.IconLocation = "$env:WINDIR\System32\shell32.dll,1"
+        Write-SetupLog "Shortcut icon missing, using shell32 fallback."
     }
     $shortcut.Save()
 }
@@ -667,6 +669,12 @@ if ($action -eq "Launch") {
         try {
             $proc = Start-Process "$env:WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe" -ArgumentList $launchArgs -WorkingDirectory $installPath -PassThru -ErrorAction Stop
             Write-SetupLog ("Launch started. PID={0}" -f $proc.Id)
+            Start-Sleep -Milliseconds 600
+            $escaped = $targetScript.Replace("\","\\")
+            $running = Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" | Where-Object { $_.CommandLine -like "*$escaped*" }
+            if (-not $running) {
+                Show-SetupError "Launch did not start. Try the Start Menu shortcut."
+            }
         } catch {
             Write-SetupLog ("Launch failed (hidden): {0}" -f $_.Exception.Message)
             try {
