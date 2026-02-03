@@ -16,7 +16,19 @@ if ($dialog.ShowDialog() -ne [System.Windows.Forms.DialogResult]::OK) {
 }
 
 $installPath = $dialog.SelectedPath
-$folders = @("Debug", "Logs", "Meta", "Settings", "Meta\Icons", "Script")
+$folders = @(
+    "Debug",
+    "Logs",
+    "Meta",
+    "Settings",
+    "Meta\Icons",
+    "Script",
+    "Script\Core",
+    "Script\Features",
+    "Script\I18n",
+    "Script\Tray",
+    "Script\UI"
+)
 foreach ($name in $folders) {
     $path = Join-Path $installPath $name
     if (-not (Test-Path $path)) {
@@ -36,52 +48,40 @@ try {
     Write-Host "Failed to write locator files: $($_.Exception.Message)"
 }
 
-$scriptUrl = "https://raw.githubusercontent.com/alexphillips-dev/Teams-Always-Green/main/Script/Teams%20Always%20Green.ps1"
-$versionUrl = "https://raw.githubusercontent.com/alexphillips-dev/Teams-Always-Green/main/VERSION"
-$debugVbsUrl = "https://raw.githubusercontent.com/alexphillips-dev/Teams-Always-Green/main/Debug/Teams%20Always%20Green%20-%20Debug.VBS"
-$trayIconUrl = "https://raw.githubusercontent.com/alexphillips-dev/Teams-Always-Green/main/Meta/Icons/Tray_Icon.ico"
-$settingsIconUrl = "https://raw.githubusercontent.com/alexphillips-dev/Teams-Always-Green/main/Meta/Icons/Settings_Icon.ico"
-
-$targetScript = Join-Path $installPath "Script\Teams Always Green.ps1"
-$targetVersion = Join-Path $installPath "VERSION"
-$targetDebugVbs = Join-Path $installPath "Debug\Teams Always Green - Debug.VBS"
-$targetTrayIcon = Join-Path $installPath "Meta\Icons\Tray_Icon.ico"
-$targetSettingsIcon = Join-Path $installPath "Meta\Icons\Settings_Icon.ico"
+$rawBase = "https://raw.githubusercontent.com/alexphillips-dev/Teams-Always-Green/main"
+$filesToDownload = @(
+    @{ Url = "$rawBase/Script/Teams%20Always%20Green.ps1"; Path = "Script\Teams Always Green.ps1" },
+    @{ Url = "$rawBase/Script/Core/Logging.ps1"; Path = "Script\Core\Logging.ps1" },
+    @{ Url = "$rawBase/Script/Core/Paths.ps1"; Path = "Script\Core\Paths.ps1" },
+    @{ Url = "$rawBase/Script/Core/Runtime.ps1"; Path = "Script\Core\Runtime.ps1" },
+    @{ Url = "$rawBase/Script/Core/Settings.ps1"; Path = "Script\Core\Settings.ps1" },
+    @{ Url = "$rawBase/Script/Features/Hotkeys.ps1"; Path = "Script\Features\Hotkeys.ps1" },
+    @{ Url = "$rawBase/Script/Features/Profiles.ps1"; Path = "Script\Features\Profiles.ps1" },
+    @{ Url = "$rawBase/Script/Features/Scheduling.ps1"; Path = "Script\Features\Scheduling.ps1" },
+    @{ Url = "$rawBase/Script/I18n/UiStrings.ps1"; Path = "Script\I18n\UiStrings.ps1" },
+    @{ Url = "$rawBase/Script/Tray/Menu.ps1"; Path = "Script\Tray\Menu.ps1" },
+    @{ Url = "$rawBase/Script/UI/SettingsDialog.ps1"; Path = "Script\UI\SettingsDialog.ps1" },
+    @{ Url = "$rawBase/Script/UI/HistoryDialog.ps1"; Path = "Script\UI\HistoryDialog.ps1" },
+    @{ Url = "$rawBase/VERSION"; Path = "VERSION" },
+    @{ Url = "$rawBase/Teams%20Always%20Green.VBS"; Path = "Teams Always Green.VBS" },
+    @{ Url = "$rawBase/Debug/Teams%20Always%20Green%20-%20Debug.VBS"; Path = "Debug\Teams Always Green - Debug.VBS" },
+    @{ Url = "$rawBase/Meta/Icons/Tray_Icon.ico"; Path = "Meta\Icons\Tray_Icon.ico" },
+    @{ Url = "$rawBase/Meta/Icons/Settings_Icon.ico"; Path = "Meta\Icons\Settings_Icon.ico" }
+)
 
 try {
     [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 } catch {
 }
 
-try {
-    Invoke-WebRequest -Uri $scriptUrl -OutFile $targetScript -UseBasicParsing
-} catch {
-    Write-Host "Download failed: $($_.Exception.Message)"
-    exit 1
-}
-
-try {
-    Invoke-WebRequest -Uri $versionUrl -OutFile $targetVersion -UseBasicParsing
-} catch {
-    Write-Host "Version file download failed: $($_.Exception.Message)"
-}
-
-try {
-    Invoke-WebRequest -Uri $debugVbsUrl -OutFile $targetDebugVbs -UseBasicParsing
-} catch {
-    Write-Host "Debug launcher download failed: $($_.Exception.Message)"
-}
-
-try {
-    Invoke-WebRequest -Uri $trayIconUrl -OutFile $targetTrayIcon -UseBasicParsing
-} catch {
-    Write-Host "Tray icon download failed: $($_.Exception.Message)"
-}
-
-try {
-    Invoke-WebRequest -Uri $settingsIconUrl -OutFile $targetSettingsIcon -UseBasicParsing
-} catch {
-    Write-Host "Settings icon download failed: $($_.Exception.Message)"
+foreach ($file in $filesToDownload) {
+    $targetPath = Join-Path $installPath $file.Path
+    try {
+        Invoke-WebRequest -Uri $file.Url -OutFile $targetPath -UseBasicParsing
+    } catch {
+        Write-Host ("Download failed: {0} -> {1}" -f $file.Url, $file.Path)
+        throw
+    }
 }
 function New-Shortcut([string]$shortcutPath, [string]$targetScriptPath, [string]$workingDir) {
     $shell = New-Object -ComObject WScript.Shell
