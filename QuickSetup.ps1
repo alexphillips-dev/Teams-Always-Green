@@ -668,18 +668,22 @@ $action = Show-SetupSummary -installPath $installPath -integrityStatus $integrit
 Write-SetupLog ("Summary action selected: {0}" -f $action)
 if ($action -eq "Launch") {
     Write-SetupLog "Launch requested."
+    $launchVbs = Join-Path $installPath "Teams Always Green.VBS"
+    if (Test-Path $launchVbs) {
+        try {
+            $proc = Start-Process "$env:WINDIR\System32\wscript.exe" -ArgumentList "`"$launchVbs`"" -WorkingDirectory $installPath -PassThru -ErrorAction Stop
+            Write-SetupLog ("Launch started (wscript). PID={0}" -f $proc.Id)
+        } catch {
+            Write-SetupLog ("Launch failed (wscript): {0}" -f $_.Exception.Message)
+        }
+    }
     if (-not (Test-Path $targetScript)) {
         Show-SetupError "Launch failed: app script not found at $targetScript"
-    } else {
+    } elseif (-not (Test-Path $launchVbs)) {
         $launchArgs = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$targetScript`""
         try {
             $proc = Start-Process "$env:WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe" -ArgumentList $launchArgs -WorkingDirectory $installPath -PassThru -ErrorAction Stop
-            Write-SetupLog ("Launch started. PID={0}" -f $proc.Id)
-            Start-Sleep -Milliseconds 600
-            $running = Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" | Where-Object { $_.CommandLine -like "*$targetScript*" }
-            if (-not $running) {
-                Show-SetupError "Launch did not start. Try the Start Menu shortcut."
-            }
+            Write-SetupLog ("Launch started (hidden). PID={0}" -f $proc.Id)
         } catch {
             Write-SetupLog ("Launch failed (hidden): {0}" -f $_.Exception.Message)
             try {
