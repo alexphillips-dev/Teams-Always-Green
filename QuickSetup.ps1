@@ -7,6 +7,7 @@ $ErrorActionPreference = 'Stop'
 $tempRoot = $env:TEMP
 if ([string]::IsNullOrWhiteSpace($tempRoot)) { $tempRoot = $env:TMP }
 if ([string]::IsNullOrWhiteSpace($tempRoot)) { $tempRoot = [System.IO.Path]::GetTempPath() }
+if ([string]::IsNullOrWhiteSpace($tempRoot)) { $tempRoot = (Get-Location).Path }
 $logPath = Join-Path $tempRoot "TeamsAlwaysGreen-QuickSetup.log"
 function Write-SetupLog([string]$message) {
     try {
@@ -18,12 +19,29 @@ function Write-SetupLog([string]$message) {
 
 function Show-SetupError([string]$message) {
     Write-SetupLog "ERROR: $message"
-    [System.Windows.Forms.MessageBox]::Show(
-        $message + "`n`nLog: $logPath",
-        "Quick Setup",
-        [System.Windows.Forms.MessageBoxButtons]::OK,
-        [System.Windows.Forms.MessageBoxIcon]::Error
-    ) | Out-Null
+    Show-SetupPrompt -message ($message + "`n`nLog: $logPath") -title "Quick Setup" -buttons ([System.Windows.Forms.MessageBoxButtons]::OK) -icon ([System.Windows.Forms.MessageBoxIcon]::Error) | Out-Null
+}
+
+function Show-SetupPrompt {
+    param(
+        [string]$message,
+        [string]$title,
+        [System.Windows.Forms.MessageBoxButtons]$buttons,
+        [System.Windows.Forms.MessageBoxIcon]$icon
+    )
+    $owner = New-Object System.Windows.Forms.Form
+    $owner.Width = 1
+    $owner.Height = 1
+    $owner.StartPosition = "CenterScreen"
+    $owner.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::None
+    $owner.ShowInTaskbar = $false
+    $owner.TopMost = $true
+    $owner.Opacity = 0
+    $owner.Show()
+    [System.Windows.Forms.Application]::DoEvents()
+    $result = [System.Windows.Forms.MessageBox]::Show($owner, $message, $title, $buttons, $icon)
+    $owner.Close()
+    return $result
 }
 
 function Get-FileHashHex([string]$path) {
@@ -181,12 +199,7 @@ if ($dialog.ShowDialog() -ne [System.Windows.Forms.DialogResult]::OK) {
 $installPath = $dialog.SelectedPath
 $detectedScript = Join-Path $installPath "Script\Teams Always Green.ps1"
 if (Test-Path $detectedScript) {
-    $choice = [System.Windows.Forms.MessageBox]::Show(
-        "An existing install was detected at:`n$installPath`n`nUpgrade/repair this install?",
-        "Existing Install",
-        [System.Windows.Forms.MessageBoxButtons]::YesNoCancel,
-        [System.Windows.Forms.MessageBoxIcon]::Question
-    )
+    $choice = Show-SetupPrompt -message "An existing install was detected at:`n$installPath`n`nUpgrade/repair this install?" -title "Existing Install" -buttons ([System.Windows.Forms.MessageBoxButtons]::YesNoCancel) -icon ([System.Windows.Forms.MessageBoxIcon]::Question)
     if ($choice -eq [System.Windows.Forms.DialogResult]::Cancel) {
         Write-Host "Install canceled."
         exit 1
@@ -204,12 +217,10 @@ $portableMarker = Join-Path $installPath "Meta\PortableMode.txt"
 if (Test-Path $portableMarker) {
     $portableMode = $true
 } else {
-    $portableMode = [System.Windows.Forms.MessageBox]::Show(
+    $portableMode = (Show-SetupPrompt -message (
         "Use portable mode?`n`nPortable mode skips Start Menu/Desktop/Startup shortcuts.",
-        "Portable Mode",
-        [System.Windows.Forms.MessageBoxButtons]::YesNo,
-        [System.Windows.Forms.MessageBoxIcon]::Question
-    ) -eq [System.Windows.Forms.DialogResult]::Yes
+        "Portable Mode"
+    ) -title "Portable Mode" -buttons ([System.Windows.Forms.MessageBoxButtons]::YesNo) -icon ([System.Windows.Forms.MessageBoxIcon]::Question)) -eq [System.Windows.Forms.DialogResult]::Yes
 }
 $folders = @(
     "Debug",
@@ -290,12 +301,10 @@ $useLocal = $false
 if ($localRoot) {
     $localManifestPath = Join-Path $localRoot "QuickSetup.manifest.json"
     if (Test-Path (Join-Path $localRoot "Script\Teams Always Green.ps1")) {
-        $useLocal = [System.Windows.Forms.MessageBox]::Show(
+        $useLocal = (Show-SetupPrompt -message (
             "Local app files were found next to QuickSetup.ps1.`nUse local files instead of downloading?",
-            "Use Local Files",
-            [System.Windows.Forms.MessageBoxButtons]::YesNo,
-            [System.Windows.Forms.MessageBoxIcon]::Question
-        ) -eq [System.Windows.Forms.DialogResult]::Yes
+            "Use Local Files"
+        ) -title "Use Local Files" -buttons ([System.Windows.Forms.MessageBoxButtons]::YesNo) -icon ([System.Windows.Forms.MessageBoxIcon]::Question)) -eq [System.Windows.Forms.DialogResult]::Yes
     }
 }
 
@@ -382,12 +391,10 @@ $desktopShortcut = Join-Path $desktopDir "Teams Always Green.lnk"
 
 $enableStartup = $false
 if (-not $portableMode) {
-    $enableStartup = [System.Windows.Forms.MessageBox]::Show(
+    $enableStartup = (Show-SetupPrompt -message (
         "Start Teams Always Green when Windows starts?",
-        "Startup Shortcut",
-        [System.Windows.Forms.MessageBoxButtons]::YesNo,
-        [System.Windows.Forms.MessageBoxIcon]::Question
-    ) -eq [System.Windows.Forms.DialogResult]::Yes
+        "Startup Shortcut"
+    ) -title "Startup Shortcut" -buttons ([System.Windows.Forms.MessageBoxButtons]::YesNo) -icon ([System.Windows.Forms.MessageBoxIcon]::Question)) -eq [System.Windows.Forms.DialogResult]::Yes
 
     if ($enableStartup) {
         $startupDir = [Environment]::GetFolderPath("Startup")
@@ -422,12 +429,10 @@ try {
 
 $deleteFiles = $true
 if (-not $Silent) {
-    $resp = [System.Windows.Forms.MessageBox]::Show(
-        "Remove the app files from:`n$installRoot`n`nThis will close the app if it is running.",
-        "Uninstall Teams Always Green",
-        [System.Windows.Forms.MessageBoxButtons]::YesNo,
-        [System.Windows.Forms.MessageBoxIcon]::Warning
-    )
+        $resp = Show-SetupPrompt -message (
+            "Remove the app files from:`n$installRoot`n`nThis will close the app if it is running.",
+            "Uninstall Teams Always Green"
+        ) -title "Uninstall Teams Always Green" -buttons ([System.Windows.Forms.MessageBoxButtons]::YesNo) -icon ([System.Windows.Forms.MessageBoxIcon]::Warning)
     if ($resp -ne [System.Windows.Forms.DialogResult]::Yes) { $deleteFiles = $false }
 }
 
