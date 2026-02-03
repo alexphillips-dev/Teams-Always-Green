@@ -206,23 +206,21 @@ What happens next:
     $cancel.Width = 100
     $cancel.Location = New-Object System.Drawing.Point(410, 220)
 
-    $form.Tag = $false
+    $continue.DialogResult = [System.Windows.Forms.DialogResult]::OK
+    $cancel.DialogResult = [System.Windows.Forms.DialogResult]::Cancel
     $form.AcceptButton = $continue
     $form.CancelButton = $cancel
-
-    $continue.Add_Click({ $form.Tag = $true; $form.Close() })
-    $cancel.Add_Click({ $form.Tag = $false; $form.Close() })
 
     $form.Controls.Add($title)
     $form.Controls.Add($body)
     $form.Controls.Add($continue)
     $form.Controls.Add($cancel)
     if ($owner) {
-        $form.ShowDialog($owner) | Out-Null
+        $result = $form.ShowDialog($owner)
     } else {
-        $form.ShowDialog() | Out-Null
+        $result = $form.ShowDialog()
     }
-    return [bool]$form.Tag
+    return ($result -eq [System.Windows.Forms.DialogResult]::OK)
 }
 
 function Show-SetupSummary {
