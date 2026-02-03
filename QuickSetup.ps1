@@ -59,18 +59,36 @@ function Is-TextFile([string]$relativePath) {
     return @(".ps1", ".cmd", ".vbs", ".json", ".md", ".txt", ".log", ".csv", ".ini") -contains $ext
 }
 
-function Get-NormalizedTextHash([string]$path, [string]$lineEnding) {
+function Get-NormalizedBytesHash([string]$path, [string]$lineEnding) {
     try {
-        $raw = Get-Content -Path $path -Raw
-        if ($null -eq $raw) { return $null }
-        $normalized = $raw -replace "`r`n", "`n"
-        $normalized = $normalized -replace "`r", "`n"
-        if ($lineEnding -eq "CRLF") {
-            $normalized = $normalized -replace "`n", "`r`n"
+        $bytes = [System.IO.File]::ReadAllBytes($path)
+        if (-not $bytes) { return $null }
+        $normalized = New-Object System.Collections.Generic.List[byte]
+        for ($i = 0; $i -lt $bytes.Length; $i++) {
+            $b = $bytes[$i]
+            if ($b -eq 0x0D) {
+                if (($i + 1) -lt $bytes.Length -and $bytes[$i + 1] -eq 0x0A) { $i++ }
+                $normalized.Add(0x0A)
+                continue
+            }
+            $normalized.Add($b)
         }
-        $bytes = [System.Text.UTF8Encoding]::new($false).GetBytes($normalized)
+
+        if ($lineEnding -eq "CRLF") {
+            $withCrLf = New-Object System.Collections.Generic.List[byte]
+            foreach ($b in $normalized) {
+                if ($b -eq 0x0A) {
+                    $withCrLf.Add(0x0D)
+                    $withCrLf.Add(0x0A)
+                } else {
+                    $withCrLf.Add($b)
+                }
+            }
+            $normalized = $withCrLf
+        }
+
         $sha = [System.Security.Cryptography.SHA256]::Create()
-        $hash = $sha.ComputeHash($bytes)
+        $hash = $sha.ComputeHash($normalized.ToArray())
         return ([BitConverter]::ToString($hash)).Replace("-", "")
     } catch {
         return $null
@@ -382,11 +400,11 @@ foreach ($file in $filesToDownload) {
             if (-not $actual -or ($actual.ToLowerInvariant() -ne [string]$expected.ToLowerInvariant())) {
                 $matched = $false
                 if (Is-TextFile $file.Path) {
-                    $altLf = Get-NormalizedTextHash $targetPath "LF"
+                    $altLf = Get-NormalizedBytesHash $targetPath "LF"
                     if ($altLf -and ($altLf.ToLowerInvariant() -eq [string]$expected.ToLowerInvariant())) {
                         $matched = $true
                     } else {
-                        $altCrLf = Get-NormalizedTextHash $targetPath "CRLF"
+                        $altCrLf = Get-NormalizedBytesHash $targetPath "CRLF"
                         if ($altCrLf -and ($altCrLf.ToLowerInvariant() -eq [string]$expected.ToLowerInvariant())) {
                             $matched = $true
                         }
