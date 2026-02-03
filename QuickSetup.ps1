@@ -326,7 +326,7 @@ $defaultBase = [Environment]::GetFolderPath("MyDocuments")
 $defaultPath = Join-Path $defaultBase "Teams Always Green"
 
 $dialog = New-Object System.Windows.Forms.FolderBrowserDialog
-$dialog.Description = "Select install folder for Teams Always Green"
+$dialog.Description = "Select the parent folder (we will create a Teams Always Green folder inside)"
 $dialog.SelectedPath = $defaultPath
 
 if ($dialog.ShowDialog($setupOwner) -ne [System.Windows.Forms.DialogResult]::OK) {
@@ -335,7 +335,16 @@ if ($dialog.ShowDialog($setupOwner) -ne [System.Windows.Forms.DialogResult]::OK)
     exit 1
 }
 
-$installPath = $dialog.SelectedPath
+$selectedBase = $dialog.SelectedPath
+$appFolderName = "Teams Always Green"
+if ([string]::Equals([System.IO.Path]::GetFileName($selectedBase), $appFolderName, [System.StringComparison]::OrdinalIgnoreCase)) {
+    $installPath = $selectedBase
+} else {
+    $installPath = Join-Path $selectedBase $appFolderName
+}
+if (-not (Test-Path $installPath)) {
+    New-Item -ItemType Directory -Path $installPath -Force | Out-Null
+}
 $detectedScript = Join-Path $installPath "Script\Teams Always Green.ps1"
 if (Test-Path $detectedScript) {
     $choice = Show-SetupPrompt -message "An existing install was detected at:`n$installPath`n`nUpgrade/repair this install?" -title "Existing Install" -buttons ([System.Windows.Forms.MessageBoxButtons]::YesNoCancel) -icon ([System.Windows.Forms.MessageBoxIcon]::Question) -owner $setupOwner
@@ -350,7 +359,15 @@ if (Test-Path $detectedScript) {
             if ($setupOwner -and -not $setupOwner.IsDisposed) { $setupOwner.Close() }
             exit 1
         }
-        $installPath = $dialog.SelectedPath
+        $selectedBase = $dialog.SelectedPath
+        if ([string]::Equals([System.IO.Path]::GetFileName($selectedBase), $appFolderName, [System.StringComparison]::OrdinalIgnoreCase)) {
+            $installPath = $selectedBase
+        } else {
+            $installPath = Join-Path $selectedBase $appFolderName
+        }
+        if (-not (Test-Path $installPath)) {
+            New-Item -ItemType Directory -Path $installPath -Force | Out-Null
+        }
     }
 }
 $portableMode = $false
