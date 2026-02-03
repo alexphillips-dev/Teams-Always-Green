@@ -305,6 +305,7 @@ try {
 }
 
 $rawBase = "https://raw.githubusercontent.com/alexphillips-dev/Teams-Always-Green/main"
+$cacheBuster = [Guid]::NewGuid().ToString("N")
 $filesToDownload = @(
     @{ Url = "$rawBase/Script/Teams%20Always%20Green.ps1"; Path = "Script\Teams Always Green.ps1" },
     @{ Url = "$rawBase/Script/Core/Logging.ps1"; Path = "Script\Core\Logging.ps1" },
@@ -355,7 +356,7 @@ $manifest = $null
 if ($useLocal) {
     $manifest = Load-Manifest $localManifestPath
 } else {
-    $manifestUrl = "$rawBase/QuickSetup.manifest.json"
+    $manifestUrl = "$rawBase/QuickSetup.manifest.json?v=$cacheBuster"
     $manifestTarget = Join-Path $installPath "Meta\QuickSetup.manifest.json"
     try {
         Invoke-WebRequest -Uri $manifestUrl -OutFile $manifestTarget -UseBasicParsing
@@ -385,7 +386,8 @@ foreach ($file in $filesToDownload) {
         Copy-Item -Path $sourcePath -Destination $targetPath -Force
     } else {
         try {
-            Invoke-WebRequest -Uri $file.Url -OutFile $targetPath -UseBasicParsing
+            $downloadUrl = if ($file.Url -match "\?") { "$($file.Url)&v=$cacheBuster" } else { "$($file.Url)?v=$cacheBuster" }
+            Invoke-WebRequest -Uri $downloadUrl -OutFile $targetPath -UseBasicParsing
         } catch {
             Show-SetupError ("Download failed: {0}" -f $file.Url)
             exit 1
