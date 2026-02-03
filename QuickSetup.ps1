@@ -2,6 +2,86 @@
 # Creates Desktop, Start Menu, and Startup shortcuts (no VBS needed).
 
 Add-Type -AssemblyName System.Windows.Forms
+$ErrorActionPreference = 'Stop'
+
+$logPath = Join-Path $env:TEMP "TeamsAlwaysGreen-QuickSetup.log"
+function Write-SetupLog([string]$message) {
+    try {
+        $line = "[{0}] {1}" -f (Get-Date).ToString("yyyy-MM-dd HH:mm:ss"), $message
+        Add-Content -Path $logPath -Value $line
+    } catch {
+    }
+}
+
+function Show-SetupError([string]$message) {
+    Write-SetupLog "ERROR: $message"
+    [System.Windows.Forms.MessageBox]::Show(
+        $message + "`n`nLog: $logPath",
+        "Quick Setup",
+        [System.Windows.Forms.MessageBoxButtons]::OK,
+        [System.Windows.Forms.MessageBoxIcon]::Error
+    ) | Out-Null
+}
+
+function Get-FileHashHex([string]$path) {
+    try {
+        return (Get-FileHash -Algorithm SHA256 -Path $path -ErrorAction Stop).Hash
+    } catch {
+        return $null
+    }
+}
+
+function Load-Manifest([string]$path) {
+    if (-not (Test-Path $path)) { return $null }
+    try {
+        $raw = Get-Content -Path $path -Raw
+        if ([string]::IsNullOrWhiteSpace($raw)) { return $null }
+        return $raw | ConvertFrom-Json
+    } catch {
+        return $null
+    }
+}
+
+function New-ProgressForm {
+    $form = New-Object System.Windows.Forms.Form
+    $form.Text = "Teams Always Green - Setup"
+    $form.Width = 520
+    $form.Height = 140
+    $form.StartPosition = "CenterScreen"
+    $form.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::FixedDialog
+    $form.MaximizeBox = $false
+    $form.MinimizeBox = $false
+
+    $label = New-Object System.Windows.Forms.Label
+    $label.AutoSize = $true
+    $label.Text = "Preparing..."
+    $label.Location = New-Object System.Drawing.Point(16, 12)
+
+    $progress = New-Object System.Windows.Forms.ProgressBar
+    $progress.Width = 470
+    $progress.Height = 20
+    $progress.Location = New-Object System.Drawing.Point(16, 42)
+    $progress.Minimum = 0
+    $progress.Maximum = 100
+
+    $form.Controls.Add($label)
+    $form.Controls.Add($progress)
+    $form.TopMost = $true
+    $form.Show()
+    [System.Windows.Forms.Application]::DoEvents()
+    return @{ Form = $form; Label = $label; Progress = $progress }
+}
+
+function Update-Progress($ui, [int]$current, [int]$total, [string]$message) {
+    if (-not $ui) { return }
+    $pct = 0
+    if ($total -gt 0) { $pct = [Math]::Min(100, [Math]::Round(($current / $total) * 100)) }
+    $ui.Label.Text = $message
+    $ui.Progress.Value = $pct
+    [System.Windows.Forms.Application]::DoEvents()
+}
+
+Write-SetupLog "Quick setup started."
 
 $defaultBase = [Environment]::GetFolderPath("MyDocuments")
 $defaultPath = Join-Path $defaultBase "Teams Always Green"
@@ -16,6 +96,26 @@ if ($dialog.ShowDialog() -ne [System.Windows.Forms.DialogResult]::OK) {
 }
 
 $installPath = $dialog.SelectedPath
+$detectedScript = Join-Path $installPath "Script\Teams Always Green.ps1"
+if (Test-Path $detectedScript) {
+    $choice = [System.Windows.Forms.MessageBox]::Show(
+        "An existing install was detected at:`n$installPath`n`nUpgrade/repair this install?",
+        "Existing Install",
+        [System.Windows.Forms.MessageBoxButtons]::YesNoCancel,
+        [System.Windows.Forms.MessageBoxIcon]::Question
+    )
+    if ($choice -eq [System.Windows.Forms.DialogResult]::Cancel) {
+        Write-Host "Install canceled."
+        exit 1
+    }
+    if ($choice -eq [System.Windows.Forms.DialogResult]::No) {
+        if ($dialog.ShowDialog() -ne [System.Windows.Forms.DialogResult]::OK) {
+            Write-Host "Install canceled."
+            exit 1
+        }
+        $installPath = $dialog.SelectedPath
+    }
+}
 $folders = @(
     "Debug",
     "Logs",
@@ -68,21 +168,82 @@ $filesToDownload = @(
     @{ Url = "$rawBase/Meta/Icons/Tray_Icon.ico"; Path = "Meta\Icons\Tray_Icon.ico" },
     @{ Url = "$rawBase/Meta/Icons/Settings_Icon.ico"; Path = "Meta\Icons\Settings_Icon.ico" }
 )
+$targetScript = Join-Path $installPath "Script\Teams Always Green.ps1"
 
 try {
     [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 } catch {
 }
 
-foreach ($file in $filesToDownload) {
-    $targetPath = Join-Path $installPath $file.Path
+$ui = New-ProgressForm
+Update-Progress $ui 0 1 "Preparing installer..."
+
+$localRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
+$localManifestPath = Join-Path $localRoot "QuickSetup.manifest.json"
+$useLocal = $false
+if (Test-Path (Join-Path $localRoot "Script\Teams Always Green.ps1")) {
+    $useLocal = [System.Windows.Forms.MessageBox]::Show(
+        "Local app files were found next to QuickSetup.ps1.`nUse local files instead of downloading?",
+        "Use Local Files",
+        [System.Windows.Forms.MessageBoxButtons]::YesNo,
+        [System.Windows.Forms.MessageBoxIcon]::Question
+    ) -eq [System.Windows.Forms.DialogResult]::Yes
+}
+
+$manifest = $null
+if ($useLocal) {
+    $manifest = Load-Manifest $localManifestPath
+} else {
+    $manifestUrl = "$rawBase/QuickSetup.manifest.json"
+    $manifestTarget = Join-Path $installPath "Meta\QuickSetup.manifest.json"
     try {
-        Invoke-WebRequest -Uri $file.Url -OutFile $targetPath -UseBasicParsing
+        Invoke-WebRequest -Uri $manifestUrl -OutFile $manifestTarget -UseBasicParsing
+        $manifest = Load-Manifest $manifestTarget
     } catch {
-        Write-Host ("Download failed: {0} -> {1}" -f $file.Url, $file.Path)
-        throw
+        Write-SetupLog "Manifest download failed; continuing without integrity validation."
+        $manifest = $null
     }
 }
+
+$total = $filesToDownload.Count
+$index = 0
+foreach ($file in $filesToDownload) {
+    $index++
+    $targetPath = Join-Path $installPath $file.Path
+    $status = "Installing {0} ({1}/{2})" -f $file.Path, $index, $total
+    Update-Progress $ui $index $total $status
+    Write-SetupLog $status
+
+    if ($useLocal) {
+        $sourcePath = Join-Path $localRoot $file.Path
+        if (-not (Test-Path $sourcePath)) {
+            Show-SetupError "Missing local file: $sourcePath"
+            exit 1
+        }
+        Copy-Item -Path $sourcePath -Destination $targetPath -Force
+    } else {
+        try {
+            Invoke-WebRequest -Uri $file.Url -OutFile $targetPath -UseBasicParsing
+        } catch {
+            Show-SetupError ("Download failed: {0}" -f $file.Url)
+            exit 1
+        }
+    }
+
+    if ($manifest -and $manifest.files) {
+        $manifestKey = $file.Path.Replace("\", "/")
+        $expected = $manifest.files.$manifestKey
+        if ($expected) {
+            $actual = Get-FileHashHex $targetPath
+            if (-not $actual -or ($actual.ToLowerInvariant() -ne [string]$expected.ToLowerInvariant())) {
+                Show-SetupError ("Integrity check failed for {0}." -f $file.Path)
+                exit 1
+            }
+        }
+    }
+}
+
+if ($ui -and $ui.Form) { $ui.Form.Close() }
 function New-Shortcut([string]$shortcutPath, [string]$targetScriptPath, [string]$workingDir) {
     $shell = New-Object -ComObject WScript.Shell
     $shortcut = $shell.CreateShortcut($shortcutPath)
@@ -138,4 +299,17 @@ if ($enableStartup) {
     Write-Host "Startup shortcut: (skipped)"
 }
 Write-Host "Desktop shortcut: $desktopShortcut"
+Write-Host "Setup log: $logPath"
+
+$postAction = [System.Windows.Forms.MessageBox]::Show(
+    "Install complete.`n`nYes = Launch now`nNo = Open Settings`nCancel = Close",
+    "Quick Setup",
+    [System.Windows.Forms.MessageBoxButtons]::YesNoCancel,
+    [System.Windows.Forms.MessageBoxIcon]::Information
+)
+if ($postAction -eq [System.Windows.Forms.DialogResult]::Yes) {
+    Start-Process "$env:WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe" -ArgumentList "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$targetScript`"" -WorkingDirectory $installPath
+} elseif ($postAction -eq [System.Windows.Forms.DialogResult]::No) {
+    Start-Process "$env:WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe" -ArgumentList "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$targetScript`" -SettingsOnly" -WorkingDirectory $installPath
+}
 

@@ -5,6 +5,12 @@ Meta/*.status.json
 Meta/*.shutdown.state.txt
 Meta/*.log.path.txt
 Meta/*.settings.path.txt
+Meta/*.crash.json
+Meta/*.integrity.json
+Meta/*.startup.json
+Meta/*.state.lastgood.json
+.vscode/
+PSScriptAnalyzerSettings.psd1
 Settings/
 
 # Deprecated settings host (no longer used)
