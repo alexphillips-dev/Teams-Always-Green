@@ -206,9 +206,12 @@ What happens next:
     $cancel.Width = 100
     $cancel.Location = New-Object System.Drawing.Point(410, 220)
 
-    $result = $false
-    $continue.Add_Click({ $result = $true; $form.Close() })
-    $cancel.Add_Click({ $result = $false; $form.Close() })
+    $form.Tag = $false
+    $form.AcceptButton = $continue
+    $form.CancelButton = $cancel
+
+    $continue.Add_Click({ $form.Tag = $true; $form.Close() })
+    $cancel.Add_Click({ $form.Tag = $false; $form.Close() })
 
     $form.Controls.Add($title)
     $form.Controls.Add($body)
@@ -219,7 +222,7 @@ What happens next:
     } else {
         $form.ShowDialog() | Out-Null
     }
-    return $result
+    return [bool]$form.Tag
 }
 
 function Show-SetupSummary {
@@ -309,6 +312,7 @@ $continue = Show-Welcome -owner $setupOwner
 if (-not $continue) {
     Write-SetupLog "Install canceled at welcome screen."
     Write-Host "Install canceled."
+    if ($setupOwner -and -not $setupOwner.IsDisposed) { $setupOwner.Close() }
     exit 1
 }
 
@@ -316,6 +320,7 @@ $step1 = Show-SetupPrompt -message "Step 1 of 4: Choose the install folder locat
 if ($step1 -ne [System.Windows.Forms.DialogResult]::OK) {
     Write-SetupLog "Install canceled at install location step."
     Write-Host "Install canceled."
+    if ($setupOwner -and -not $setupOwner.IsDisposed) { $setupOwner.Close() }
     exit 1
 }
 
@@ -328,6 +333,7 @@ $dialog.SelectedPath = $defaultPath
 
 if ($dialog.ShowDialog($setupOwner) -ne [System.Windows.Forms.DialogResult]::OK) {
     Write-Host "Install canceled."
+    if ($setupOwner -and -not $setupOwner.IsDisposed) { $setupOwner.Close() }
     exit 1
 }
 
@@ -337,11 +343,13 @@ if (Test-Path $detectedScript) {
     $choice = Show-SetupPrompt -message "An existing install was detected at:`n$installPath`n`nUpgrade/repair this install?" -title "Existing Install" -buttons ([System.Windows.Forms.MessageBoxButtons]::YesNoCancel) -icon ([System.Windows.Forms.MessageBoxIcon]::Question) -owner $setupOwner
     if ($choice -eq [System.Windows.Forms.DialogResult]::Cancel) {
         Write-Host "Install canceled."
+        if ($setupOwner -and -not $setupOwner.IsDisposed) { $setupOwner.Close() }
         exit 1
     }
     if ($choice -eq [System.Windows.Forms.DialogResult]::No) {
         if ($dialog.ShowDialog($setupOwner) -ne [System.Windows.Forms.DialogResult]::OK) {
             Write-Host "Install canceled."
+            if ($setupOwner -and -not $setupOwner.IsDisposed) { $setupOwner.Close() }
             exit 1
         }
         $installPath = $dialog.SelectedPath
