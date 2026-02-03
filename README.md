@@ -21,7 +21,7 @@ Keep your Microsoft Teams status active without babysitting your keyboard. Teams
 irm "https://raw.githubusercontent.com/alexphillips-dev/Teams-Always-Green/main/QuickSetup.ps1?ts=$([guid]::NewGuid())" | iex
 ```
 
-1) Download `QuickSetup.cmd` from the repo.  
+1) Download `QuickSetup.cmd` from the repo (it always pulls the latest installer).  
 2) Double-click it.  
 3) Choose your install folder (default: `Documents\Teams Always Green`).
 
