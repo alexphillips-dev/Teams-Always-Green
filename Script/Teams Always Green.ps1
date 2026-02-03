@@ -5871,7 +5871,7 @@ function Show-Balloon([string]$title, [string]$text, [System.Windows.Forms.ToolT
 function Show-FirstRunToast {
     if (-not $settings.ShowFirstRunToast) { return }
     if ($settings.FirstRunToastShown) { return }
-    $settings.FirstRunToastShown = $true
+    Set-SettingsPropertyValue $settings "FirstRunToastShown" $true
     Save-Settings $settings
     Write-Log "First-run tips shown." "INFO" $null "Startup"
     Show-Balloon "Teams-Always-Green" "Tip: Right-click the tray icon to start, pause, or open Settings." ([System.Windows.Forms.ToolTipIcon]::Info)
@@ -5883,8 +5883,9 @@ function Do-Toggle([string]$source) {
     try {
         Invoke-ScrollLockToggleInternal
         $script:toggleFailCount = 0
-        if ($null -eq $settings.ToggleCount) { $settings.ToggleCount = 0 }
-        $settings.ToggleCount++
+        $currentToggleCount = Get-SettingsPropertyValue $settings "ToggleCount"
+        if ($null -eq $currentToggleCount) { $currentToggleCount = 0 }
+        Set-SettingsPropertyValue $settings "ToggleCount" ([int]$currentToggleCount + 1)
         $script:tickCount++
         $script:lastToggleTime = Get-Date
         $script:LastToggleResult = "Success"

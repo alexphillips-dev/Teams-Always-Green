@@ -10,6 +10,9 @@ function Show-SettingsDialog {
             $reuseOk = $true
             try {
                 $settingsIconPath = Join-Path (Split-Path -Path $scriptPath -Parent) "Meta\\Icons\\Settings_Icon.ico"
+                if (Test-Path $settingsIconPath) {
+                    try { $script:SettingsForm.Icon = New-Object System.Drawing.Icon($settingsIconPath) } catch { }
+                }
                 Set-FormTaskbarIcon $script:SettingsForm $settingsIconPath
                 if (-not $script:SettingsForm.Visible) {
                     $script:SettingsForm.Show()
@@ -4656,8 +4659,8 @@ $clearLogButton = New-Object System.Windows.Forms.Button
             }
             $script:tickCount = 0
             $script:lastToggleTime = $null
-            $settings.ToggleCount = 0
-            $settings.LastToggleTime = $null
+            Set-SettingsPropertyValue $settings "ToggleCount" 0
+            Set-SettingsPropertyValue $settings "LastToggleTime" $null
             Save-Stats
             $script:toggleCountBox.Value = 0
             $script:LastTogglePicker.Checked = $false

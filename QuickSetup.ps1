@@ -676,8 +676,7 @@ if ($action -eq "Launch") {
             $proc = Start-Process "$env:WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe" -ArgumentList $launchArgs -WorkingDirectory $installPath -PassThru -ErrorAction Stop
             Write-SetupLog ("Launch started. PID={0}" -f $proc.Id)
             Start-Sleep -Milliseconds 600
-            $escaped = $targetScript.Replace("\","\\")
-            $running = Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" | Where-Object { $_.CommandLine -like "*$escaped*" }
+            $running = Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" | Where-Object { $_.CommandLine -like "*$targetScript*" }
             if (-not $running) {
                 Show-SetupError "Launch did not start. Try the Start Menu shortcut."
             }
