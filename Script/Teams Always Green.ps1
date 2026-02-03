@@ -4752,8 +4752,10 @@ Apply-StateToSettings $settings $script:AppState
 Save-StateImmediate $script:AppState
 # --- Stats persistence and next-toggle calculations ---
 function Save-Stats {
-    if ($null -eq $settings.ToggleCount) { $settings.ToggleCount = 0 }
-    $settings.LastToggleTime = if ($script:lastToggleTime) { $script:lastToggleTime.ToString("o") } else { $null }
+    if ($null -eq (Get-SettingsPropertyValue $settings "ToggleCount")) {
+        Set-SettingsPropertyValue $settings "ToggleCount" 0
+    }
+    Set-SettingsPropertyValue $settings "LastToggleTime" (if ($script:lastToggleTime) { $script:lastToggleTime.ToString("o") } else { $null })
     Ensure-FunStats $settings | Out-Null
     Sync-StateFromSettings $settings
     Apply-StateToSettings $settings $script:AppState
