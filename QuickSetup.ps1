@@ -654,9 +654,12 @@ if (-not $portableMode) {
 
 Write-Host "Installed Teams Always Green to: $installPath"
 Write-Host "Setup log: $logPath"
+Write-SetupLog "Install completed. Showing summary."
 
 $action = Show-SetupSummary -installPath $installPath -integrityStatus $integrityStatus -portableMode $portableMode -shortcutsCreated $shortcutsCreated -logPath $logPath
+Write-SetupLog ("Summary action selected: {0}" -f $action)
 if ($action -eq "Launch") {
+    Write-SetupLog "Launch requested."
     if (-not (Test-Path $targetScript)) {
         Show-SetupError "Launch failed: app script not found at $targetScript"
     } else {
