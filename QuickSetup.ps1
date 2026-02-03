@@ -27,8 +27,28 @@ function Show-SetupPrompt {
         [string]$message,
         [string]$title,
         [System.Windows.Forms.MessageBoxButtons]$buttons,
-        [System.Windows.Forms.MessageBoxIcon]$icon
+        [System.Windows.Forms.MessageBoxIcon]$icon,
+        [System.Windows.Forms.Form]$owner
     )
+    $localOwner = $owner
+    if (-not $localOwner) {
+        $localOwner = New-Object System.Windows.Forms.Form
+        $localOwner.Width = 1
+        $localOwner.Height = 1
+        $localOwner.StartPosition = "CenterScreen"
+        $localOwner.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::None
+        $localOwner.ShowInTaskbar = $false
+        $localOwner.TopMost = $true
+        $localOwner.Opacity = 0
+        $localOwner.Show()
+        [System.Windows.Forms.Application]::DoEvents()
+    }
+    $result = [System.Windows.Forms.MessageBox]::Show($localOwner, $message, $title, $buttons, $icon)
+    if (-not $owner -and $localOwner) { $localOwner.Close() }
+    return $result
+}
+
+function New-SetupOwner {
     $owner = New-Object System.Windows.Forms.Form
     $owner.Width = 1
     $owner.Height = 1
@@ -39,9 +59,7 @@ function Show-SetupPrompt {
     $owner.Opacity = 0
     $owner.Show()
     [System.Windows.Forms.Application]::DoEvents()
-    $result = [System.Windows.Forms.MessageBox]::Show($owner, $message, $title, $buttons, $icon)
-    $owner.Close()
-    return $result
+    return $owner
 }
 
 function Get-FileHashHex([string]$path) {
@@ -146,6 +164,7 @@ function Update-Progress($ui, [int]$current, [int]$total, [string]$message) {
 }
 
 function Show-Welcome {
+    param([System.Windows.Forms.Form]$owner)
     $form = New-Object System.Windows.Forms.Form
     $form.Text = "Teams Always Green - Welcome"
     $form.Width = 520
@@ -195,7 +214,11 @@ What happens next:
     $form.Controls.Add($body)
     $form.Controls.Add($continue)
     $form.Controls.Add($cancel)
-    $form.ShowDialog() | Out-Null
+    if ($owner) {
+        $form.ShowDialog($owner) | Out-Null
+    } else {
+        $form.ShowDialog() | Out-Null
+    }
     return $result
 }
 
@@ -281,9 +304,17 @@ Setup Log: $logPath
 
 Write-SetupLog "Quick setup started."
 
-$continue = Show-Welcome
+$setupOwner = New-SetupOwner
+$continue = Show-Welcome -owner $setupOwner
 if (-not $continue) {
     Write-SetupLog "Install canceled at welcome screen."
+    Write-Host "Install canceled."
+    exit 1
+}
+
+$step1 = Show-SetupPrompt -message "Step 1 of 4: Choose the install folder location." -title "Install Location" -buttons ([System.Windows.Forms.MessageBoxButtons]::OKCancel) -icon ([System.Windows.Forms.MessageBoxIcon]::Information) -owner $setupOwner
+if ($step1 -ne [System.Windows.Forms.DialogResult]::OK) {
+    Write-SetupLog "Install canceled at install location step."
     Write-Host "Install canceled."
     exit 1
 }
@@ -295,7 +326,7 @@ $dialog = New-Object System.Windows.Forms.FolderBrowserDialog
 $dialog.Description = "Select install folder for Teams Always Green"
 $dialog.SelectedPath = $defaultPath
 
-if ($dialog.ShowDialog() -ne [System.Windows.Forms.DialogResult]::OK) {
+if ($dialog.ShowDialog($setupOwner) -ne [System.Windows.Forms.DialogResult]::OK) {
     Write-Host "Install canceled."
     exit 1
 }
@@ -303,13 +334,13 @@ if ($dialog.ShowDialog() -ne [System.Windows.Forms.DialogResult]::OK) {
 $installPath = $dialog.SelectedPath
 $detectedScript = Join-Path $installPath "Script\Teams Always Green.ps1"
 if (Test-Path $detectedScript) {
-    $choice = Show-SetupPrompt -message "An existing install was detected at:`n$installPath`n`nUpgrade/repair this install?" -title "Existing Install" -buttons ([System.Windows.Forms.MessageBoxButtons]::YesNoCancel) -icon ([System.Windows.Forms.MessageBoxIcon]::Question)
+    $choice = Show-SetupPrompt -message "An existing install was detected at:`n$installPath`n`nUpgrade/repair this install?" -title "Existing Install" -buttons ([System.Windows.Forms.MessageBoxButtons]::YesNoCancel) -icon ([System.Windows.Forms.MessageBoxIcon]::Question) -owner $setupOwner
     if ($choice -eq [System.Windows.Forms.DialogResult]::Cancel) {
         Write-Host "Install canceled."
         exit 1
     }
     if ($choice -eq [System.Windows.Forms.DialogResult]::No) {
-        if ($dialog.ShowDialog() -ne [System.Windows.Forms.DialogResult]::OK) {
+        if ($dialog.ShowDialog($setupOwner) -ne [System.Windows.Forms.DialogResult]::OK) {
             Write-Host "Install canceled."
             exit 1
         }
@@ -322,9 +353,9 @@ if (Test-Path $portableMarker) {
     $portableMode = $true
 } else {
     $portableMode = (Show-SetupPrompt -message (
-        "Use portable mode?`n`nPortable mode skips Start Menu/Desktop/Startup shortcuts.",
+        "Step 2 of 4: Use portable mode?`n`nPortable mode skips Start Menu/Desktop/Startup shortcuts.",
         "Portable Mode"
-    ) -title "Portable Mode" -buttons ([System.Windows.Forms.MessageBoxButtons]::YesNo) -icon ([System.Windows.Forms.MessageBoxIcon]::Question)) -eq [System.Windows.Forms.DialogResult]::Yes
+    ) -title "Portable Mode" -buttons ([System.Windows.Forms.MessageBoxButtons]::YesNo) -icon ([System.Windows.Forms.MessageBoxIcon]::Question) -owner $setupOwner) -eq [System.Windows.Forms.DialogResult]::Yes
 }
 $folders = @(
     "Debug",
@@ -520,9 +551,9 @@ $desktopShortcut = Join-Path $desktopDir "Teams Always Green.lnk"
 $enableStartup = $false
 if (-not $portableMode) {
     $enableStartup = (Show-SetupPrompt -message (
-        "Start Teams Always Green when Windows starts?",
+        "Step 3 of 4: Start Teams Always Green when Windows starts?",
         "Startup Shortcut"
-    ) -title "Startup Shortcut" -buttons ([System.Windows.Forms.MessageBoxButtons]::YesNo) -icon ([System.Windows.Forms.MessageBoxIcon]::Question)) -eq [System.Windows.Forms.DialogResult]::Yes
+    ) -title "Startup Shortcut" -buttons ([System.Windows.Forms.MessageBoxButtons]::YesNo) -icon ([System.Windows.Forms.MessageBoxIcon]::Question) -owner $setupOwner) -eq [System.Windows.Forms.DialogResult]::Yes
 
     if ($enableStartup) {
         $startupDir = [Environment]::GetFolderPath("Startup")
@@ -601,12 +632,13 @@ if (-not $portableMode) {
 Write-Host "Installed Teams Always Green to: $installPath"
 Write-Host "Setup log: $logPath"
 
-$action = Show-SetupSummary -installPath $installPath -integrityStatus $integrityStatus -portableMode $portableMode -shortcutsCreated $shortcutsCreated -logPath $logPath
-if ($action -eq "Launch") {
-    Start-Process "$env:WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe" -ArgumentList "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$targetScript`"" -WorkingDirectory $installPath
-} elseif ($action -eq "Settings") {
-    Start-Process "$env:WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe" -ArgumentList "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$targetScript`" -SettingsOnly" -WorkingDirectory $installPath
-} elseif ($action -eq "Folder") {
-    Start-Process "explorer.exe" $installPath
-}
+    $action = Show-SetupSummary -installPath $installPath -integrityStatus $integrityStatus -portableMode $portableMode -shortcutsCreated $shortcutsCreated -logPath $logPath
+    if ($action -eq "Launch") {
+        Start-Process "$env:WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe" -ArgumentList "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$targetScript`"" -WorkingDirectory $installPath
+    } elseif ($action -eq "Settings") {
+        Start-Process "$env:WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe" -ArgumentList "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$targetScript`" -SettingsOnly" -WorkingDirectory $installPath
+    } elseif ($action -eq "Folder") {
+        Start-Process "explorer.exe" $installPath
+    }
+    if ($setupOwner -and -not $setupOwner.IsDisposed) { $setupOwner.Close() }
 
