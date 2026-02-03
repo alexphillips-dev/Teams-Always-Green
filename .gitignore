@@ -9,6 +9,8 @@ Meta/*.crash.json
 Meta/*.integrity.json
 Meta/*.startup.json
 Meta/*.state.lastgood.json
+Meta/PortableMode.txt
+Meta/QuickSetup.manifest.json
 .vscode/
 PSScriptAnalyzerSettings.psd1
 Settings/

@@ -81,6 +81,86 @@ function Update-Progress($ui, [int]$current, [int]$total, [string]$message) {
     [System.Windows.Forms.Application]::DoEvents()
 }
 
+function Show-SetupSummary {
+    param(
+        [string]$installPath,
+        [string]$integrityStatus,
+        [bool]$portableMode,
+        [string[]]$shortcutsCreated,
+        [string]$logPath
+    )
+
+    $form = New-Object System.Windows.Forms.Form
+    $form.Text = "Teams Always Green - Setup Complete"
+    $form.Width = 560
+    $form.Height = 290
+    $form.StartPosition = "CenterScreen"
+    $form.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::FixedDialog
+    $form.MaximizeBox = $false
+    $form.MinimizeBox = $false
+
+    $title = New-Object System.Windows.Forms.Label
+    $title.AutoSize = $true
+    $title.Font = New-Object System.Drawing.Font("Segoe UI", 11, [System.Drawing.FontStyle]::Bold)
+    $title.Text = "Install completed successfully."
+    $title.Location = New-Object System.Drawing.Point(16, 12)
+
+    $summary = New-Object System.Windows.Forms.TextBox
+    $summary.Multiline = $true
+    $summary.ReadOnly = $true
+    $summary.BorderStyle = [System.Windows.Forms.BorderStyle]::None
+    $summary.BackColor = $form.BackColor
+    $summary.Width = 520
+    $summary.Height = 120
+    $summary.Location = New-Object System.Drawing.Point(16, 44)
+
+    $shortcutsText = if ($shortcutsCreated -and $shortcutsCreated.Count -gt 0) { $shortcutsCreated -join "; " } else { "None (portable mode)" }
+    $modeText = if ($portableMode) { "Portable (no shortcuts)" } else { "Standard" }
+    $summary.Text = @"
+Install Path: $installPath
+Mode: $modeText
+Integrity: $integrityStatus
+Shortcuts: $shortcutsText
+Setup Log: $logPath
+"@
+
+    $buttonLaunch = New-Object System.Windows.Forms.Button
+    $buttonLaunch.Text = "Launch"
+    $buttonLaunch.Width = 90
+    $buttonLaunch.Location = New-Object System.Drawing.Point(16, 175)
+
+    $buttonSettings = New-Object System.Windows.Forms.Button
+    $buttonSettings.Text = "Settings"
+    $buttonSettings.Width = 90
+    $buttonSettings.Location = New-Object System.Drawing.Point(116, 175)
+
+    $buttonFolder = New-Object System.Windows.Forms.Button
+    $buttonFolder.Text = "Open Folder"
+    $buttonFolder.Width = 110
+    $buttonFolder.Location = New-Object System.Drawing.Point(216, 175)
+
+    $buttonClose = New-Object System.Windows.Forms.Button
+    $buttonClose.Text = "Close"
+    $buttonClose.Width = 90
+    $buttonClose.Location = New-Object System.Drawing.Point(446, 175)
+
+    $action = "Close"
+    $buttonLaunch.Add_Click({ $action = "Launch"; $form.Close() })
+    $buttonSettings.Add_Click({ $action = "Settings"; $form.Close() })
+    $buttonFolder.Add_Click({ $action = "Folder"; $form.Close() })
+    $buttonClose.Add_Click({ $action = "Close"; $form.Close() })
+
+    $form.Controls.Add($title)
+    $form.Controls.Add($summary)
+    $form.Controls.Add($buttonLaunch)
+    $form.Controls.Add($buttonSettings)
+    $form.Controls.Add($buttonFolder)
+    $form.Controls.Add($buttonClose)
+    $form.TopMost = $true
+    $form.ShowDialog() | Out-Null
+    return $action
+}
+
 Write-SetupLog "Quick setup started."
 
 $defaultBase = [Environment]::GetFolderPath("MyDocuments")
@@ -116,6 +196,18 @@ if (Test-Path $detectedScript) {
         $installPath = $dialog.SelectedPath
     }
 }
+$portableMode = $false
+$portableMarker = Join-Path $installPath "Meta\PortableMode.txt"
+if (Test-Path $portableMarker) {
+    $portableMode = $true
+} else {
+    $portableMode = [System.Windows.Forms.MessageBox]::Show(
+        "Use portable mode?`n`nPortable mode skips Start Menu/Desktop/Startup shortcuts.",
+        "Portable Mode",
+        [System.Windows.Forms.MessageBoxButtons]::YesNo,
+        [System.Windows.Forms.MessageBoxIcon]::Question
+    ) -eq [System.Windows.Forms.DialogResult]::Yes
+}
 $folders = @(
     "Debug",
     "Logs",
@@ -133,6 +225,13 @@ foreach ($name in $folders) {
     $path = Join-Path $installPath $name
     if (-not (Test-Path $path)) {
         New-Item -ItemType Directory -Path $path -Force | Out-Null
+    }
+}
+if ($portableMode) {
+    try {
+        Set-Content -Path $portableMarker -Value ("PortableMode=1`nSetOn={0}" -f (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")) -Encoding ASCII
+        Write-SetupLog "Portable mode enabled."
+    } catch {
     }
 }
 
@@ -204,6 +303,7 @@ if ($useLocal) {
         $manifest = $null
     }
 }
+$integrityStatus = if ($manifest) { "Verified" } else { "Not verified (manifest unavailable)" }
 
 $total = $filesToDownload.Count
 $index = 0
@@ -266,50 +366,104 @@ if (-not (Test-Path $menuFolder)) {
     New-Item -ItemType Directory -Path $menuFolder -Force | Out-Null
 }
 $menuShortcut = Join-Path $menuFolder "Teams Always Green.lnk"
+$uninstallShortcut = Join-Path $menuFolder "Uninstall Teams Always Green.lnk"
 $desktopDir = [Environment]::GetFolderPath("Desktop")
 $desktopShortcut = Join-Path $desktopDir "Teams Always Green.lnk"
 
-$enableStartup = [System.Windows.Forms.MessageBox]::Show(
-    "Start Teams Always Green when Windows starts?",
-    "Startup Shortcut",
-    [System.Windows.Forms.MessageBoxButtons]::YesNo,
-    [System.Windows.Forms.MessageBoxIcon]::Question
-) -eq [System.Windows.Forms.DialogResult]::Yes
+$enableStartup = $false
+if (-not $portableMode) {
+    $enableStartup = [System.Windows.Forms.MessageBox]::Show(
+        "Start Teams Always Green when Windows starts?",
+        "Startup Shortcut",
+        [System.Windows.Forms.MessageBoxButtons]::YesNo,
+        [System.Windows.Forms.MessageBoxIcon]::Question
+    ) -eq [System.Windows.Forms.DialogResult]::Yes
 
-if ($enableStartup) {
-    $startupDir = [Environment]::GetFolderPath("Startup")
-    $startupShortcut = Join-Path $startupDir "Teams Always Green.lnk"
+    if ($enableStartup) {
+        $startupDir = [Environment]::GetFolderPath("Startup")
+        $startupShortcut = Join-Path $startupDir "Teams Always Green.lnk"
+    }
 }
 
+$uninstallScriptPath = Join-Path $installPath "Uninstall-Teams-Always-Green.ps1"
+$uninstallScript = @'
+param([switch]$Silent)
+Add-Type -AssemblyName System.Windows.Forms
+
+$scriptPath = $MyInvocation.MyCommand.Path
+$installRoot = Split-Path -Parent $scriptPath
+$programsDir = [Environment]::GetFolderPath("Programs")
+$menuFolder = Join-Path $programsDir "Teams Always Green"
+$shortcuts = @(
+    Join-Path $menuFolder "Teams Always Green.lnk",
+    Join-Path $menuFolder "Uninstall Teams Always Green.lnk",
+    Join-Path ([Environment]::GetFolderPath("Desktop")) "Teams Always Green.lnk",
+    Join-Path ([Environment]::GetFolderPath("Startup")) "Teams Always Green.lnk"
+)
+
+foreach ($shortcut in $shortcuts) {
+    try { if (Test-Path $shortcut) { Remove-Item -Path $shortcut -Force -ErrorAction SilentlyContinue } } catch { }
+}
 try {
-    New-Shortcut -shortcutPath $menuShortcut -targetScriptPath $targetScript -workingDir $installPath
-    if ($enableStartup) {
-        New-Shortcut -shortcutPath $startupShortcut -targetScriptPath $targetScript -workingDir $installPath
+    if (Test-Path $menuFolder -and -not (Get-ChildItem -Path $menuFolder -Force | Measure-Object).Count) {
+        Remove-Item -Path $menuFolder -Force -ErrorAction SilentlyContinue
     }
-    New-Shortcut -shortcutPath $desktopShortcut -targetScriptPath $targetScript -workingDir $installPath
+} catch { }
+
+$deleteFiles = $true
+if (-not $Silent) {
+    $resp = [System.Windows.Forms.MessageBox]::Show(
+        "Remove the app files from:`n$installRoot`n`nThis will close the app if it is running.",
+        "Uninstall Teams Always Green",
+        [System.Windows.Forms.MessageBoxButtons]::YesNo,
+        [System.Windows.Forms.MessageBoxIcon]::Warning
+    )
+    if ($resp -ne [System.Windows.Forms.DialogResult]::Yes) { $deleteFiles = $false }
+}
+
+if (-not $deleteFiles) { return }
+$cmdPath = Join-Path $env:TEMP ("TAG-Uninstall-" + [Guid]::NewGuid().ToString("N") + ".cmd")
+$cmd = "@echo off`r`n" + "timeout /t 2 >nul`r`n" + "rmdir /s /q `"$installRoot`"`r`n" + "del /f /q `"$cmdPath`"`r`n"
+Set-Content -Path $cmdPath -Value $cmd -Encoding ASCII
+Start-Process -FilePath "cmd.exe" -ArgumentList "/c `"$cmdPath`"" -WindowStyle Hidden
+'@
+try {
+    Set-Content -Path $uninstallScriptPath -Value $uninstallScript -Encoding UTF8
 } catch {
-    Write-Host "Failed to create shortcuts: $($_.Exception.Message)"
+    Write-SetupLog "Failed to write uninstall script."
+}
+
+$shortcutsCreated = @()
+if (-not $portableMode) {
+    try {
+        New-Shortcut -shortcutPath $menuShortcut -targetScriptPath $targetScript -workingDir $installPath
+        $shortcutsCreated += "Start Menu"
+        if ($enableStartup) {
+            New-Shortcut -shortcutPath $startupShortcut -targetScriptPath $targetScript -workingDir $installPath
+            $shortcutsCreated += "Startup"
+        }
+        New-Shortcut -shortcutPath $desktopShortcut -targetScriptPath $targetScript -workingDir $installPath
+        $shortcutsCreated += "Desktop"
+        if (Test-Path $uninstallScriptPath) {
+            New-Shortcut -shortcutPath $uninstallShortcut -targetScriptPath $uninstallScriptPath -workingDir $installPath
+            $shortcutsCreated += "Uninstall"
+        }
+    } catch {
+        Write-Host "Failed to create shortcuts: $($_.Exception.Message)"
+    }
+} else {
+    Write-SetupLog "Portable mode: shortcuts not created."
 }
 
 Write-Host "Installed Teams Always Green to: $installPath"
-Write-Host "Start Menu shortcut: $menuShortcut"
-if ($enableStartup) {
-    Write-Host "Startup shortcut: $startupShortcut"
-} else {
-    Write-Host "Startup shortcut: (skipped)"
-}
-Write-Host "Desktop shortcut: $desktopShortcut"
 Write-Host "Setup log: $logPath"
 
-$postAction = [System.Windows.Forms.MessageBox]::Show(
-    "Install complete.`n`nYes = Launch now`nNo = Open Settings`nCancel = Close",
-    "Quick Setup",
-    [System.Windows.Forms.MessageBoxButtons]::YesNoCancel,
-    [System.Windows.Forms.MessageBoxIcon]::Information
-)
-if ($postAction -eq [System.Windows.Forms.DialogResult]::Yes) {
+$action = Show-SetupSummary -installPath $installPath -integrityStatus $integrityStatus -portableMode $portableMode -shortcutsCreated $shortcutsCreated -logPath $logPath
+if ($action -eq "Launch") {
     Start-Process "$env:WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe" -ArgumentList "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$targetScript`"" -WorkingDirectory $installPath
-} elseif ($postAction -eq [System.Windows.Forms.DialogResult]::No) {
+} elseif ($action -eq "Settings") {
     Start-Process "$env:WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe" -ArgumentList "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$targetScript`" -SettingsOnly" -WorkingDirectory $installPath
+} elseif ($action -eq "Folder") {
+    Start-Process "explorer.exe" $installPath
 }
 
