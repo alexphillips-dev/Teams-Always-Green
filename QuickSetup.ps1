@@ -52,6 +52,31 @@ function Get-FileHashHex([string]$path) {
     }
 }
 
+function Is-TextFile([string]$relativePath) {
+    $ext = [System.IO.Path]::GetExtension($relativePath)
+    if ([string]::IsNullOrWhiteSpace($ext)) { return $true }
+    $ext = $ext.ToLowerInvariant()
+    return @(".ps1", ".cmd", ".vbs", ".json", ".md", ".txt", ".log", ".csv", ".ini") -contains $ext
+}
+
+function Get-NormalizedTextHash([string]$path, [string]$lineEnding) {
+    try {
+        $raw = Get-Content -Path $path -Raw
+        if ($null -eq $raw) { return $null }
+        $normalized = $raw -replace "`r`n", "`n"
+        $normalized = $normalized -replace "`r", "`n"
+        if ($lineEnding -eq "CRLF") {
+            $normalized = $normalized -replace "`n", "`r`n"
+        }
+        $bytes = [System.Text.UTF8Encoding]::new($false).GetBytes($normalized)
+        $sha = [System.Security.Cryptography.SHA256]::Create()
+        $hash = $sha.ComputeHash($bytes)
+        return ([BitConverter]::ToString($hash)).Replace("-", "")
+    } catch {
+        return $null
+    }
+}
+
 function Load-Manifest([string]$path) {
     if (-not (Test-Path $path)) { return $null }
     try {
@@ -355,8 +380,23 @@ foreach ($file in $filesToDownload) {
         if ($expected) {
             $actual = Get-FileHashHex $targetPath
             if (-not $actual -or ($actual.ToLowerInvariant() -ne [string]$expected.ToLowerInvariant())) {
-                Show-SetupError ("Integrity check failed for {0}." -f $file.Path)
-                exit 1
+                $matched = $false
+                if (Is-TextFile $file.Path) {
+                    $altLf = Get-NormalizedTextHash $targetPath "LF"
+                    if ($altLf -and ($altLf.ToLowerInvariant() -eq [string]$expected.ToLowerInvariant())) {
+                        $matched = $true
+                    } else {
+                        $altCrLf = Get-NormalizedTextHash $targetPath "CRLF"
+                        if ($altCrLf -and ($altCrLf.ToLowerInvariant() -eq [string]$expected.ToLowerInvariant())) {
+                            $matched = $true
+                        }
+                    }
+                }
+                if (-not $matched) {
+                    Show-SetupError ("Integrity check failed for {0}." -f $file.Path)
+                    exit 1
+                }
+                Write-SetupLog ("Integrity check matched after line-ending normalization: {0}" -f $file.Path)
             }
         }
     }
