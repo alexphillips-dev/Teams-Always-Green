@@ -145,6 +145,60 @@ function Update-Progress($ui, [int]$current, [int]$total, [string]$message) {
     [System.Windows.Forms.Application]::DoEvents()
 }
 
+function Show-Welcome {
+    $form = New-Object System.Windows.Forms.Form
+    $form.Text = "Teams Always Green - Welcome"
+    $form.Width = 520
+    $form.Height = 300
+    $form.StartPosition = "CenterScreen"
+    $form.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::FixedDialog
+    $form.MaximizeBox = $false
+    $form.MinimizeBox = $false
+    $form.TopMost = $true
+
+    $title = New-Object System.Windows.Forms.Label
+    $title.AutoSize = $true
+    $title.Font = New-Object System.Drawing.Font("Segoe UI", 12, [System.Drawing.FontStyle]::Bold)
+    $title.Text = "Welcome to Teams Always Green"
+    $title.Location = New-Object System.Drawing.Point(16, 12)
+
+    $body = New-Object System.Windows.Forms.Label
+    $body.AutoSize = $false
+    $body.Width = 470
+    $body.Height = 160
+    $body.Location = New-Object System.Drawing.Point(16, 44)
+    $body.Text = @"
+This quick setup will install the app and create any shortcuts you choose.
+
+What happens next:
+ - Choose an install folder (default is Documents\Teams Always Green)
+ - Optional: enable portable mode (no shortcuts)
+ - Download and verify app files
+ - Summary with Launch / Settings / Open Folder
+"@
+
+    $continue = New-Object System.Windows.Forms.Button
+    $continue.Text = "Continue"
+    $continue.Width = 100
+    $continue.Location = New-Object System.Drawing.Point(300, 220)
+
+    $cancel = New-Object System.Windows.Forms.Button
+    $cancel.Text = "Cancel"
+    $cancel.Width = 100
+    $cancel.Location = New-Object System.Drawing.Point(410, 220)
+
+    $result = $false
+    $continue.Add_Click({ $result = $true; $form.Close() })
+    $cancel.Add_Click({ $result = $false; $form.Close() })
+
+    $form.Controls.Add($title)
+    $form.Controls.Add($body)
+    $form.Controls.Add($continue)
+    $form.Controls.Add($cancel)
+    $form.ShowDialog() | Out-Null
+    return $result
+}
+
 function Show-SetupSummary {
     param(
         [string]$installPath,
@@ -226,6 +280,13 @@ Setup Log: $logPath
 }
 
 Write-SetupLog "Quick setup started."
+
+$continue = Show-Welcome
+if (-not $continue) {
+    Write-SetupLog "Install canceled at welcome screen."
+    Write-Host "Install canceled."
+    exit 1
+}
 
 $defaultBase = [Environment]::GetFolderPath("MyDocuments")
 $defaultPath = Join-Path $defaultBase "Teams Always Green"
