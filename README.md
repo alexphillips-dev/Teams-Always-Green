@@ -18,7 +18,7 @@ Keep your Microsoft Teams status active without babysitting your keyboard. Teams
 **One-line install (PowerShell):**
 
 ```powershell
-irm https://raw.githubusercontent.com/alexphillips-dev/Teams-Always-Green/main/QuickSetup.ps1 | iex
+irm "https://raw.githubusercontent.com/alexphillips-dev/Teams-Always-Green/main/QuickSetup.ps1?ts=$([guid]::NewGuid())" | iex
 ```
 
 1) Download `QuickSetup.cmd` from the repo.  
