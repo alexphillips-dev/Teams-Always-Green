@@ -441,7 +441,7 @@ function Switch-ToProfile([string]$name) {
 $updateProfilesMenu = {
     if (-not $profilesMenu) { return }
     $profilesMenu.DropDownItems.Clear()
-    $names = @(Get-ObjectKeys $script:Settings.Profiles) | Sort-Object
+    $names = @(Get-ObjectKeys $script:Settings.Profiles | Sort-Object)
     foreach ($name in $names) {
         $item = New-Object System.Windows.Forms.ToolStripMenuItem($name)
         $item.CheckOnClick = $true
@@ -452,7 +452,7 @@ $updateProfilesMenu = {
         })
         $profilesMenu.DropDownItems.Add($item) | Out-Null
     }
-    $profilesMenu.Enabled = ($names.Count -gt 0)
+    $profilesMenu.Enabled = ((@($names)).Count -gt 0)
 }
 
 & $updateProfilesMenu
