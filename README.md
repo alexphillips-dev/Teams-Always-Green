@@ -9,6 +9,7 @@ Keep your Microsoft Teams status active without babysitting your keyboard. Teams
 - **Smart scheduling:** Work hours, pauses, and quick overrides.
 - **Profiles:** Switch configurations in seconds.
 - **Helpful logging:** Debug detail when you need it.
+- **Language support:** English, Español, Français, Deutsch (auto-detect + manual).
 
 ---
 
@@ -24,7 +25,7 @@ irm https://raw.githubusercontent.com/alexphillips-dev/Teams-Always-Green/main/Q
 2) Double-click it.  
 3) Choose your install folder (default: `Documents\Teams Always Green`).
 
-The installer will download the main script and create required folders and shortcuts.
+The installer will download the app scripts/modules and create required folders and shortcuts.
 
 ---
 
@@ -48,7 +49,7 @@ The installer will download the main script and create required folders and shor
 ## Manual Install
 
 1) Create a folder (example: `Documents\Teams Always Green`).  
-2) Place `Script\Teams Always Green.ps1` inside it (create `Script` if missing).  
+2) Copy the entire `Script\` folder from the repo into it.  
 3) Create subfolders: `Debug`, `Logs`, `Meta`, `Settings`.  
 4) Run:
 
@@ -71,6 +72,11 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File "Script\Teams Always Gre
 Teams Always Green\
   Script\
     Teams Always Green.ps1
+    Core\
+    Features\
+    I18n\
+    Tray\
+    UI\
   QuickSetup.ps1
   QuickSetup.cmd
   Teams Always Green.VBS
@@ -85,6 +91,7 @@ Key files:
 - Logs: `Logs\Teams-Always-Green.log`
 - Bootstrap: `Logs\Teams-Always-Green.bootstrap.log`
 - Settings: `Settings\Teams-Always-Green.settings.json`
+- State: `Settings\Teams-Always-Green.state.json`
 
 ---
 
