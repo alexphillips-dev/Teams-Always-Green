@@ -277,16 +277,23 @@ try {
 $ui = New-ProgressForm
 Update-Progress $ui 0 1 "Preparing installer..."
 
-$localRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
-$localManifestPath = Join-Path $localRoot "QuickSetup.manifest.json"
+$localRoot = $null
+if ($PSScriptRoot) { $localRoot = $PSScriptRoot }
+elseif ($PSCommandPath) { $localRoot = Split-Path -Parent $PSCommandPath }
+elseif ($MyInvocation.MyCommand.Path) { $localRoot = Split-Path -Parent $MyInvocation.MyCommand.Path }
+
+$localManifestPath = $null
 $useLocal = $false
-if (Test-Path (Join-Path $localRoot "Script\Teams Always Green.ps1")) {
-    $useLocal = [System.Windows.Forms.MessageBox]::Show(
-        "Local app files were found next to QuickSetup.ps1.`nUse local files instead of downloading?",
-        "Use Local Files",
-        [System.Windows.Forms.MessageBoxButtons]::YesNo,
-        [System.Windows.Forms.MessageBoxIcon]::Question
-    ) -eq [System.Windows.Forms.DialogResult]::Yes
+if ($localRoot) {
+    $localManifestPath = Join-Path $localRoot "QuickSetup.manifest.json"
+    if (Test-Path (Join-Path $localRoot "Script\Teams Always Green.ps1")) {
+        $useLocal = [System.Windows.Forms.MessageBox]::Show(
+            "Local app files were found next to QuickSetup.ps1.`nUse local files instead of downloading?",
+            "Use Local Files",
+            [System.Windows.Forms.MessageBoxButtons]::YesNo,
+            [System.Windows.Forms.MessageBoxIcon]::Question
+        ) -eq [System.Windows.Forms.DialogResult]::Yes
+    }
 }
 
 $manifest = $null
