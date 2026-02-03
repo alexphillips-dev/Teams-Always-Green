@@ -25,7 +25,9 @@ irm https://raw.githubusercontent.com/alexphillips-dev/Teams-Always-Green/main/Q
 2) Double-click it.  
 3) Choose your install folder (default: `Documents\Teams Always Green`).
 
-The installer will download the app scripts/modules and create required folders and shortcuts.
+The installer downloads the app scripts/modules, validates integrity (when the manifest is available),
+creates required folders, and can set up shortcuts. A setup summary appears at the end.
+Optional: choose **portable mode** to skip shortcuts. Setup logs are saved to `%TEMP%\TeamsAlwaysGreen-QuickSetup.log`.
 
 ---
 
@@ -77,6 +79,7 @@ Teams Always Green\
     I18n\
     Tray\
     UI\
+  Uninstall-Teams-Always-Green.ps1
   QuickSetup.ps1
   QuickSetup.cmd
   Teams Always Green.VBS
@@ -113,8 +116,12 @@ Key files:
 
 ## Uninstall
 
+**Standard install (recommended):** Use the Start Menu shortcut  
+`Teams Always Green` → **Uninstall Teams Always Green**
+
+**Manual/portable uninstall:**
 1) Exit the app from the tray.  
-2) Remove shortcuts:
+2) Remove shortcuts (if any):
    - Startup: `%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\Teams Always Green.lnk`
    - Start Menu: `%APPDATA%\Microsoft\Windows\Start Menu\Programs\Teams Always Green\Teams Always Green.lnk`
 3) Delete the install folder.
