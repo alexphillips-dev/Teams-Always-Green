@@ -286,11 +286,11 @@ Setup Log: $logPath
     $buttonClose.Width = 90
     $buttonClose.Location = New-Object System.Drawing.Point(446, 175)
 
-    $action = "Close"
-    $buttonLaunch.Add_Click({ $action = "Launch"; $form.Close() })
-    $buttonSettings.Add_Click({ $action = "Settings"; $form.Close() })
-    $buttonFolder.Add_Click({ $action = "Folder"; $form.Close() })
-    $buttonClose.Add_Click({ $action = "Close"; $form.Close() })
+    $form.Tag = "Close"
+    $buttonLaunch.Add_Click({ $form.Tag = "Launch"; $form.Close() })
+    $buttonSettings.Add_Click({ $form.Tag = "Settings"; $form.Close() })
+    $buttonFolder.Add_Click({ $form.Tag = "Folder"; $form.Close() })
+    $buttonClose.Add_Click({ $form.Tag = "Close"; $form.Close() })
 
     $form.Controls.Add($title)
     $form.Controls.Add($summary)
@@ -300,7 +300,7 @@ Setup Log: $logPath
     $form.Controls.Add($buttonClose)
     $form.TopMost = $true
     $form.ShowDialog() | Out-Null
-    return $action
+    return [string]$form.Tag
 }
 
 Write-SetupLog "Quick setup started."
