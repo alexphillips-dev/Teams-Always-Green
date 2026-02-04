@@ -1412,6 +1412,9 @@ function Show-SetupWizard {
         } elseif ($index -eq 3) {
             $btnBack.Enabled = $false
             $btnNext.Enabled = $false
+            $btnBack.Visible = $false
+            $btnNext.Visible = $false
+            $btnCancel.Visible = $false
         } else {
             $btnNext.Enabled = $true
         }
