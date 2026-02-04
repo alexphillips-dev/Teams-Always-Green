@@ -224,10 +224,13 @@ function Show-Welcome {
     $title.Location = New-Object System.Drawing.Point(44, 6)
 
     $tagline = New-Object System.Windows.Forms.Label
-    $tagline.AutoSize = $true
+    $tagline.AutoSize = $false
     $tagline.Font = New-Object System.Drawing.Font("Segoe UI", 9, [System.Drawing.FontStyle]::Regular)
     $tagline.Text = "Stay available without micromanaging your status."
-    $tagline.Location = New-Object System.Drawing.Point(44, 32)
+    $tagline.Location = New-Object System.Drawing.Point(44, 34)
+    $tagline.Width = 500
+    $tagline.Height = 18
+    $tagline.Padding = New-Object System.Windows.Forms.Padding(0, 1, 0, 0)
 
     $headerPanel.Controls.Add($iconBox)
     $headerPanel.Controls.Add($title)
