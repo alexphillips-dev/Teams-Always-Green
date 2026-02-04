@@ -1520,32 +1520,22 @@ function Show-SetupWizard {
             }
             $state.IntegrityStatus = if ($manifest) { "Verified" } else { "Not verified (manifest unavailable)" }
 
-            $downloadUi = @{
-                Form = $form
-                Label = $dlLabel
-                Progress = $dlProgress
-                Meta = $dlMeta
-                DetailsLink = $dlDetailsLink
-                DetailsList = $dlDetailsList
-                CancelButton = $dlCancel
-                NextButton = $null
-                NextClicked = $false
-                Cancelled = $false
-                DetailsVisible = $false
-                StartTime = (Get-Date)
-                BytesDownloaded = 0
-            }
-
-            $dlDetailsLink.Add_LinkClicked({
-                $downloadUi.DetailsVisible = -not $downloadUi.DetailsVisible
-                $downloadUi.DetailsList.Visible = $downloadUi.DetailsVisible
-                $dlDetailsLink.Text = if ($downloadUi.DetailsVisible) { "Hide details" } else { "Show details" }
-            })
-            $dlCancel.Add_Click({
-                $downloadUi.Cancelled = $true
-                $dlCancel.Enabled = $false
-                $dlLabel.Text = "Canceling after current file..."
-            })
+    $downloadUi = New-ProgressDialog -title "Downloading Teams Always Green" -showDetails $true
+    $downloadUi.Form.Owner = $form
+    $downloadUi.Form.StartPosition = "CenterParent"
+    $downloadUi.DetailsList = $dlDetailsList
+    $downloadUi.DetailsLink = $dlDetailsLink
+    $downloadUi.DetailsVisible = $false
+    $dlDetailsLink.Add_LinkClicked({
+        $downloadUi.DetailsVisible = -not $downloadUi.DetailsVisible
+        $downloadUi.DetailsList.Visible = $downloadUi.DetailsVisible
+        $dlDetailsLink.Text = if ($downloadUi.DetailsVisible) { "Hide details" } else { "Show details" }
+    })
+    $dlCancel.Add_Click({
+        $downloadUi.Cancelled = $true
+        $dlCancel.Enabled = $false
+        $dlLabel.Text = "Canceling after current file..."
+    })
 
             $total = $script:QuickSetupFiles.Count
             $index = 0
