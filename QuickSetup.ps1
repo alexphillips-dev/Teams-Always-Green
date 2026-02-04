@@ -1427,6 +1427,17 @@ function Show-SetupWizard {
     })
 
     $btnNext.Add_Click({
+        if ($stepRef.Value -eq 2) {
+            if (-not $downloadComplete) { return }
+            $sumInstall.Text = $state.InstallPath
+            $sumMode.Text = if ($state.PortableMode) { "Portable (no shortcuts)" } else { "Standard" }
+            $sumIntegrity.Text = $state.IntegrityStatus
+            $sumShortcuts.Text = if ($state.ShortcutsCreated.Count -gt 0) { $state.ShortcutsCreated -join "; " } else { "None" }
+            $sumLog.Text = $logPath
+            $pinTip.Visible = (-not $state.PortableMode)
+            & $showStep 3
+            return
+        }
         if ($stepRef.Value -eq 0) {
             $state.CreateShortcuts = [bool]$chkShortcuts.Checked
             $state.EnableStartup = [bool]$chkStartup.Checked
@@ -1610,16 +1621,8 @@ function Show-SetupWizard {
             Update-Progress $downloadUi $total $total "Step 2 of 4: Download complete. Click Next to continue."
             $downloadComplete = $true
             $btnNext.Enabled = $true
-
             $state.ShortcutsCreated = Finalize-Install -installPath $state.InstallPath -targetScript $targetScript -portableMode $state.PortableMode -enableStartup $state.EnableStartup
-
-            $sumInstall.Text = $state.InstallPath
-            $sumMode.Text = if ($state.PortableMode) { "Portable (no shortcuts)" } else { "Standard" }
-            $sumIntegrity.Text = $state.IntegrityStatus
-            $sumShortcuts.Text = if ($state.ShortcutsCreated.Count -gt 0) { $state.ShortcutsCreated -join "; " } else { "None" }
-            $sumLog.Text = $logPath
-            $pinTip.Visible = (-not $state.PortableMode)
-            & $showStep 3
+            return
         }
     })
 
