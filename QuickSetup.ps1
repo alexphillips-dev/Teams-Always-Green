@@ -1404,6 +1404,9 @@ function Show-SetupWizard {
         $panelDownload.Visible = ($index -eq 2)
         $panelSummary.Visible = ($index -eq 3)
         $btnBack.Enabled = ($index -gt 0 -and $index -lt 3)
+        $btnBack.Visible = ($index -lt 3)
+        $btnNext.Visible = ($index -lt 3)
+        $btnCancel.Visible = ($index -lt 3)
         if ($index -eq 2) {
             $btnNext.Enabled = $downloadComplete
         } elseif ($index -eq 3) {
