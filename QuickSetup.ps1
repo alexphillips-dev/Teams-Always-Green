@@ -292,10 +292,10 @@ function New-ProgressDialog {
     return $ui
 }
 
-function Update-Progress($ui, [int]$current, [int]$total, [string]$message) {
+function Update-Progress($ui, $current, $total, [string]$message) {
     if (-not $ui) { return }
-    if ($current -is [System.Array]) { $current = if ($current.Count -gt 0) { [int]$current[0] } else { 0 } }
-    if ($total -is [System.Array]) { $total = if ($total.Count -gt 0) { [int]$total[0] } else { 0 } }
+    $current = Get-ScalarInt $current
+    $total = Get-ScalarInt $total
     $pct = 0
     if ($total -gt 0) { $pct = [Math]::Min(100, [Math]::Round(($current / $total) * 100)) }
     $ui.Label.Text = $message
