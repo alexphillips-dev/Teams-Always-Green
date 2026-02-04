@@ -174,7 +174,7 @@ function New-ProgressForm {
     $form = New-Object System.Windows.Forms.Form
     $form.Text = "Teams Always Green - Setup"
     $form.Width = 520
-    $form.Height = 140
+    $form.Height = 180
     $form.StartPosition = "CenterScreen"
     $form.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::FixedDialog
     $form.MaximizeBox = $false
@@ -192,12 +192,19 @@ function New-ProgressForm {
     $progress.Minimum = 0
     $progress.Maximum = 100
 
+    $nextButton = New-Object System.Windows.Forms.Button
+    $nextButton.Text = "Next"
+    $nextButton.Width = 90
+    $nextButton.Enabled = $false
+    $nextButton.Location = New-Object System.Drawing.Point(396, 70)
+
     $form.Controls.Add($label)
     $form.Controls.Add($progress)
+    $form.Controls.Add($nextButton)
     $form.TopMost = $true
     $form.Show()
     [System.Windows.Forms.Application]::DoEvents()
-    return @{ Form = $form; Label = $label; Progress = $progress }
+    return @{ Form = $form; Label = $label; Progress = $progress; NextButton = $nextButton; NextClicked = $false }
 }
 
 function Update-Progress($ui, [int]$current, [int]$total, [string]$message) {
@@ -207,6 +214,18 @@ function Update-Progress($ui, [int]$current, [int]$total, [string]$message) {
     $ui.Label.Text = $message
     $ui.Progress.Value = $pct
     [System.Windows.Forms.Application]::DoEvents()
+}
+
+function Wait-For-ProgressNext($ui) {
+    if (-not $ui -or -not $ui.Form -or $ui.Form.IsDisposed) { return }
+    $ui.NextClicked = $false
+    $ui.NextButton.Enabled = $true
+    $ui.NextButton.Add_Click({ $ui.NextClicked = $true })
+    while (-not $ui.NextClicked -and $ui.Form.Visible) {
+        [System.Windows.Forms.Application]::DoEvents()
+        Start-Sleep -Milliseconds 50
+    }
+    try { $ui.Form.Close() } catch { }
 }
 
 function Show-Welcome {
@@ -704,7 +723,7 @@ try {
 }
 
 $ui = New-ProgressForm
-Update-Progress $ui 0 1 "Preparing installer..."
+Update-Progress $ui 0 1 "Step 2 of 4: Preparing download..."
 
 $localRoot = $null
 if ($PSScriptRoot) { $localRoot = $PSScriptRoot }
@@ -744,7 +763,7 @@ $index = 0
 foreach ($file in $filesToDownload) {
     $index++
     $targetPath = Join-Path $installPath $file.Path
-    $status = "Installing {0} ({1}/{2})" -f $file.Path, $index, $total
+    $status = "Step 2 of 4: Downloading {0} ({1}/{2})" -f $file.Path, $index, $total
     Update-Progress $ui $index $total $status
     Write-SetupLog $status
 
@@ -800,7 +819,11 @@ foreach ($file in $filesToDownload) {
     }
 }
 
-if ($ui -and $ui.Form) { $ui.Form.Close() }
+if ($ui -and $ui.Form) {
+    Write-SetupLog "Download completed."
+    Update-Progress $ui $total $total "Step 2 of 4: Download complete. Click Next to continue."
+    Wait-For-ProgressNext $ui
+}
 function New-Shortcut([string]$shortcutPath, [string]$targetScriptPath, [string]$workingDir) {
     $shell = New-Object -ComObject WScript.Shell
     $shortcut = $shell.CreateShortcut($shortcutPath)
