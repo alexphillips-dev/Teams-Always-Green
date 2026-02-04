@@ -300,7 +300,10 @@ function Update-Progress($ui, [int]$current, [int]$total, [string]$message) {
     $ui.Progress.Value = $pct
     if ($ui.Meta) {
         try {
-            $elapsed = (Get-Date) - $ui.StartTime
+            $startTime = $ui.StartTime
+            if ($startTime -is [System.Array] -and $startTime.Count -gt 0) { $startTime = $startTime[0] }
+            if (-not ($startTime -is [DateTime])) { $startTime = Get-Date; $ui.StartTime = $startTime }
+            $elapsed = (Get-Date) - $startTime
             $rate = if ($elapsed.TotalMinutes -gt 0 -and $current -gt 0) { "{0:N1} files/min" -f ($current / $elapsed.TotalMinutes) } else { "-" }
             $remaining = [Math]::Max(0, $total - $current)
             $etaSeconds = if ($current -gt 0) { ($elapsed.TotalSeconds / $current) * $remaining } else { 0 }
