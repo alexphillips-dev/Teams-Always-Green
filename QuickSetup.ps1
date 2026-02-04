@@ -167,6 +167,7 @@ function Show-Welcome {
     param([System.Windows.Forms.Form]$owner)
     $form = New-Object System.Windows.Forms.Form
     $form.Text = "Teams Always Green - Welcome"
+    $form.ClientSize = New-Object System.Drawing.Size(580, 360)
     $form.Width = 600
     $form.Height = 400
     $form.StartPosition = "CenterScreen"
@@ -199,6 +200,7 @@ function Show-Welcome {
     }
     if (-not $welcomeIcon) {
         try {
+            try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 } catch { }
             $remoteIconUrl = "https://raw.githubusercontent.com/alexphillips-dev/Teams-Always-Green/main/Meta/Icons/Tray_Icon.ico"
             $remoteIconPath = Join-Path $env:TEMP "TeamsAlwaysGreen-Welcome.ico"
             $wc = New-Object System.Net.WebClient
@@ -266,17 +268,17 @@ This setup does not:
     $shortcutsBox.Text = "Create Start Menu/Desktop shortcuts (Recommended)"
     $shortcutsBox.Checked = $true
     $shortcutsBox.AutoSize = $true
-    $shortcutsBox.Location = New-Object System.Drawing.Point(24, 290)
+    $shortcutsBox.Location = New-Object System.Drawing.Point(24, 278)
 
     $continue = New-Object System.Windows.Forms.Button
     $continue.Text = "Continue"
     $continue.Width = 100
-    $continue.Location = New-Object System.Drawing.Point(340, 308)
+    $continue.Location = New-Object System.Drawing.Point(320, 300)
 
     $cancel = New-Object System.Windows.Forms.Button
     $cancel.Text = "Cancel"
     $cancel.Width = 100
-    $cancel.Location = New-Object System.Drawing.Point(450, 308)
+    $cancel.Location = New-Object System.Drawing.Point(430, 300)
 
     $continue.DialogResult = [System.Windows.Forms.DialogResult]::OK
     $cancel.DialogResult = [System.Windows.Forms.DialogResult]::Cancel
