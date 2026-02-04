@@ -282,11 +282,11 @@ function Update-Progress($ui, [int]$current, [int]$total, [string]$message) {
     $ui.Progress.Value = $pct
     if ($ui.Meta) {
         $elapsed = (Get-Date) - $ui.StartTime
-        $rate = if ($elapsed.TotalMinutes -gt 0 -and $current -gt 0) { "{0:N1} files/min" -f ($current / $elapsed.TotalMinutes) } else { "â€”" }
+        $rate = if ($elapsed.TotalMinutes -gt 0 -and $current -gt 0) { "{0:N1} files/min" -f ($current / $elapsed.TotalMinutes) } else { "-" }
         $remaining = [Math]::Max(0, $total - $current)
         $etaSeconds = if ($current -gt 0) { ($elapsed.TotalSeconds / $current) * $remaining } else { 0 }
-        $etaText = if ($etaSeconds -gt 0) { ([TimeSpan]::FromSeconds($etaSeconds)).ToString("mm\:ss") } else { "--:--" }
-        $ui.Meta.Text = ("Files: {0}/{1} â€¢ Rate: {2} â€¢ ETA: {3}" -f $current, $total, $rate, $etaText)
+        $etaText = if ($etaSeconds -gt 0) { ([TimeSpan]::FromSeconds($etaSeconds)).ToString('mm\\:ss') } else { '--:--' }
+        $ui.Meta.Text = ("Files: {0}/{1} | Rate: {2} | ETA: {3}" -f $current, $total, $rate, $etaText)
     }
     [System.Windows.Forms.Application]::DoEvents()
 }
@@ -388,7 +388,7 @@ function Show-Welcome {
     $body.Width = 520
     $body.Height = 190
     $body.Location = New-Object System.Drawing.Point(12, 10)
-            $body.Text = @(
+                $body.Text = @(
         "Quick setup will install the app and walk you through the choices below.",
         "",
         "Steps:",
@@ -1141,7 +1141,7 @@ function Show-SetupWizard {
     $welcomeBody.Width = 550
     $welcomeBody.Height = 170
     $welcomeBody.Location = New-Object System.Drawing.Point(12, 10)
-            $welcomeBody.Text = @(
+                $welcomeBody.Text = @(
         "Quick setup will install the app and walk you through the choices below.",
         "",
         "Steps:",
@@ -1844,6 +1844,8 @@ if ($action -eq "Launch") {
         Start-Process "explorer.exe" $installPath
     }
     if ($setupOwner -and -not $setupOwner.IsDisposed) { $setupOwner.Close() }
+
+
 
 
 
