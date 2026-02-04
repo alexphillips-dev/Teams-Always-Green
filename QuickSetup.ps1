@@ -1085,7 +1085,7 @@ function Show-SetupWizard {
     $form = New-Object System.Windows.Forms.Form
     $form.Text = "Teams Always Green - Setup"
     $form.Width = 640
-    $form.Height = 460
+    $form.Height = 480
     $form.StartPosition = "CenterScreen"
     $form.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::FixedDialog
     $form.MaximizeBox = $false
@@ -1099,7 +1099,7 @@ function Show-SetupWizard {
 
     $panelWelcome = New-Object System.Windows.Forms.Panel
     $panelWelcome.Location = New-Object System.Drawing.Point(16, 44)
-    $panelWelcome.Size = New-Object System.Drawing.Size(600, 320)
+    $panelWelcome.Size = New-Object System.Drawing.Size(600, 340)
 
     $headerPanel = New-Object System.Windows.Forms.Panel
     $headerPanel.Width = 580
@@ -1161,13 +1161,13 @@ function Show-SetupWizard {
     $card = New-Object System.Windows.Forms.Panel
     $card.BorderStyle = [System.Windows.Forms.BorderStyle]::FixedSingle
     $card.Width = 580
-    $card.Height = 190
+    $card.Height = 210
     $card.Location = New-Object System.Drawing.Point(0, 60)
 
     $welcomeBody = New-Object System.Windows.Forms.Label
     $welcomeBody.AutoSize = $false
     $welcomeBody.Width = 550
-    $welcomeBody.Height = 170
+    $welcomeBody.Height = 190
     $welcomeBody.Location = New-Object System.Drawing.Point(12, 10)
                 $welcomeBody.Text = @(
         "Quick setup will install the app and walk you through the choices below.",
@@ -1193,13 +1193,13 @@ function Show-SetupWizard {
     $chkShortcuts.Text = "Create Start Menu/Desktop shortcuts (Recommended)"
     $chkShortcuts.Checked = $true
     $chkShortcuts.AutoSize = $true
-    $chkShortcuts.Location = New-Object System.Drawing.Point(8, 260)
+    $chkShortcuts.Location = New-Object System.Drawing.Point(8, 280)
 
     $chkStartup = New-Object System.Windows.Forms.CheckBox
     $chkStartup.Text = "Start with Windows"
     $chkStartup.Checked = $false
     $chkStartup.AutoSize = $true
-    $chkStartup.Location = New-Object System.Drawing.Point(8, 284)
+    $chkStartup.Location = New-Object System.Drawing.Point(8, 304)
 
     $chkShortcuts.Add_CheckedChanged({
         $chkStartup.Enabled = [bool]$chkShortcuts.Checked
