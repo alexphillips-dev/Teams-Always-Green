@@ -1462,12 +1462,17 @@ function Show-SetupWizard {
     $summaryFormHeight = [Math]::Max(420, $baseFormHeight - 50)
     $positionNavButtons = {
         if (-not $form -or $form.IsDisposed) { return }
-        $clientWidth = Get-ScalarInt $form.ClientSize.Width
-        $clientHeight = Get-ScalarInt $form.ClientSize.Height
-        $buttonsY = $clientHeight - (Get-ScalarInt $btnCancel.Height) - 14
-        $btnCancel.Location = New-Object System.Drawing.Point($clientWidth - (Get-ScalarInt $btnCancel.Width) - 16, $buttonsY)
-        $btnNext.Location = New-Object System.Drawing.Point($btnCancel.Left - (Get-ScalarInt $btnNext.Width) - 10, $buttonsY)
-        $btnBack.Location = New-Object System.Drawing.Point($btnNext.Left - (Get-ScalarInt $btnBack.Width) - 10, $buttonsY)
+        $clientWidth = Get-ScalarInt @($form.ClientSize.Width)
+        $clientHeight = Get-ScalarInt @($form.ClientSize.Height)
+        $cancelWidth = Get-ScalarInt @($btnCancel.Width)
+        $cancelHeight = Get-ScalarInt @($btnCancel.Height)
+        $nextWidth = Get-ScalarInt @($btnNext.Width)
+        $backWidth = Get-ScalarInt @($btnBack.Width)
+        $buttonsY = $clientHeight - $cancelHeight - 14
+        if ($buttonsY -lt 0) { $buttonsY = 0 }
+        $btnCancel.Location = New-Object System.Drawing.Point(($clientWidth - $cancelWidth - 16), $buttonsY)
+        $btnNext.Location = New-Object System.Drawing.Point(($btnCancel.Left - $nextWidth - 10), $buttonsY)
+        $btnBack.Location = New-Object System.Drawing.Point(($btnNext.Left - $backWidth - 10), $buttonsY)
     }
     & $positionNavButtons
     $form.add_Shown({ & $positionNavButtons })
