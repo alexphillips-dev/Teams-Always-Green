@@ -1520,11 +1520,20 @@ function Show-SetupWizard {
             }
             $state.IntegrityStatus = if ($manifest) { "Verified" } else { "Not verified (manifest unavailable)" }
 
-    $downloadUi = New-ProgressDialog -title "Downloading Teams Always Green" -showDetails $true
-    $downloadUi.Form.Owner = $form
-    $downloadUi.Form.StartPosition = "CenterParent"
-    $downloadUi.DetailsList = $dlDetailsList
-    $downloadUi.DetailsLink = $dlDetailsLink
+    $downloadUi = @{
+        Form = $form
+        Label = $dlLabel
+        Progress = $dlProgress
+        Meta = $dlMeta
+        DetailsLink = $dlDetailsLink
+        DetailsList = $dlDetailsList
+        CancelButton = $dlCancel
+        NextButton = $null
+        NextClicked = $false
+        Cancelled = $false
+        StartTime = (Get-Date)
+        BytesDownloaded = 0
+    }
     $dlDetailsLink.Add_LinkClicked({
         $dlDetailsList.Visible = -not $dlDetailsList.Visible
         $dlDetailsLink.Text = if ($dlDetailsList.Visible) { "Hide details" } else { "Show details" }
