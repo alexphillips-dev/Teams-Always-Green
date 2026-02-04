@@ -294,6 +294,8 @@ function New-ProgressDialog {
 
 function Update-Progress($ui, [int]$current, [int]$total, [string]$message) {
     if (-not $ui) { return }
+    if ($current -is [System.Array]) { $current = if ($current.Count -gt 0) { [int]$current[0] } else { 0 } }
+    if ($total -is [System.Array]) { $total = if ($total.Count -gt 0) { [int]$total[0] } else { 0 } }
     $pct = 0
     if ($total -gt 0) { $pct = [Math]::Min(100, [Math]::Round(($current / $total) * 100)) }
     $ui.Label.Text = $message
