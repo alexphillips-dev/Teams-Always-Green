@@ -1447,8 +1447,12 @@ function Show-SetupWizard {
     })
 
     $btnNext.Add_Click({
+        Write-SetupLog ("Next clicked. Step={0} DownloadComplete={1}" -f $stepRef.Value, $state.DownloadComplete)
         if ($stepRef.Value -eq 2) {
-            if (-not $state.DownloadComplete) { return }
+            if (-not $state.DownloadComplete) {
+                Show-SetupInfo "Download is still running. Please wait until it finishes."
+                return
+            }
             $allowSummary = $true
             $sumInstall.Text = $state.InstallPath
             $sumMode.Text = if ($state.PortableMode) { "Portable (no shortcuts)" } else { "Standard" }
