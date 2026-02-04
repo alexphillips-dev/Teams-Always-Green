@@ -46,6 +46,7 @@ function Cleanup-SetupTempFiles {
     # Schedule a delayed cleanup to handle files still locked by the shell/editor.
     try {
         $cleanupCmd = Join-Path $tempRoot ("TeamsAlwaysGreen-Cleanup-" + [Guid]::NewGuid().ToString("N") + ".cmd")
+        $pattern = Join-Path $tempRoot "TeamsAlwaysGreen-QuickSetup*.ps1"
         $lines = @(
             "@echo off",
             "timeout /t 2 >nul",
@@ -53,7 +54,7 @@ function Cleanup-SetupTempFiles {
             "del /f /q `"$($tempRoot)\TeamsAlwaysGreen-Welcome.ico`"",
             "del /f /q `"$($tempRoot)\teams-always-green-run.err`"",
             "del /f /q `"$($tempRoot)\teams-always-green-run.out`"",
-            "for %%F in (`"$($tempRoot)\TeamsAlwaysGreen-QuickSetup*.ps1`") do del /f /q `\"%%~fF`\"",
+            ('for %%F in ("{0}") do del /f /q "%%~fF"' -f $pattern),
             "del /f /q `"$cleanupCmd`""
         )
         Set-Content -Path $cleanupCmd -Value ($lines -join "`r`n") -Encoding ASCII
