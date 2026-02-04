@@ -17,6 +17,29 @@ function Write-SetupLog([string]$message) {
     }
 }
 
+function Cleanup-SetupTempFiles {
+    param([bool]$success)
+    if (-not $success) { return }
+    Write-SetupLog "Cleaning up QuickSetup temp files."
+    $paths = @()
+    if ($script:WelcomeTempIconPath) { $paths += $script:WelcomeTempIconPath }
+    $paths += (Join-Path $tempRoot "TeamsAlwaysGreen-Welcome.ico")
+    foreach ($path in ($paths | Select-Object -Unique)) {
+        if ($path -and (Test-Path $path)) {
+            try { Remove-Item -Path $path -Force -ErrorAction Stop } catch { }
+        }
+    }
+    try {
+        Get-ChildItem -Path $tempRoot -Filter "TeamsAlwaysGreen-QuickSetup*.ps1" -ErrorAction SilentlyContinue | ForEach-Object {
+            try { Remove-Item -Path $_.FullName -Force -ErrorAction Stop } catch { }
+        }
+    } catch {
+    }
+    if ($logPath -and (Test-Path $logPath)) {
+        try { Remove-Item -Path $logPath -Force -ErrorAction Stop } catch { }
+    }
+}
+
 function Show-SetupError([string]$message) {
     Write-SetupLog "ERROR: $message"
     Show-SetupPrompt -message ($message + "`n`nLog: $logPath") -title "Quick Setup" -buttons ([System.Windows.Forms.MessageBoxButtons]::OK) -icon ([System.Windows.Forms.MessageBoxIcon]::Error) | Out-Null
@@ -206,6 +229,7 @@ function Show-Welcome {
             $wc = New-Object System.Net.WebClient
             $wc.DownloadFile($remoteIconUrl, $remoteIconPath)
             if (Test-Path $remoteIconPath) { $welcomeIcon = New-Object System.Drawing.Icon($remoteIconPath) }
+            $script:WelcomeTempIconPath = $remoteIconPath
         } catch {
         }
     }
@@ -516,6 +540,7 @@ $welcome = Show-Welcome -owner $setupOwner
 if (-not $welcome.Proceed) {
     Write-SetupLog "Install canceled at welcome screen."
     Write-Host "Install canceled."
+    Cleanup-SetupTempFiles -success $true
     if ($setupOwner -and -not $setupOwner.IsDisposed) { $setupOwner.Close() }
     exit 1
 }
@@ -525,7 +550,7 @@ if (-not $welcome.CreateShortcuts) {
     Write-SetupLog "Welcome: shortcuts enabled."
 }
 
-$step1 = Show-SetupPrompt -message "Step 2 of 4: Choose the install folder location." -title "Install Location" -buttons ([System.Windows.Forms.MessageBoxButtons]::OKCancel) -icon ([System.Windows.Forms.MessageBoxIcon]::Information) -owner $setupOwner
+$step1 = Show-SetupPrompt -message "Step 1 of 4: Choose the install folder location." -title "Install Location" -buttons ([System.Windows.Forms.MessageBoxButtons]::OKCancel) -icon ([System.Windows.Forms.MessageBoxIcon]::Information) -owner $setupOwner
 if ($step1 -ne [System.Windows.Forms.DialogResult]::OK) {
     Write-SetupLog "Install canceled at install location step."
     Write-Host "Install canceled."
