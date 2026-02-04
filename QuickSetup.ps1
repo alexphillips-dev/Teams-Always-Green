@@ -1525,11 +1525,9 @@ function Show-SetupWizard {
     $downloadUi.Form.StartPosition = "CenterParent"
     $downloadUi.DetailsList = $dlDetailsList
     $downloadUi.DetailsLink = $dlDetailsLink
-    $downloadUi.DetailsVisible = $false
     $dlDetailsLink.Add_LinkClicked({
-        $downloadUi.DetailsVisible = -not $downloadUi.DetailsVisible
-        $downloadUi.DetailsList.Visible = $downloadUi.DetailsVisible
-        $dlDetailsLink.Text = if ($downloadUi.DetailsVisible) { "Hide details" } else { "Show details" }
+        $dlDetailsList.Visible = -not $dlDetailsList.Visible
+        $dlDetailsLink.Text = if ($dlDetailsList.Visible) { "Hide details" } else { "Show details" }
     })
     $dlCancel.Add_Click({
         $downloadUi.Cancelled = $true
