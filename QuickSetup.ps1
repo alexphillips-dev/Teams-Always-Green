@@ -315,8 +315,8 @@ function Show-SetupSummary {
 
     $form = New-Object System.Windows.Forms.Form
     $form.Text = "Teams Always Green - Setup Complete"
-    $form.Width = 560
-    $form.Height = 290
+    $form.Width = 600
+    $form.Height = 320
     $form.StartPosition = "CenterScreen"
     $form.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::FixedDialog
     $form.MaximizeBox = $false
@@ -328,18 +328,21 @@ function Show-SetupSummary {
     $title.Text = "Install completed successfully."
     $title.Location = New-Object System.Drawing.Point(16, 12)
 
-    $summary = New-Object System.Windows.Forms.TextBox
-    $summary.Multiline = $true
-    $summary.ReadOnly = $true
-    $summary.BorderStyle = [System.Windows.Forms.BorderStyle]::None
-    $summary.BackColor = $form.BackColor
-    $summary.Width = 520
-    $summary.Height = 120
-    $summary.Location = New-Object System.Drawing.Point(16, 44)
+    $card = New-Object System.Windows.Forms.Panel
+    $card.BorderStyle = [System.Windows.Forms.BorderStyle]::FixedSingle
+    $card.Width = 552
+    $card.Height = 150
+    $card.Location = New-Object System.Drawing.Point(16, 44)
 
     $shortcutsText = if ($shortcutsCreated -and $shortcutsCreated.Count -gt 0) { $shortcutsCreated -join "; " } else { "None (portable mode)" }
     $modeText = if ($portableMode) { "Portable (no shortcuts)" } else { "Standard" }
-    $summary.Text = @"
+
+    $summaryLabel = New-Object System.Windows.Forms.Label
+    $summaryLabel.AutoSize = $false
+    $summaryLabel.Width = 520
+    $summaryLabel.Height = 130
+    $summaryLabel.Location = New-Object System.Drawing.Point(12, 10)
+    $summaryLabel.Text = @"
 Install Path: $installPath
 Mode: $modeText
 Integrity: $integrityStatus
@@ -347,25 +350,27 @@ Shortcuts: $shortcutsText
 Setup Log: $logPath
 "@
 
+    $card.Controls.Add($summaryLabel)
+
     $buttonLaunch = New-Object System.Windows.Forms.Button
     $buttonLaunch.Text = "Launch"
     $buttonLaunch.Width = 90
-    $buttonLaunch.Location = New-Object System.Drawing.Point(16, 175)
+    $buttonLaunch.Location = New-Object System.Drawing.Point(16, 210)
 
     $buttonSettings = New-Object System.Windows.Forms.Button
     $buttonSettings.Text = "Settings"
     $buttonSettings.Width = 90
-    $buttonSettings.Location = New-Object System.Drawing.Point(116, 175)
+    $buttonSettings.Location = New-Object System.Drawing.Point(116, 210)
 
     $buttonFolder = New-Object System.Windows.Forms.Button
     $buttonFolder.Text = "Open Folder"
     $buttonFolder.Width = 110
-    $buttonFolder.Location = New-Object System.Drawing.Point(216, 175)
+    $buttonFolder.Location = New-Object System.Drawing.Point(216, 210)
 
     $buttonClose = New-Object System.Windows.Forms.Button
     $buttonClose.Text = "Close"
     $buttonClose.Width = 90
-    $buttonClose.Location = New-Object System.Drawing.Point(446, 175)
+    $buttonClose.Location = New-Object System.Drawing.Point(446, 210)
 
     $buttonLaunch.DialogResult = [System.Windows.Forms.DialogResult]::Yes
     $buttonSettings.DialogResult = [System.Windows.Forms.DialogResult]::Retry
@@ -375,7 +380,7 @@ Setup Log: $logPath
     $form.CancelButton = $buttonClose
 
     $form.Controls.Add($title)
-    $form.Controls.Add($summary)
+    $form.Controls.Add($card)
     $form.Controls.Add($buttonLaunch)
     $form.Controls.Add($buttonSettings)
     $form.Controls.Add($buttonFolder)
