@@ -285,7 +285,7 @@ function Update-Progress($ui, [int]$current, [int]$total, [string]$message) {
         $rate = if ($elapsed.TotalMinutes -gt 0 -and $current -gt 0) { "{0:N1} files/min" -f ($current / $elapsed.TotalMinutes) } else { "-" }
         $remaining = [Math]::Max(0, $total - $current)
         $etaSeconds = if ($current -gt 0) { ($elapsed.TotalSeconds / $current) * $remaining } else { 0 }
-        $etaText = if ($etaSeconds -gt 0) { ([TimeSpan]::FromSeconds($etaSeconds)).ToString('mm\\:ss') } else { '--:--' }
+        $etaText = if ($etaSeconds -gt 0) { ([TimeSpan]::FromSeconds($etaSeconds)).ToString('mm\:ss') } else { '--:--' }
         $ui.Meta.Text = ("Files: {0}/{1} | Rate: {2} | ETA: {3}" -f $current, $total, $rate, $etaText)
     }
     [System.Windows.Forms.Application]::DoEvents()
