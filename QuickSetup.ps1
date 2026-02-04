@@ -1,4 +1,4 @@
-﻿# QuickSetup.ps1 - Download and install Teams Always Green into a chosen folder
+# QuickSetup.ps1 - Download and install Teams Always Green into a chosen folder
 # Creates Desktop, Start Menu, and Startup shortcuts (no VBS needed).
 
 Add-Type -AssemblyName System.Windows.Forms
