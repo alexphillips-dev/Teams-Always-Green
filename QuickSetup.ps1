@@ -281,18 +281,22 @@ function Update-Progress($ui, [int]$current, [int]$total, [string]$message) {
     $ui.Label.Text = $message
     $ui.Progress.Value = $pct
     if ($ui.Meta) {
-        $elapsed = (Get-Date) - $ui.StartTime
-        $rate = if ($elapsed.TotalMinutes -gt 0 -and $current -gt 0) { "{0:N1} files/min" -f ($current / $elapsed.TotalMinutes) } else { "-" }
-        $remaining = [Math]::Max(0, $total - $current)
-        $etaSeconds = if ($current -gt 0) { ($elapsed.TotalSeconds / $current) * $remaining } else { 0 }
-        if ($etaSeconds -gt 0) {
-            $etaMinutes = [int][Math]::Floor($etaSeconds / 60)
-            $etaRemainSeconds = [int]($etaSeconds % 60)
-            $etaText = "{0:00}:{1:00}" -f $etaMinutes, $etaRemainSeconds
-        } else {
-            $etaText = '--:--'
+        try {
+            $elapsed = (Get-Date) - $ui.StartTime
+            $rate = if ($elapsed.TotalMinutes -gt 0 -and $current -gt 0) { "{0:N1} files/min" -f ($current / $elapsed.TotalMinutes) } else { "-" }
+            $remaining = [Math]::Max(0, $total - $current)
+            $etaSeconds = if ($current -gt 0) { ($elapsed.TotalSeconds / $current) * $remaining } else { 0 }
+            if ($etaSeconds -gt 0) {
+                $etaMinutes = [int][Math]::Floor($etaSeconds / 60)
+                $etaRemainSeconds = [int]($etaSeconds % 60)
+                $etaText = "{0:00}:{1:00}" -f $etaMinutes, $etaRemainSeconds
+            } else {
+                $etaText = '--:--'
+            }
+            $ui.Meta.Text = ("Files: {0}/{1} | Rate: {2} | ETA: {3}" -f $current, $total, $rate, $etaText)
+        } catch {
+            try { $ui.Meta.Text = ("Files: {0}/{1}" -f $current, $total) } catch { }
         }
-        $ui.Meta.Text = ("Files: {0}/{1} | Rate: {2} | ETA: {3}" -f $current, $total, $rate, $etaText)
     }
     [System.Windows.Forms.Application]::DoEvents()
 }
