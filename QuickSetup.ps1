@@ -324,6 +324,14 @@ function Update-Progress($ui, [int]$current, [int]$total, [string]$message) {
     [System.Windows.Forms.Application]::DoEvents()
 }
 
+function Get-ScalarInt($value) {
+    if ($value -is [System.Array]) {
+        if ($value.Count -gt 0) { return [int]$value[0] }
+        return 0
+    }
+    try { return [int]$value } catch { return 0 }
+}
+
 function Wait-For-ProgressNext($ui) {
     if (-not $ui -or -not $ui.Form -or $ui.Form.IsDisposed) { return }
     $ui.NextClicked = $false
@@ -1450,10 +1458,12 @@ function Show-SetupWizard {
     $summaryFormHeight = [Math]::Max(420, $baseFormHeight - 50)
     $positionNavButtons = {
         if (-not $form -or $form.IsDisposed) { return }
-        $buttonsY = $form.ClientSize.Height - $btnCancel.Height - 14
-        $btnCancel.Location = New-Object System.Drawing.Point($form.ClientSize.Width - $btnCancel.Width - 16, $buttonsY)
-        $btnNext.Location = New-Object System.Drawing.Point($btnCancel.Left - $btnNext.Width - 10, $buttonsY)
-        $btnBack.Location = New-Object System.Drawing.Point($btnNext.Left - $btnBack.Width - 10, $buttonsY)
+        $clientWidth = Get-ScalarInt $form.ClientSize.Width
+        $clientHeight = Get-ScalarInt $form.ClientSize.Height
+        $buttonsY = $clientHeight - (Get-ScalarInt $btnCancel.Height) - 14
+        $btnCancel.Location = New-Object System.Drawing.Point($clientWidth - (Get-ScalarInt $btnCancel.Width) - 16, $buttonsY)
+        $btnNext.Location = New-Object System.Drawing.Point($btnCancel.Left - (Get-ScalarInt $btnNext.Width) - 10, $buttonsY)
+        $btnBack.Location = New-Object System.Drawing.Point($btnNext.Left - (Get-ScalarInt $btnBack.Width) - 10, $buttonsY)
     }
     & $positionNavButtons
     $form.add_Shown({ & $positionNavButtons })
