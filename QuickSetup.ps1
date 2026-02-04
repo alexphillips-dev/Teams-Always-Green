@@ -1085,7 +1085,7 @@ function Show-SetupWizard {
     $form = New-Object System.Windows.Forms.Form
     $form.Text = "Teams Always Green - Setup"
     $form.Width = 640
-    $form.Height = 500
+    $form.Height = 470
     $form.StartPosition = "CenterScreen"
     $form.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::FixedDialog
     $form.MaximizeBox = $false
@@ -1392,17 +1392,17 @@ function Show-SetupWizard {
     $btnBack = New-Object System.Windows.Forms.Button
     $btnBack.Text = "Back"
     $btnBack.Width = 90
-    # Position set after sizing.
+    $btnBack.Anchor = [System.Windows.Forms.AnchorStyles]::Bottom -bor [System.Windows.Forms.AnchorStyles]::Right
 
     $btnNext = New-Object System.Windows.Forms.Button
     $btnNext.Text = "Next"
     $btnNext.Width = 90
-    # Position set after sizing.
+    $btnNext.Anchor = [System.Windows.Forms.AnchorStyles]::Bottom -bor [System.Windows.Forms.AnchorStyles]::Right
 
     $btnCancel = New-Object System.Windows.Forms.Button
     $btnCancel.Text = "Cancel"
     $btnCancel.Width = 90
-    # Position set after sizing.
+    $btnCancel.Anchor = [System.Windows.Forms.AnchorStyles]::Bottom -bor [System.Windows.Forms.AnchorStyles]::Right
 
     $form.Controls.Add($title)
     $form.Controls.Add($panelWelcome)
@@ -1410,14 +1410,17 @@ function Show-SetupWizard {
     $form.Controls.Add($panelDownload)
     $form.Controls.Add($panelSummary)
     $baseFormHeight = $form.Height
-    $summaryFormHeight = [Math]::Max(440, $baseFormHeight - 60)
+    $summaryFormHeight = [Math]::Max(420, $baseFormHeight - 50)
     $positionNavButtons = {
-        $buttonsY = $form.ClientSize.Height - 50
+        if (-not $form -or $form.IsDisposed) { return }
+        $buttonsY = $form.ClientSize.Height - $btnCancel.Height - 14
         $btnCancel.Location = New-Object System.Drawing.Point($form.ClientSize.Width - $btnCancel.Width - 16, $buttonsY)
         $btnNext.Location = New-Object System.Drawing.Point($btnCancel.Left - $btnNext.Width - 10, $buttonsY)
         $btnBack.Location = New-Object System.Drawing.Point($btnNext.Left - $btnBack.Width - 10, $buttonsY)
     }
     & $positionNavButtons
+    $form.add_Shown({ & $positionNavButtons })
+    $form.add_ClientSizeChanged({ & $positionNavButtons })
 
     $form.Controls.Add($btnBack)
     $form.Controls.Add($btnNext)
