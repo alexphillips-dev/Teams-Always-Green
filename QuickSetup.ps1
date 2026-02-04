@@ -167,7 +167,7 @@ function Show-Welcome {
     param([System.Windows.Forms.Form]$owner)
     $form = New-Object System.Windows.Forms.Form
     $form.Text = "Teams Always Green - Welcome"
-    $form.ClientSize = New-Object System.Drawing.Size(580, 360)
+    $form.ClientSize = New-Object System.Drawing.Size(580, 380)
     $form.Width = 600
     $form.Height = 400
     $form.StartPosition = "CenterScreen"
@@ -268,17 +268,17 @@ This setup does not:
     $shortcutsBox.Text = "Create Start Menu/Desktop shortcuts (Recommended)"
     $shortcutsBox.Checked = $true
     $shortcutsBox.AutoSize = $true
-    $shortcutsBox.Location = New-Object System.Drawing.Point(24, 278)
+    $shortcutsBox.Location = New-Object System.Drawing.Point(24, 296)
 
     $continue = New-Object System.Windows.Forms.Button
     $continue.Text = "Continue"
     $continue.Width = 100
-    $continue.Location = New-Object System.Drawing.Point(320, 300)
+    $continue.Location = New-Object System.Drawing.Point(320, 320)
 
     $cancel = New-Object System.Windows.Forms.Button
     $cancel.Text = "Cancel"
     $cancel.Width = 100
-    $cancel.Location = New-Object System.Drawing.Point(430, 300)
+    $cancel.Location = New-Object System.Drawing.Point(430, 320)
 
     $continue.DialogResult = [System.Windows.Forms.DialogResult]::OK
     $cancel.DialogResult = [System.Windows.Forms.DialogResult]::Cancel
