@@ -174,7 +174,7 @@ function New-ProgressForm {
     $form = New-Object System.Windows.Forms.Form
     $form.Text = "Teams Always Green - Setup"
     $form.Width = 520
-    $form.Height = 180
+    $form.Height = 200
     $form.StartPosition = "CenterScreen"
     $form.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::FixedDialog
     $form.MaximizeBox = $false
@@ -192,19 +192,86 @@ function New-ProgressForm {
     $progress.Minimum = 0
     $progress.Maximum = 100
 
+    $meta = New-Object System.Windows.Forms.Label
+    $meta.AutoSize = $true
+    $meta.Font = New-Object System.Drawing.Font("Segoe UI", 8.5, [System.Drawing.FontStyle]::Regular)
+    $meta.Text = "Files: 0/0"
+    $meta.Location = New-Object System.Drawing.Point(16, 70)
+
+    $detailsLink = New-Object System.Windows.Forms.LinkLabel
+    $detailsLink.Text = "Show details"
+    $detailsLink.AutoSize = $true
+    $detailsLink.Location = New-Object System.Drawing.Point(400, 70)
+
+    $detailsList = New-Object System.Windows.Forms.ListBox
+    $detailsList.Width = 470
+    $detailsList.Height = 70
+    $detailsList.Location = New-Object System.Drawing.Point(16, 92)
+    $detailsList.Visible = $false
+
+    $cancelButton = New-Object System.Windows.Forms.Button
+    $cancelButton.Text = "Cancel"
+    $cancelButton.Width = 90
+    $cancelButton.Location = New-Object System.Drawing.Point(300, 128)
+
     $nextButton = New-Object System.Windows.Forms.Button
     $nextButton.Text = "Next"
     $nextButton.Width = 90
     $nextButton.Enabled = $false
-    $nextButton.Location = New-Object System.Drawing.Point(396, 70)
+    $nextButton.Location = New-Object System.Drawing.Point(396, 128)
 
     $form.Controls.Add($label)
     $form.Controls.Add($progress)
+    $form.Controls.Add($meta)
+    $form.Controls.Add($detailsLink)
+    $form.Controls.Add($detailsList)
+    $form.Controls.Add($cancelButton)
     $form.Controls.Add($nextButton)
     $form.TopMost = $true
     $form.Show()
     [System.Windows.Forms.Application]::DoEvents()
-    return @{ Form = $form; Label = $label; Progress = $progress; NextButton = $nextButton; NextClicked = $false }
+    $ui = @{
+        Form = $form
+        Label = $label
+        Progress = $progress
+        Meta = $meta
+        DetailsLink = $detailsLink
+        DetailsList = $detailsList
+        CancelButton = $cancelButton
+        NextButton = $nextButton
+        NextClicked = $false
+        Cancelled = $false
+        DetailsVisible = $false
+        BaseHeight = $form.Height
+        ExpandedHeight = $form.Height + 90
+        ButtonsYBase = 128
+        ButtonsYExpanded = 218
+        StartTime = (Get-Date)
+        BytesDownloaded = 0
+    }
+    $detailsLink.Add_LinkClicked({
+        if ($ui.DetailsVisible) {
+            $ui.DetailsVisible = $false
+            $ui.DetailsList.Visible = $false
+            $ui.Form.Height = $ui.BaseHeight
+            $ui.CancelButton.Location = New-Object System.Drawing.Point(300, $ui.ButtonsYBase)
+            $ui.NextButton.Location = New-Object System.Drawing.Point(396, $ui.ButtonsYBase)
+            $ui.DetailsLink.Text = "Show details"
+        } else {
+            $ui.DetailsVisible = $true
+            $ui.DetailsList.Visible = $true
+            $ui.Form.Height = $ui.ExpandedHeight
+            $ui.CancelButton.Location = New-Object System.Drawing.Point(300, $ui.ButtonsYExpanded)
+            $ui.NextButton.Location = New-Object System.Drawing.Point(396, $ui.ButtonsYExpanded)
+            $ui.DetailsLink.Text = "Hide details"
+        }
+    })
+    $cancelButton.Add_Click({
+        $ui.Cancelled = $true
+        $ui.CancelButton.Enabled = $false
+        $ui.Label.Text = "Canceling after current file..."
+    })
+    return $ui
 }
 
 function Update-Progress($ui, [int]$current, [int]$total, [string]$message) {
@@ -213,6 +280,14 @@ function Update-Progress($ui, [int]$current, [int]$total, [string]$message) {
     if ($total -gt 0) { $pct = [Math]::Min(100, [Math]::Round(($current / $total) * 100)) }
     $ui.Label.Text = $message
     $ui.Progress.Value = $pct
+    if ($ui.Meta) {
+        $elapsed = (Get-Date) - $ui.StartTime
+        $rate = if ($elapsed.TotalMinutes -gt 0 -and $current -gt 0) { "{0:N1} files/min" -f ($current / $elapsed.TotalMinutes) } else { "—" }
+        $remaining = [Math]::Max(0, $total - $current)
+        $etaSeconds = if ($current -gt 0) { ($elapsed.TotalSeconds / $current) * $remaining } else { 0 }
+        $etaText = if ($etaSeconds -gt 0) { ([TimeSpan]::FromSeconds($etaSeconds)).ToString("mm\:ss") } else { "--:--" }
+        $ui.Meta.Text = ("Files: {0}/{1} • Rate: {2} • ETA: {3}" -f $current, $total, $rate, $etaText)
+    }
     [System.Windows.Forms.Application]::DoEvents()
 }
 
@@ -221,7 +296,7 @@ function Wait-For-ProgressNext($ui) {
     $ui.NextClicked = $false
     $ui.NextButton.Enabled = $true
     $ui.NextButton.Add_Click({ $ui.NextClicked = $true })
-    while (-not $ui.NextClicked -and $ui.Form.Visible) {
+    while (-not $ui.NextClicked -and -not $ui.Cancelled -and $ui.Form.Visible) {
         [System.Windows.Forms.Application]::DoEvents()
         Start-Sleep -Milliseconds 50
     }
@@ -760,10 +835,16 @@ $integrityStatus = if ($manifest) { "Verified" } else { "Not verified (manifest 
 
 $total = $filesToDownload.Count
 $index = 0
+$downloadedFiles = New-Object System.Collections.ArrayList
 foreach ($file in $filesToDownload) {
+    if ($ui.Cancelled) { break }
     $index++
     $targetPath = Join-Path $installPath $file.Path
     $status = "Step 2 of 4: Downloading {0} ({1}/{2})" -f $file.Path, $index, $total
+    if ($ui.DetailsList) {
+        [void]$ui.DetailsList.Items.Insert(0, $file.Path)
+        while ($ui.DetailsList.Items.Count -gt 3) { $ui.DetailsList.Items.RemoveAt($ui.DetailsList.Items.Count - 1) }
+    }
     Update-Progress $ui $index $total $status
     Write-SetupLog $status
 
@@ -783,11 +864,20 @@ foreach ($file in $filesToDownload) {
             exit 1
         }
     }
+    if (Test-Path $targetPath) {
+        try {
+            $ui.BytesDownloaded += (Get-Item $targetPath).Length
+            Update-Progress $ui $index $total $status
+        } catch {
+        }
+        [void]$downloadedFiles.Add($targetPath)
+    }
 
     if ($manifest -and $manifest.files) {
         $manifestKey = $file.Path.Replace("\", "/")
         $expected = $manifest.files.$manifestKey
         if ($expected) {
+            Update-Progress $ui $index $total ("Step 2 of 4: Verifying {0} ({1}/{2})" -f $file.Path, $index, $total)
             $actual = Get-FileHashHex $targetPath
             if (-not $actual -or ($actual.ToLowerInvariant() -ne [string]$expected.ToLowerInvariant())) {
                 Write-SetupLog ("Integrity expected: {0}" -f $expected)
@@ -820,9 +910,21 @@ foreach ($file in $filesToDownload) {
 }
 
 if ($ui -and $ui.Form) {
-    Write-SetupLog "Download completed."
-    Update-Progress $ui $total $total "Step 2 of 4: Download complete. Click Next to continue."
-    Wait-For-ProgressNext $ui
+    if ($ui.Cancelled) {
+        try { $ui.Form.Close() } catch { }
+    } else {
+        Write-SetupLog "Download completed."
+        Update-Progress $ui $total $total "Step 2 of 4: Download complete. Click Next to continue."
+        Wait-For-ProgressNext $ui
+    }
+}
+
+if ($ui.Cancelled) {
+    foreach ($path in $downloadedFiles) {
+        try { Remove-Item -Path $path -Force -ErrorAction Stop } catch { }
+    }
+    Show-SetupError "Install canceled during download. Partial files were removed."
+    exit 1
 }
 function New-Shortcut([string]$shortcutPath, [string]$targetScriptPath, [string]$workingDir) {
     $shell = New-Object -ComObject WScript.Shell
