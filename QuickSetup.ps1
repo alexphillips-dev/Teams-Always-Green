@@ -178,7 +178,7 @@ function Show-Welcome {
 
     $headerPanel = New-Object System.Windows.Forms.Panel
     $headerPanel.Width = 560
-    $headerPanel.Height = 52
+    $headerPanel.Height = 58
     $headerPanel.Location = New-Object System.Drawing.Point(16, 12)
     $headerPanel.BackColor = $form.BackColor
 
@@ -221,13 +221,13 @@ function Show-Welcome {
     $title.AutoSize = $true
     $title.Font = New-Object System.Drawing.Font("Segoe UI", 12, [System.Drawing.FontStyle]::Bold)
     $title.Text = "Welcome to Teams Always Green"
-    $title.Location = New-Object System.Drawing.Point(44, 4)
+    $title.Location = New-Object System.Drawing.Point(44, 6)
 
     $tagline = New-Object System.Windows.Forms.Label
     $tagline.AutoSize = $true
     $tagline.Font = New-Object System.Drawing.Font("Segoe UI", 9, [System.Drawing.FontStyle]::Regular)
     $tagline.Text = "Stay available without micromanaging your status."
-    $tagline.Location = New-Object System.Drawing.Point(44, 28)
+    $tagline.Location = New-Object System.Drawing.Point(44, 32)
 
     $headerPanel.Controls.Add($iconBox)
     $headerPanel.Controls.Add($title)
