@@ -1097,6 +1097,13 @@ function Show-SetupWizard {
     $title.Location = New-Object System.Drawing.Point(16, 12)
     $title.Text = "Setup"
 
+    $stepper = New-Object System.Windows.Forms.Label
+    $stepper.AutoSize = $true
+    $stepper.Font = New-Object System.Drawing.Font("Segoe UI", 8.5, [System.Drawing.FontStyle]::Regular)
+    $stepper.ForeColor = [System.Drawing.Color]::FromArgb(90, 90, 90)
+    $stepper.Location = New-Object System.Drawing.Point(120, 14)
+    $stepper.Text = "Step 1 of 4 · Welcome"
+
     $panelWelcome = New-Object System.Windows.Forms.Panel
     $panelWelcome.Location = New-Object System.Drawing.Point(16, 44)
     $panelWelcome.Size = New-Object System.Drawing.Size(600, 340)
@@ -1230,10 +1237,33 @@ function Show-SetupWizard {
     $locBrowse.Width = 90
     $locBrowse.Location = New-Object System.Drawing.Point(430, 26)
 
+    $locDefault = New-Object System.Windows.Forms.CheckBox
+    $locDefault.Text = "Use default install location"
+    $locDefault.AutoSize = $true
+    $locDefault.Checked = $true
+    $locDefault.Location = New-Object System.Drawing.Point(0, 56)
+
     $locHint = New-Object System.Windows.Forms.Label
     $locHint.AutoSize = $true
     $locHint.Text = "A 'Teams Always Green' folder will be created inside the selected path."
-    $locHint.Location = New-Object System.Drawing.Point(0, 60)
+    $locHint.Location = New-Object System.Drawing.Point(0, 82)
+
+    $applyDefaultLocation = {
+        $defaultBase = [Environment]::GetFolderPath("MyDocuments")
+        $locText.Text = $defaultBase
+        $locText.ReadOnly = $true
+        $locBrowse.Enabled = $false
+    }
+
+    $locDefault.Add_CheckedChanged({
+        if ($locDefault.Checked) {
+            & $applyDefaultLocation
+        } else {
+            $locText.ReadOnly = $false
+            $locBrowse.Enabled = $true
+        }
+    })
+    & $applyDefaultLocation
 
     $locBrowse.Add_Click({
         $dialog = New-Object System.Windows.Forms.FolderBrowserDialog
@@ -1247,6 +1277,7 @@ function Show-SetupWizard {
     $panelLocation.Controls.Add($locLabel)
     $panelLocation.Controls.Add($locText)
     $panelLocation.Controls.Add($locBrowse)
+    $panelLocation.Controls.Add($locDefault)
     $panelLocation.Controls.Add($locHint)
 
     $panelDownload = New-Object System.Windows.Forms.Panel
@@ -1405,6 +1436,7 @@ function Show-SetupWizard {
     $btnCancel.Anchor = [System.Windows.Forms.AnchorStyles]::Bottom -bor [System.Windows.Forms.AnchorStyles]::Right
 
     $form.Controls.Add($title)
+    $form.Controls.Add($stepper)
     $form.Controls.Add($panelWelcome)
     $form.Controls.Add($panelLocation)
     $form.Controls.Add($panelDownload)
@@ -1438,6 +1470,12 @@ function Show-SetupWizard {
         $panelLocation.Visible = ($index -eq 1)
         $panelDownload.Visible = ($index -eq 2)
         $panelSummary.Visible = ($index -eq 3)
+        switch ($index) {
+            0 { $stepper.Text = "Step 1 of 4 · Welcome" }
+            1 { $stepper.Text = "Step 1 of 4 · Location" }
+            2 { $stepper.Text = "Step 2 of 4 · Download" }
+            3 { $stepper.Text = "Step 4 of 4 · Summary" }
+        }
         if ($index -eq 3) {
             $form.Height = $summaryFormHeight
         } else {
@@ -1487,17 +1525,32 @@ function Show-SetupWizard {
         if ($stepRef.Value -eq 0) {
             $state.CreateShortcuts = [bool]$chkShortcuts.Checked
             $state.EnableStartup = [bool]$chkStartup.Checked
-            $defaultBase = [Environment]::GetFolderPath("MyDocuments")
-            $locText.Text = (Join-Path $defaultBase "Teams Always Green")
+            & $applyDefaultLocation
             & $showStep 1
             return
         }
         if ($stepRef.Value -eq 1) {
+            if ($locDefault.Checked) { & $applyDefaultLocation }
             if ([string]::IsNullOrWhiteSpace($locText.Text)) {
-                $defaultBase = [Environment]::GetFolderPath("MyDocuments")
-                $locText.Text = (Join-Path $defaultBase "Teams Always Green")
+                & $applyDefaultLocation
             }
             $selectedBase = $locText.Text
+            try {
+                $root = [System.IO.Path]::GetPathRoot($selectedBase)
+                $drive = Get-PSDrive -Name $root.TrimEnd('\') -ErrorAction SilentlyContinue
+                if ($drive -and $drive.Free -lt 200MB) {
+                    Show-SetupInfo "Not enough free space in the selected drive (need at least 200 MB)."
+                    return
+                }
+            } catch { }
+            try {
+                $probePath = Join-Path $selectedBase ("write-test-{0}.tmp" -f [Guid]::NewGuid().ToString("N"))
+                Set-Content -Path $probePath -Value "ok" -Encoding ASCII
+                Remove-Item -Path $probePath -Force -ErrorAction SilentlyContinue
+            } catch {
+                Show-SetupInfo "Cannot write to the selected folder. Choose a different location."
+                return
+            }
             $appFolderName = "Teams Always Green"
             if ([string]::Equals([System.IO.Path]::GetFileName($selectedBase), $appFolderName, [System.StringComparison]::OrdinalIgnoreCase)) {
                 $state.InstallPath = $selectedBase
@@ -1614,7 +1667,16 @@ function Show-SetupWizard {
                         $downloadUrl = if ($file.Url -match "\?") { "$($file.Url)&v=$script:QuickSetupCacheBuster" } else { "$($file.Url)?v=$script:QuickSetupCacheBuster" }
                         Invoke-WebRequest -Uri $downloadUrl -OutFile $targetPath -UseBasicParsing
                     } catch {
-                        Show-SetupError ("Download failed: {0}" -f $file.Url)
+                        $choice = Show-SetupPrompt -message ("Download failed for:`n{0}`n`nRetry, change folder, or cancel?" -f $file.Url) -title "Download Failed" -buttons ([System.Windows.Forms.MessageBoxButtons]::AbortRetryIgnore) -icon ([System.Windows.Forms.MessageBoxIcon]::Warning) -owner $form
+                        if ($choice -eq [System.Windows.Forms.DialogResult]::Retry) {
+                            $index--
+                            continue
+                        }
+                        if ($choice -eq [System.Windows.Forms.DialogResult]::Ignore) {
+                            $state.Cancelled = $true
+                            & $showStep 1
+                            break
+                        }
                         $state.Cancelled = $true
                         break
                     }
