@@ -1,4 +1,4 @@
-# QuickSetup.ps1 - Download and install Teams Always Green into a chosen folder
+﻿# QuickSetup.ps1 - Download and install Teams Always Green into a chosen folder
 # Creates Desktop, Start Menu, and Startup shortcuts (no VBS needed).
 
 Add-Type -AssemblyName System.Windows.Forms
@@ -282,11 +282,11 @@ function Update-Progress($ui, [int]$current, [int]$total, [string]$message) {
     $ui.Progress.Value = $pct
     if ($ui.Meta) {
         $elapsed = (Get-Date) - $ui.StartTime
-        $rate = if ($elapsed.TotalMinutes -gt 0 -and $current -gt 0) { "{0:N1} files/min" -f ($current / $elapsed.TotalMinutes) } else { "—" }
+        $rate = if ($elapsed.TotalMinutes -gt 0 -and $current -gt 0) { "{0:N1} files/min" -f ($current / $elapsed.TotalMinutes) } else { "â€”" }
         $remaining = [Math]::Max(0, $total - $current)
         $etaSeconds = if ($current -gt 0) { ($elapsed.TotalSeconds / $current) * $remaining } else { 0 }
         $etaText = if ($etaSeconds -gt 0) { ([TimeSpan]::FromSeconds($etaSeconds)).ToString("mm\:ss") } else { "--:--" }
-        $ui.Meta.Text = ("Files: {0}/{1} • Rate: {2} • ETA: {3}" -f $current, $total, $rate, $etaText)
+        $ui.Meta.Text = ("Files: {0}/{1} â€¢ Rate: {2} â€¢ ETA: {3}" -f $current, $total, $rate, $etaText)
     }
     [System.Windows.Forms.Application]::DoEvents()
 }
@@ -388,23 +388,23 @@ function Show-Welcome {
     $body.Width = 520
     $body.Height = 190
     $body.Location = New-Object System.Drawing.Point(12, 10)
-    $body.Text = @"
-Quick setup will install the app and walk you through the choices below.
-
-Steps:
-  1) Choose an install folder (default is Documents\Teams Always Green)
-  2) Choose whether to create shortcuts
-  3) Download and verify app files
-  4) Review the summary and launch
-
-This setup will:
-  • Install the app files into a single folder
-  • Optionally create Start Menu/Desktop/Startup shortcuts
-
-This setup does not:
-  • Change your Teams settings
-  • Run anything in the background without your permission
-"@
+            $body.Text = @(
+        "Quick setup will install the app and walk you through the choices below.",
+        "",
+        "Steps:",
+        "  1) Choose an install folder (default is Documents\\Teams Always Green)",
+        "  2) Choose whether to create shortcuts",
+        "  3) Download and verify app files",
+        "  4) Review the summary and launch",
+        "",
+        "This setup will:",
+        "  - Install the app files into a single folder",
+        "  - Optionally create Start Menu/Desktop/Startup shortcuts",
+        "",
+        "This setup does not:",
+        "  - Change your Teams settings",
+        "  - Run anything in the background without your permission"
+    ) -join [Environment]::NewLine
 
     $card.Controls.Add($body)
 
@@ -650,6 +650,7 @@ function Show-SetupSummary {
     }
 }
 
+if ($false) {
 Write-SetupLog "Quick setup started."
 
 $setupOwner = New-SetupOwner
@@ -926,6 +927,8 @@ if ($ui.Cancelled) {
     Show-SetupError "Install canceled during download. Partial files were removed."
     exit 1
 }
+}
+
 function New-Shortcut([string]$shortcutPath, [string]$targetScriptPath, [string]$workingDir) {
     $shell = New-Object -ComObject WScript.Shell
     $shortcut = $shell.CreateShortcut($shortcutPath)
@@ -943,6 +946,760 @@ function New-Shortcut([string]$shortcutPath, [string]$targetScriptPath, [string]
     }
     $shortcut.Save()
 }
+
+function Finalize-Install {
+    param(
+        [string]$installPath,
+        [string]$targetScript,
+        [bool]$portableMode,
+        [bool]$enableStartup
+    )
+
+    $programsDir = [Environment]::GetFolderPath("Programs")
+    $menuFolder = Join-Path $programsDir "Teams Always Green"
+    if (-not (Test-Path $menuFolder)) {
+        New-Item -ItemType Directory -Path $menuFolder -Force | Out-Null
+    }
+    $menuShortcut = Join-Path $menuFolder "Teams Always Green.lnk"
+    $uninstallShortcut = Join-Path $menuFolder "Uninstall Teams Always Green.lnk"
+    $desktopDir = [Environment]::GetFolderPath("Desktop")
+    $desktopShortcut = Join-Path $desktopDir "Teams Always Green.lnk"
+
+    if ($enableStartup) {
+        $startupDir = [Environment]::GetFolderPath("Startup")
+        $startupShortcut = Join-Path $startupDir "Teams Always Green.lnk"
+    }
+
+    $uninstallScriptPath = Join-Path $installPath "Uninstall-Teams-Always-Green.ps1"
+    $uninstallScript = @'
+param([switch]$Silent)
+Add-Type -AssemblyName System.Windows.Forms
+
+$scriptPath = $MyInvocation.MyCommand.Path
+$installRoot = Split-Path -Parent $scriptPath
+$programsDir = [Environment]::GetFolderPath("Programs")
+$menuFolder = Join-Path $programsDir "Teams Always Green"
+$shortcuts = @(
+    Join-Path $menuFolder "Teams Always Green.lnk",
+    Join-Path $menuFolder "Uninstall Teams Always Green.lnk",
+    Join-Path ([Environment]::GetFolderPath("Desktop")) "Teams Always Green.lnk",
+    Join-Path ([Environment]::GetFolderPath("Startup")) "Teams Always Green.lnk"
+)
+
+foreach ($shortcut in $shortcuts) {
+    try { if (Test-Path $shortcut) { Remove-Item -Path $shortcut -Force -ErrorAction SilentlyContinue } } catch { }
+}
+try {
+    if (Test-Path $menuFolder -and -not (Get-ChildItem -Path $menuFolder -Force | Measure-Object).Count) {
+        Remove-Item -Path $menuFolder -Force -ErrorAction SilentlyContinue
+    }
+} catch { }
+
+$deleteFiles = $true
+if (-not $Silent) {
+        $resp = Show-SetupPrompt -message (
+            "Remove the app files from:`n$installRoot`n`nThis will close the app if it is running.",
+            "Uninstall Teams Always Green"
+        ) -title "Uninstall Teams Always Green" -buttons ([System.Windows.Forms.MessageBoxButtons]::YesNo) -icon ([System.Windows.Forms.MessageBoxIcon]::Warning)
+    if ($resp -ne [System.Windows.Forms.DialogResult]::Yes) { $deleteFiles = $false }
+}
+
+if (-not $deleteFiles) { return }
+$cmdPath = Join-Path $env:TEMP ("TAG-Uninstall-" + [Guid]::NewGuid().ToString("N") + ".cmd")
+$cmd = "@echo off`r`n" + "timeout /t 2 >nul`r`n" + "rmdir /s /q `"$installRoot`"`r`n" + "del /f /q `"$cmdPath`"`r`n"
+Set-Content -Path $cmdPath -Value $cmd -Encoding ASCII
+Start-Process -FilePath "cmd.exe" -ArgumentList "/c `"$cmdPath`"" -WindowStyle Hidden
+'@
+    try {
+        Set-Content -Path $uninstallScriptPath -Value $uninstallScript -Encoding UTF8
+    } catch {
+        Write-SetupLog "Failed to write uninstall script."
+    }
+
+    $shortcutsCreated = @()
+    if (-not $portableMode) {
+        try {
+            New-Shortcut -shortcutPath $menuShortcut -targetScriptPath $targetScript -workingDir $installPath
+            $shortcutsCreated += "Start Menu"
+            if ($enableStartup) {
+                New-Shortcut -shortcutPath $startupShortcut -targetScriptPath $targetScript -workingDir $installPath
+                $shortcutsCreated += "Startup"
+            }
+            New-Shortcut -shortcutPath $desktopShortcut -targetScriptPath $targetScript -workingDir $installPath
+            $shortcutsCreated += "Desktop"
+            if (Test-Path $uninstallScriptPath) {
+                New-Shortcut -shortcutPath $uninstallShortcut -targetScriptPath $uninstallScriptPath -workingDir $installPath
+                $shortcutsCreated += "Uninstall"
+            }
+        } catch {
+            Write-SetupLog "Failed to create shortcuts: $($_.Exception.Message)"
+        }
+    } else {
+        Write-SetupLog "Portable mode: shortcuts not created."
+    }
+    return $shortcutsCreated
+}
+
+function Show-SetupWizard {
+    param([System.Windows.Forms.Form]$owner)
+
+    $state = [ordered]@{
+        Cancelled = $false
+        Action = "Close"
+        InstallPath = $null
+        CreateShortcuts = $true
+        EnableStartup = $false
+        IntegrityStatus = "Not verified"
+        ShortcutsCreated = @()
+        PortableMode = $false
+    }
+
+    $form = New-Object System.Windows.Forms.Form
+    $form.Text = "Teams Always Green - Setup"
+    $form.Width = 640
+    $form.Height = 460
+    $form.StartPosition = "CenterScreen"
+    $form.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::FixedDialog
+    $form.MaximizeBox = $false
+    $form.MinimizeBox = $false
+
+    $title = New-Object System.Windows.Forms.Label
+    $title.AutoSize = $true
+    $title.Font = New-Object System.Drawing.Font("Segoe UI", 11, [System.Drawing.FontStyle]::Bold)
+    $title.Location = New-Object System.Drawing.Point(16, 12)
+    $title.Text = "Setup"
+
+    $panelWelcome = New-Object System.Windows.Forms.Panel
+    $panelWelcome.Location = New-Object System.Drawing.Point(16, 44)
+    $panelWelcome.Size = New-Object System.Drawing.Size(600, 320)
+
+    $headerPanel = New-Object System.Windows.Forms.Panel
+    $headerPanel.Width = 580
+    $headerPanel.Height = 56
+    $headerPanel.Location = New-Object System.Drawing.Point(0, 0)
+    $headerPanel.BackColor = $form.BackColor
+
+    $welcomeIconBox = New-Object System.Windows.Forms.PictureBox
+    $welcomeIconBox.Size = New-Object System.Drawing.Size(32, 32)
+    $welcomeIconBox.Location = New-Object System.Drawing.Point(0, 6)
+    $welcomeIconBox.SizeMode = [System.Windows.Forms.PictureBoxSizeMode]::StretchImage
+
+    $welcomeIcon = $null
+    $iconPath = $null
+    $localRoot = $PSScriptRoot
+    if (-not $localRoot -and $PSCommandPath) { $localRoot = Split-Path -Parent $PSCommandPath }
+    if ($localRoot) { $iconPath = Join-Path $localRoot "Meta\Icons\Tray_Icon.ico" }
+    if ($iconPath -and (Test-Path $iconPath)) {
+        try { $welcomeIcon = New-Object System.Drawing.Icon($iconPath) } catch { }
+    }
+    if (-not $welcomeIcon) {
+        try {
+            try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 } catch { }
+            $remoteIconUrl = "https://raw.githubusercontent.com/alexphillips-dev/Teams-Always-Green/main/Meta/Icons/Tray_Icon.ico"
+            $remoteIconPath = Join-Path $env:TEMP "TeamsAlwaysGreen-Welcome.ico"
+            $wc = New-Object System.Net.WebClient
+            $wc.DownloadFile($remoteIconUrl, $remoteIconPath)
+            if (Test-Path $remoteIconPath) { $welcomeIcon = New-Object System.Drawing.Icon($remoteIconPath) }
+            $script:WelcomeTempIconPath = $remoteIconPath
+        } catch {
+        }
+    }
+    if ($welcomeIcon) {
+        $welcomeIconBox.Image = $welcomeIcon.ToBitmap()
+        try { $form.Icon = $welcomeIcon } catch { }
+    } else {
+        $welcomeIconBox.Image = [System.Drawing.SystemIcons]::Information.ToBitmap()
+    }
+
+    $welcomeTitle = New-Object System.Windows.Forms.Label
+    $welcomeTitle.AutoSize = $true
+    $welcomeTitle.Font = New-Object System.Drawing.Font("Segoe UI", 12, [System.Drawing.FontStyle]::Bold)
+    $welcomeTitle.Text = "Welcome to Teams Always Green"
+    $welcomeTitle.Location = New-Object System.Drawing.Point(44, 4)
+
+    $welcomeTagline = New-Object System.Windows.Forms.Label
+    $welcomeTagline.AutoSize = $false
+    $welcomeTagline.Font = New-Object System.Drawing.Font("Segoe UI", 9, [System.Drawing.FontStyle]::Regular)
+    $welcomeTagline.Text = "Stay available without micromanaging your status."
+    $welcomeTagline.Location = New-Object System.Drawing.Point(44, 30)
+    $welcomeTagline.Width = 520
+    $welcomeTagline.Height = 18
+    $welcomeTagline.Padding = New-Object System.Windows.Forms.Padding(0, 1, 0, 0)
+
+    $headerPanel.Controls.Add($welcomeIconBox)
+    $headerPanel.Controls.Add($welcomeTitle)
+    $headerPanel.Controls.Add($welcomeTagline)
+
+    $card = New-Object System.Windows.Forms.Panel
+    $card.BorderStyle = [System.Windows.Forms.BorderStyle]::FixedSingle
+    $card.Width = 580
+    $card.Height = 190
+    $card.Location = New-Object System.Drawing.Point(0, 60)
+
+    $welcomeBody = New-Object System.Windows.Forms.Label
+    $welcomeBody.AutoSize = $false
+    $welcomeBody.Width = 550
+    $welcomeBody.Height = 170
+    $welcomeBody.Location = New-Object System.Drawing.Point(12, 10)
+            $welcomeBody.Text = @(
+        "Quick setup will install the app and walk you through the choices below.",
+        "",
+        "Steps:",
+        "  1) Choose an install folder (default is Documents\\Teams Always Green)",
+        "  2) Choose whether to create shortcuts",
+        "  3) Download and verify app files",
+        "  4) Review the summary and launch",
+        "",
+        "This setup will:",
+        "  - Install the app files into a single folder",
+        "  - Optionally create Start Menu/Desktop/Startup shortcuts",
+        "",
+        "This setup does not:",
+        "  - Change your Teams settings",
+        "  - Run anything in the background without your permission"
+    ) -join [Environment]::NewLine
+
+    $card.Controls.Add($welcomeBody)
+
+    $chkShortcuts = New-Object System.Windows.Forms.CheckBox
+    $chkShortcuts.Text = "Create Start Menu/Desktop shortcuts (Recommended)"
+    $chkShortcuts.Checked = $true
+    $chkShortcuts.AutoSize = $true
+    $chkShortcuts.Location = New-Object System.Drawing.Point(8, 260)
+
+    $chkStartup = New-Object System.Windows.Forms.CheckBox
+    $chkStartup.Text = "Start with Windows"
+    $chkStartup.Checked = $false
+    $chkStartup.AutoSize = $true
+    $chkStartup.Location = New-Object System.Drawing.Point(8, 284)
+
+    $chkShortcuts.Add_CheckedChanged({
+        $chkStartup.Enabled = [bool]$chkShortcuts.Checked
+        if (-not $chkStartup.Enabled) { $chkStartup.Checked = $false }
+    })
+
+    $panelWelcome.Controls.Add($headerPanel)
+    $panelWelcome.Controls.Add($card)
+    $panelWelcome.Controls.Add($chkShortcuts)
+    $panelWelcome.Controls.Add($chkStartup)
+
+    $panelLocation = New-Object System.Windows.Forms.Panel
+    $panelLocation.Location = New-Object System.Drawing.Point(16, 44)
+    $panelLocation.Size = New-Object System.Drawing.Size(600, 320)
+    $panelLocation.Visible = $false
+
+    $locLabel = New-Object System.Windows.Forms.Label
+    $locLabel.AutoSize = $true
+    $locLabel.Text = "Step 1 of 4: Choose the install folder location."
+    $locLabel.Location = New-Object System.Drawing.Point(0, 0)
+
+    $locText = New-Object System.Windows.Forms.TextBox
+    $locText.Width = 420
+    $locText.Location = New-Object System.Drawing.Point(0, 28)
+
+    $locBrowse = New-Object System.Windows.Forms.Button
+    $locBrowse.Text = "Browse..."
+    $locBrowse.Width = 90
+    $locBrowse.Location = New-Object System.Drawing.Point(430, 26)
+
+    $locHint = New-Object System.Windows.Forms.Label
+    $locHint.AutoSize = $true
+    $locHint.Text = "A 'Teams Always Green' folder will be created inside the selected path."
+    $locHint.Location = New-Object System.Drawing.Point(0, 60)
+
+    $locBrowse.Add_Click({
+        $dialog = New-Object System.Windows.Forms.FolderBrowserDialog
+        $dialog.Description = "Select the parent folder (we will create a Teams Always Green folder inside)"
+        $dialog.SelectedPath = $locText.Text
+        if ($dialog.ShowDialog($form) -eq [System.Windows.Forms.DialogResult]::OK) {
+            $locText.Text = $dialog.SelectedPath
+        }
+    })
+
+    $panelLocation.Controls.Add($locLabel)
+    $panelLocation.Controls.Add($locText)
+    $panelLocation.Controls.Add($locBrowse)
+    $panelLocation.Controls.Add($locHint)
+
+    $panelDownload = New-Object System.Windows.Forms.Panel
+    $panelDownload.Location = New-Object System.Drawing.Point(16, 44)
+    $panelDownload.Size = New-Object System.Drawing.Size(600, 320)
+    $panelDownload.Visible = $false
+
+    $dlLabel = New-Object System.Windows.Forms.Label
+    $dlLabel.AutoSize = $true
+    $dlLabel.Text = "Step 2 of 4: Preparing download..."
+    $dlLabel.Location = New-Object System.Drawing.Point(0, 0)
+
+    $dlProgress = New-Object System.Windows.Forms.ProgressBar
+    $dlProgress.Width = 560
+    $dlProgress.Height = 20
+    $dlProgress.Location = New-Object System.Drawing.Point(0, 28)
+    $dlProgress.Minimum = 0
+    $dlProgress.Maximum = 100
+
+    $dlMeta = New-Object System.Windows.Forms.Label
+    $dlMeta.AutoSize = $true
+    $dlMeta.Font = New-Object System.Drawing.Font("Segoe UI", 8.5)
+    $dlMeta.Text = "Files: 0/0"
+    $dlMeta.Location = New-Object System.Drawing.Point(0, 54)
+
+    $dlDetailsLink = New-Object System.Windows.Forms.LinkLabel
+    $dlDetailsLink.Text = "Show details"
+    $dlDetailsLink.AutoSize = $true
+    $dlDetailsLink.Location = New-Object System.Drawing.Point(460, 54)
+
+    $dlDetailsList = New-Object System.Windows.Forms.ListBox
+    $dlDetailsList.Width = 560
+    $dlDetailsList.Height = 80
+    $dlDetailsList.Location = New-Object System.Drawing.Point(0, 78)
+    $dlDetailsList.Visible = $false
+
+    $dlCancel = New-Object System.Windows.Forms.Button
+    $dlCancel.Text = "Cancel Download"
+    $dlCancel.Width = 130
+    $dlCancel.Location = New-Object System.Drawing.Point(0, 168)
+
+    $panelDownload.Controls.Add($dlLabel)
+    $panelDownload.Controls.Add($dlProgress)
+    $panelDownload.Controls.Add($dlMeta)
+    $panelDownload.Controls.Add($dlDetailsLink)
+    $panelDownload.Controls.Add($dlDetailsList)
+    $panelDownload.Controls.Add($dlCancel)
+
+    $panelSummary = New-Object System.Windows.Forms.Panel
+    $panelSummary.Location = New-Object System.Drawing.Point(16, 44)
+    $panelSummary.Size = New-Object System.Drawing.Size(600, 320)
+    $panelSummary.Visible = $false
+
+    $summaryTitle = New-Object System.Windows.Forms.Label
+    $summaryTitle.AutoSize = $true
+    $summaryTitle.Font = New-Object System.Drawing.Font("Segoe UI", 11, [System.Drawing.FontStyle]::Bold)
+    $summaryTitle.Text = "Install completed successfully."
+    $summaryTitle.Location = New-Object System.Drawing.Point(0, 0)
+
+    $summaryGroup = New-Object System.Windows.Forms.GroupBox
+    $summaryGroup.Text = "Install summary"
+    $summaryGroup.Width = 580
+    $summaryGroup.Height = 180
+    $summaryGroup.Location = New-Object System.Drawing.Point(0, 30)
+
+    $summaryTable = New-Object System.Windows.Forms.TableLayoutPanel
+    $summaryTable.Dock = [System.Windows.Forms.DockStyle]::Fill
+    $summaryTable.Padding = New-Object System.Windows.Forms.Padding(10, 18, 10, 10)
+    $summaryTable.ColumnCount = 2
+    $summaryTable.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::AutoSize)))
+    $summaryTable.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Percent, 100)))
+
+    $sumInstall = New-Object System.Windows.Forms.Label
+    $sumMode = New-Object System.Windows.Forms.Label
+    $sumIntegrity = New-Object System.Windows.Forms.Label
+    $sumShortcuts = New-Object System.Windows.Forms.Label
+    $sumLog = New-Object System.Windows.Forms.Label
+
+    foreach ($lbl in @($sumInstall,$sumMode,$sumIntegrity,$sumShortcuts,$sumLog)) {
+        $lbl.AutoSize = $true
+        $lbl.MaximumSize = New-Object System.Drawing.Size(420, 0)
+    }
+
+    $addRow = {
+        param([string]$labelText, $valueLabel)
+        $row = $summaryTable.RowCount
+        $summaryTable.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::AutoSize)))
+        $label = New-Object System.Windows.Forms.Label
+        $label.AutoSize = $true
+        $label.Font = New-Object System.Drawing.Font("Segoe UI", 9, [System.Drawing.FontStyle]::Bold)
+        $label.Text = $labelText
+        $label.Margin = New-Object System.Windows.Forms.Padding(0, 0, 8, 6)
+        $valueLabel.Margin = New-Object System.Windows.Forms.Padding(0, 0, 0, 6)
+        $summaryTable.Controls.Add($label, 0, $row)
+        $summaryTable.Controls.Add($valueLabel, 1, $row)
+        $summaryTable.RowCount++
+    }
+
+    & $addRow "Install Path:" $sumInstall
+    & $addRow "Mode:" $sumMode
+    & $addRow "Integrity:" $sumIntegrity
+    & $addRow "Shortcuts:" $sumShortcuts
+    & $addRow "Setup Log:" $sumLog
+
+    $summaryGroup.Controls.Add($summaryTable)
+
+    $pinTip = New-Object System.Windows.Forms.Label
+    $pinTip.AutoSize = $true
+    $pinTip.ForeColor = [System.Drawing.Color]::FromArgb(90,90,90)
+    $pinTip.Text = "Tip: Pin the tray icon via the ^ menu so it's always visible."
+    $pinTip.Location = New-Object System.Drawing.Point(0, 220)
+
+    $sumLaunch = New-Object System.Windows.Forms.Button
+    $sumLaunch.Text = "Launch"
+    $sumLaunch.Width = 90
+    $sumLaunch.Location = New-Object System.Drawing.Point(0, 250)
+
+    $sumSettings = New-Object System.Windows.Forms.Button
+    $sumSettings.Text = "Settings"
+    $sumSettings.Width = 90
+    $sumSettings.Location = New-Object System.Drawing.Point(100, 250)
+
+    $sumFolder = New-Object System.Windows.Forms.Button
+    $sumFolder.Text = "Open Folder"
+    $sumFolder.Width = 110
+    $sumFolder.Location = New-Object System.Drawing.Point(200, 250)
+
+    $sumClose = New-Object System.Windows.Forms.Button
+    $sumClose.Text = "Close"
+    $sumClose.Width = 90
+    $sumClose.Location = New-Object System.Drawing.Point(490, 250)
+
+    $panelSummary.Controls.Add($summaryTitle)
+    $panelSummary.Controls.Add($summaryGroup)
+    $panelSummary.Controls.Add($pinTip)
+    $panelSummary.Controls.Add($sumLaunch)
+    $panelSummary.Controls.Add($sumSettings)
+    $panelSummary.Controls.Add($sumFolder)
+    $panelSummary.Controls.Add($sumClose)
+
+    $btnBack = New-Object System.Windows.Forms.Button
+    $btnBack.Text = "Back"
+    $btnBack.Width = 90
+    $btnBack.Location = New-Object System.Drawing.Point(340, 380)
+
+    $btnNext = New-Object System.Windows.Forms.Button
+    $btnNext.Text = "Next"
+    $btnNext.Width = 90
+    $btnNext.Location = New-Object System.Drawing.Point(440, 380)
+
+    $btnCancel = New-Object System.Windows.Forms.Button
+    $btnCancel.Text = "Cancel"
+    $btnCancel.Width = 90
+    $btnCancel.Location = New-Object System.Drawing.Point(540, 380)
+
+    $form.Controls.Add($title)
+    $form.Controls.Add($panelWelcome)
+    $form.Controls.Add($panelLocation)
+    $form.Controls.Add($panelDownload)
+    $form.Controls.Add($panelSummary)
+    $form.Controls.Add($btnBack)
+    $form.Controls.Add($btnNext)
+    $form.Controls.Add($btnCancel)
+
+    $step = 0
+    $downloadComplete = $false
+
+    $showStep = {
+        param([int]$index)
+        $step = $index
+        $panelWelcome.Visible = ($index -eq 0)
+        $panelLocation.Visible = ($index -eq 1)
+        $panelDownload.Visible = ($index -eq 2)
+        $panelSummary.Visible = ($index -eq 3)
+        $btnBack.Enabled = ($index -gt 0 -and $index -lt 3)
+        if ($index -eq 2) {
+            $btnNext.Enabled = $downloadComplete
+        } elseif ($index -eq 3) {
+            $btnBack.Enabled = $false
+            $btnNext.Enabled = $false
+        } else {
+            $btnNext.Enabled = $true
+        }
+    }
+
+    $btnCancel.Add_Click({ $state.Cancelled = $true; $form.Close() })
+    $btnBack.Add_Click({
+        if ($step -eq 1) { & $showStep 0 }
+    })
+
+    $btnNext.Add_Click({
+        if ($step -eq 0) {
+            $state.CreateShortcuts = [bool]$chkShortcuts.Checked
+            $state.EnableStartup = [bool]$chkStartup.Checked
+            $defaultBase = [Environment]::GetFolderPath("MyDocuments")
+            $locText.Text = (Join-Path $defaultBase "Teams Always Green")
+            & $showStep 1
+            return
+        }
+        if ($step -eq 1) {
+            if ([string]::IsNullOrWhiteSpace($locText.Text)) {
+                $defaultBase = [Environment]::GetFolderPath("MyDocuments")
+                $locText.Text = (Join-Path $defaultBase "Teams Always Green")
+            }
+            $selectedBase = $locText.Text
+            $appFolderName = "Teams Always Green"
+            if ([string]::Equals([System.IO.Path]::GetFileName($selectedBase), $appFolderName, [System.StringComparison]::OrdinalIgnoreCase)) {
+                $state.InstallPath = $selectedBase
+            } else {
+                $state.InstallPath = Join-Path $selectedBase $appFolderName
+            }
+            if (-not (Test-Path $state.InstallPath)) {
+                New-Item -ItemType Directory -Path $state.InstallPath -Force | Out-Null
+            }
+            & $showStep 2
+
+            $state.PortableMode = (-not $state.CreateShortcuts)
+            $targetScript = Join-Path $state.InstallPath "Script\Teams Always Green.ps1"
+
+            $folders = @(
+                "Debug","Logs","Meta","Settings","Meta\Icons","Script","Script\Core","Script\Features","Script\I18n","Script\Tray","Script\UI"
+            )
+            foreach ($name in $folders) {
+                $path = Join-Path $state.InstallPath $name
+                if (-not (Test-Path $path)) { New-Item -ItemType Directory -Path $path -Force | Out-Null }
+            }
+
+            $metaDir = Join-Path $state.InstallPath "Meta"
+            $settingsDir = Join-Path $state.InstallPath "Settings"
+            $logsDir = Join-Path $state.InstallPath "Logs"
+            $portableMarker = Join-Path $metaDir "PortableMode.txt"
+            if ($state.PortableMode) {
+                try {
+                    Set-Content -Path $portableMarker -Value ("PortableMode=1`nSetOn={0}" -f (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")) -Encoding ASCII
+                    Write-SetupLog "Portable mode enabled."
+                } catch {
+                }
+            } else {
+                try { if (Test-Path $portableMarker) { Remove-Item -Path $portableMarker -Force -ErrorAction SilentlyContinue } } catch { }
+            }
+            try {
+                Set-Content -Path (Join-Path $metaDir "Teams-Always-Green.settings.path.txt") -Value $settingsDir -Encoding ASCII
+                Set-Content -Path (Join-Path $metaDir "Teams-Always-Green.log.path.txt") -Value $logsDir -Encoding ASCII
+            } catch { }
+
+            $localRoot = $null
+            if ($PSScriptRoot) { $localRoot = $PSScriptRoot }
+            elseif ($PSCommandPath) { $localRoot = Split-Path -Parent $PSCommandPath }
+            elseif ($MyInvocation.MyCommand.Path) { $localRoot = Split-Path -Parent $MyInvocation.MyCommand.Path }
+            $useLocal = $false
+            if ($localRoot -and (Test-Path (Join-Path $localRoot "Script\Teams Always Green.ps1"))) {
+                $useLocal = $true
+                Write-SetupLog "Using local app files for install."
+            }
+
+            $manifest = $null
+            if ($useLocal) {
+                $manifest = Load-Manifest (Join-Path $localRoot "QuickSetup.manifest.json")
+            } else {
+                $manifestUrl = "$script:QuickSetupRawBase/QuickSetup.manifest.json?v=$script:QuickSetupCacheBuster"
+                $manifestTarget = Join-Path $state.InstallPath "Meta\QuickSetup.manifest.json"
+                try {
+                    Invoke-WebRequest -Uri $manifestUrl -OutFile $manifestTarget -UseBasicParsing
+                    $manifest = Load-Manifest $manifestTarget
+                } catch {
+                    Write-SetupLog "Manifest download failed; continuing without integrity validation."
+                }
+            }
+            $state.IntegrityStatus = if ($manifest) { "Verified" } else { "Not verified (manifest unavailable)" }
+
+            $downloadUi = @{
+                Form = $form
+                Label = $dlLabel
+                Progress = $dlProgress
+                Meta = $dlMeta
+                DetailsLink = $dlDetailsLink
+                DetailsList = $dlDetailsList
+                CancelButton = $dlCancel
+                NextButton = $null
+                NextClicked = $false
+                Cancelled = $false
+                DetailsVisible = $false
+                StartTime = (Get-Date)
+                BytesDownloaded = 0
+            }
+
+            $dlDetailsLink.Add_LinkClicked({
+                $downloadUi.DetailsVisible = -not $downloadUi.DetailsVisible
+                $downloadUi.DetailsList.Visible = $downloadUi.DetailsVisible
+                $dlDetailsLink.Text = if ($downloadUi.DetailsVisible) { "Hide details" } else { "Show details" }
+            })
+            $dlCancel.Add_Click({
+                $downloadUi.Cancelled = $true
+                $dlCancel.Enabled = $false
+                $dlLabel.Text = "Canceling after current file..."
+            })
+
+            $total = $script:QuickSetupFiles.Count
+            $index = 0
+            $downloaded = New-Object System.Collections.ArrayList
+            foreach ($file in $script:QuickSetupFiles) {
+                if ($downloadUi.Cancelled) { break }
+                $index++
+                $targetPath = Join-Path $state.InstallPath $file.Path
+                $status = "Step 2 of 4: Downloading {0} ({1}/{2})" -f $file.Path, $index, $total
+                if ($downloadUi.DetailsList) {
+                    [void]$downloadUi.DetailsList.Items.Insert(0, $file.Path)
+                    while ($downloadUi.DetailsList.Items.Count -gt 3) { $downloadUi.DetailsList.Items.RemoveAt($downloadUi.DetailsList.Items.Count - 1) }
+                }
+                Update-Progress $downloadUi $index $total $status
+                Write-SetupLog $status
+
+                if ($useLocal) {
+                    $sourcePath = Join-Path $localRoot $file.Path
+                    if (-not (Test-Path $sourcePath)) {
+                        Show-SetupError "Missing local file: $sourcePath"
+                        $state.Cancelled = $true
+                        break
+                    }
+                    Copy-Item -Path $sourcePath -Destination $targetPath -Force
+                } else {
+                    try {
+                        $downloadUrl = if ($file.Url -match "\?") { "$($file.Url)&v=$script:QuickSetupCacheBuster" } else { "$($file.Url)?v=$script:QuickSetupCacheBuster" }
+                        Invoke-WebRequest -Uri $downloadUrl -OutFile $targetPath -UseBasicParsing
+                    } catch {
+                        Show-SetupError ("Download failed: {0}" -f $file.Url)
+                        $state.Cancelled = $true
+                        break
+                    }
+                }
+
+                if (Test-Path $targetPath) { [void]$downloaded.Add($targetPath) }
+
+                if ($manifest -and $manifest.files) {
+                    $manifestKey = $file.Path.Replace("\", "/")
+                    $expected = $manifest.files.$manifestKey
+                    if ($expected) {
+                        Update-Progress $downloadUi $index $total ("Step 2 of 4: Verifying {0} ({1}/{2})" -f $file.Path, $index, $total)
+                        $actual = Get-FileHashHex $targetPath
+                        if (-not $actual -or ($actual.ToLowerInvariant() -ne [string]$expected.ToLowerInvariant())) {
+                            $matched = $false
+                            if (Is-TextFile $file.Path) {
+                                $altLf = Get-NormalizedBytesHash $targetPath "LF"
+                                if ($altLf -and ($altLf.ToLowerInvariant() -eq [string]$expected.ToLowerInvariant())) {
+                                    $matched = $true
+                                } else {
+                                    $altCrLf = Get-NormalizedBytesHash $targetPath "CRLF"
+                                    if ($altCrLf -and ($altCrLf.ToLowerInvariant() -eq [string]$expected.ToLowerInvariant())) {
+                                        $matched = $true
+                                    }
+                                }
+                            }
+                            if (-not $matched) {
+                                Show-SetupError ("Integrity check failed for {0}. See log for hash details." -f $file.Path)
+                                $state.Cancelled = $true
+                                break
+                            }
+                        }
+                    }
+                }
+            }
+
+            if ($downloadUi.Cancelled -or $state.Cancelled) {
+                foreach ($path in $downloaded) {
+                    try { Remove-Item -Path $path -Force -ErrorAction Stop } catch { }
+                }
+                $state.Cancelled = $true
+                $form.Close()
+                return
+            }
+
+            Update-Progress $downloadUi $total $total "Step 2 of 4: Download complete. Click Next to continue."
+            $downloadComplete = $true
+            $btnNext.Enabled = $true
+
+            $state.ShortcutsCreated = Finalize-Install -installPath $state.InstallPath -targetScript $targetScript -portableMode $state.PortableMode -enableStartup $state.EnableStartup
+
+            $sumInstall.Text = $state.InstallPath
+            $sumMode.Text = if ($state.PortableMode) { "Portable (no shortcuts)" } else { "Standard" }
+            $sumIntegrity.Text = $state.IntegrityStatus
+            $sumShortcuts.Text = if ($state.ShortcutsCreated.Count -gt 0) { $state.ShortcutsCreated -join "; " } else { "None" }
+            $sumLog.Text = $logPath
+            $pinTip.Visible = (-not $state.PortableMode)
+            & $showStep 3
+        }
+    })
+
+    $sumLaunch.Add_Click({ $state.Action = "Launch"; $form.Close() })
+    $sumSettings.Add_Click({ $state.Action = "Settings"; $form.Close() })
+    $sumFolder.Add_Click({ $state.Action = "Folder"; $form.Close() })
+    $sumClose.Add_Click({ $state.Action = "Close"; $form.Close() })
+
+    & $showStep 0
+    if ($owner) { $form.ShowDialog($owner) | Out-Null } else { $form.ShowDialog() | Out-Null }
+    return $state
+}
+
+$script:QuickSetupRawBase = "https://raw.githubusercontent.com/alexphillips-dev/Teams-Always-Green/main"
+$script:QuickSetupCacheBuster = [Guid]::NewGuid().ToString("N")
+$script:QuickSetupFiles = @(
+    @{ Url = "$script:QuickSetupRawBase/Script/Teams%20Always%20Green.ps1"; Path = "Script\Teams Always Green.ps1" },
+    @{ Url = "$script:QuickSetupRawBase/Script/Core/Logging.ps1"; Path = "Script\Core\Logging.ps1" },
+    @{ Url = "$script:QuickSetupRawBase/Script/Core/Paths.ps1"; Path = "Script\Core\Paths.ps1" },
+    @{ Url = "$script:QuickSetupRawBase/Script/Core/Runtime.ps1"; Path = "Script\Core\Runtime.ps1" },
+    @{ Url = "$script:QuickSetupRawBase/Script/Core/Settings.ps1"; Path = "Script\Core\Settings.ps1" },
+    @{ Url = "$script:QuickSetupRawBase/Script/Features/Hotkeys.ps1"; Path = "Script\Features\Hotkeys.ps1" },
+    @{ Url = "$script:QuickSetupRawBase/Script/Features/Profiles.ps1"; Path = "Script\Features\Profiles.ps1" },
+    @{ Url = "$script:QuickSetupRawBase/Script/Features/Scheduling.ps1"; Path = "Script\Features\Scheduling.ps1" },
+    @{ Url = "$script:QuickSetupRawBase/Script/I18n/UiStrings.ps1"; Path = "Script\I18n\UiStrings.ps1" },
+    @{ Url = "$script:QuickSetupRawBase/Script/Tray/Menu.ps1"; Path = "Script\Tray\Menu.ps1" },
+    @{ Url = "$script:QuickSetupRawBase/Script/UI/SettingsDialog.ps1"; Path = "Script\UI\SettingsDialog.ps1" },
+    @{ Url = "$script:QuickSetupRawBase/Script/UI/HistoryDialog.ps1"; Path = "Script\UI\HistoryDialog.ps1" },
+    @{ Url = "$script:QuickSetupRawBase/VERSION"; Path = "VERSION" },
+    @{ Url = "$script:QuickSetupRawBase/Teams%20Always%20Green.VBS"; Path = "Teams Always Green.VBS" },
+    @{ Url = "$script:QuickSetupRawBase/Debug/Teams%20Always%20Green%20-%20Debug.VBS"; Path = "Debug\Teams Always Green - Debug.VBS" },
+    @{ Url = "$script:QuickSetupRawBase/Meta/Icons/Tray_Icon.ico"; Path = "Meta\Icons\Tray_Icon.ico" },
+    @{ Url = "$script:QuickSetupRawBase/Meta/Icons/Settings_Icon.ico"; Path = "Meta\Icons\Settings_Icon.ico" }
+)
+
+try {
+    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+} catch {
+}
+
+Write-SetupLog "Quick setup started."
+$setupOwner = New-SetupOwner
+$wizard = Show-SetupWizard -owner $setupOwner
+if ($setupOwner -and -not $setupOwner.IsDisposed) { $setupOwner.Close() }
+
+if (-not $wizard -or $wizard.Cancelled) {
+    Write-SetupLog "Install canceled in setup wizard."
+    Cleanup-SetupTempFiles -success $true
+    exit 1
+}
+
+$installPath = $wizard.InstallPath
+if ([string]::IsNullOrWhiteSpace($installPath)) {
+    Write-SetupLog "Install canceled: missing install path."
+    Cleanup-SetupTempFiles -success $true
+    exit 1
+}
+
+$targetScript = Join-Path $installPath "Script\Teams Always Green.ps1"
+Write-SetupLog ("Summary action selected: {0}" -f $wizard.Action)
+
+if ($wizard.Action -eq "Launch") {
+    Write-SetupLog "Launch requested."
+    $launchVbs = Join-Path $installPath "Teams Always Green.VBS"
+    if (Test-Path $launchVbs) {
+        try {
+            $proc = Start-Process "$env:WINDIR\System32\wscript.exe" -ArgumentList "`"$launchVbs`"" -WorkingDirectory $installPath -PassThru -ErrorAction Stop
+            Write-SetupLog ("Launch started (wscript). PID={0}" -f $proc.Id)
+        } catch {
+            Write-SetupLog ("Launch failed (wscript): {0}" -f $_.Exception.Message)
+        }
+    }
+    if (-not (Test-Path $targetScript)) {
+        Show-SetupError "Launch failed: app script not found at $targetScript"
+    } elseif (-not (Test-Path $launchVbs)) {
+        $launchArgs = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$targetScript`""
+        try {
+            $proc = Start-Process "$env:WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe" -ArgumentList $launchArgs -WorkingDirectory $installPath -PassThru -ErrorAction Stop
+            Write-SetupLog ("Launch started (hidden). PID={0}" -f $proc.Id)
+        } catch {
+            Write-SetupLog ("Launch failed (hidden): {0}" -f $_.Exception.Message)
+            try {
+                $proc = Start-Process "$env:WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe" -ArgumentList ("-NoProfile -ExecutionPolicy Bypass -File `"$targetScript`"") -WorkingDirectory $installPath -PassThru -ErrorAction Stop
+                Write-SetupLog ("Launch started (visible). PID={0}" -f $proc.Id)
+            } catch {
+                Show-SetupError ("Launch failed: {0}" -f $_.Exception.Message)
+            }
+        }
+    }
+} elseif ($wizard.Action -eq "Settings") {
+    Start-Process "$env:WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe" -ArgumentList "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$targetScript`" -SettingsOnly" -WorkingDirectory $installPath
+} elseif ($wizard.Action -eq "Folder") {
+    Start-Process "explorer.exe" $installPath
+}
+
+Cleanup-SetupTempFiles -success $true
+exit 0
 
 $programsDir = [Environment]::GetFolderPath("Programs")
 $menuFolder = Join-Path $programsDir "Teams Always Green"
@@ -1087,4 +1844,6 @@ if ($action -eq "Launch") {
         Start-Process "explorer.exe" $installPath
     }
     if ($setupOwner -and -not $setupOwner.IsDisposed) { $setupOwner.Close() }
+
+
 
