@@ -1576,7 +1576,6 @@ function Show-SetupWizard {
                 $status = "Step 2 of 4: Downloading {0} ({1}/{2})" -f $file.Path, $index, $total
                 if ($downloadUi.DetailsList) {
                     [void]$downloadUi.DetailsList.Items.Insert(0, $file.Path)
-                    while ($downloadUi.DetailsList.Items.Count -gt 3) { $downloadUi.DetailsList.Items.RemoveAt($downloadUi.DetailsList.Items.Count - 1) }
                 }
                 Update-Progress $downloadUi $index $total $status
                 Write-SetupLog $status
