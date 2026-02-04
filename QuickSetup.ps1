@@ -322,12 +322,16 @@ function Show-SetupSummary {
     $form.MaximizeBox = $false
     $form.MinimizeBox = $false
     $form.BackColor = [System.Drawing.Color]::White
+    $windowIconPath = Join-Path $installPath "Meta\Icons\Tray_Icon.ico"
     try {
-        $windowIconPath = Join-Path $installPath "Meta\Icons\Tray_Icon.ico"
         if (Test-Path $windowIconPath) {
             $form.Icon = New-Object System.Drawing.Icon($windowIconPath)
+        } else {
+            $form.Icon = [System.Drawing.SystemIcons]::Application
         }
-    } catch { }
+    } catch {
+        try { $form.Icon = [System.Drawing.SystemIcons]::Application } catch { }
+    }
 
     $header = New-Object System.Windows.Forms.Panel
     $header.Width = 640
@@ -339,7 +343,15 @@ function Show-SetupSummary {
     $iconBox.Size = New-Object System.Drawing.Size(36, 36)
     $iconBox.Location = New-Object System.Drawing.Point(12, 14)
     $iconBox.SizeMode = [System.Windows.Forms.PictureBoxSizeMode]::StretchImage
-    try { $iconBox.Image = [System.Drawing.SystemIcons]::Information.ToBitmap() } catch { }
+    try {
+        if (Test-Path $windowIconPath) {
+            $iconBox.Image = [System.Drawing.Icon]::ExtractAssociatedIcon($windowIconPath).ToBitmap()
+        } else {
+            $iconBox.Image = [System.Drawing.SystemIcons]::Information.ToBitmap()
+        }
+    } catch {
+        try { $iconBox.Image = [System.Drawing.SystemIcons]::Information.ToBitmap() } catch { }
+    }
 
     $headerTitle = New-Object System.Windows.Forms.Label
     $headerTitle.AutoSize = $true
