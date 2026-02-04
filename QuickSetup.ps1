@@ -315,62 +315,155 @@ function Show-SetupSummary {
 
     $form = New-Object System.Windows.Forms.Form
     $form.Text = "Teams Always Green - Setup Complete"
-    $form.Width = 600
-    $form.Height = 320
+    $form.Width = 680
+    $form.Height = 380
     $form.StartPosition = "CenterScreen"
     $form.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::FixedDialog
     $form.MaximizeBox = $false
     $form.MinimizeBox = $false
+    $form.BackColor = [System.Drawing.Color]::White
 
-    $title = New-Object System.Windows.Forms.Label
-    $title.AutoSize = $true
-    $title.Font = New-Object System.Drawing.Font("Segoe UI", 11, [System.Drawing.FontStyle]::Bold)
-    $title.Text = "Install completed successfully."
-    $title.Location = New-Object System.Drawing.Point(16, 12)
+    $header = New-Object System.Windows.Forms.Panel
+    $header.Width = 640
+    $header.Height = 66
+    $header.Location = New-Object System.Drawing.Point(16, 12)
+    $header.BackColor = [System.Drawing.Color]::FromArgb(245, 248, 252)
 
-    $card = New-Object System.Windows.Forms.Panel
-    $card.BorderStyle = [System.Windows.Forms.BorderStyle]::FixedSingle
-    $card.Width = 552
-    $card.Height = 150
-    $card.Location = New-Object System.Drawing.Point(16, 44)
+    $iconBox = New-Object System.Windows.Forms.PictureBox
+    $iconBox.Size = New-Object System.Drawing.Size(36, 36)
+    $iconBox.Location = New-Object System.Drawing.Point(12, 14)
+    $iconBox.SizeMode = [System.Windows.Forms.PictureBoxSizeMode]::StretchImage
+    try { $iconBox.Image = [System.Drawing.SystemIcons]::Information.ToBitmap() } catch { }
+
+    $headerTitle = New-Object System.Windows.Forms.Label
+    $headerTitle.AutoSize = $true
+    $headerTitle.Font = New-Object System.Drawing.Font("Segoe UI", 12, [System.Drawing.FontStyle]::Bold)
+    $headerTitle.Text = "Install completed successfully."
+    $headerTitle.Location = New-Object System.Drawing.Point(60, 10)
+
+    $headerSubtitle = New-Object System.Windows.Forms.Label
+    $headerSubtitle.AutoSize = $true
+    $headerSubtitle.Font = New-Object System.Drawing.Font("Segoe UI", 9, [System.Drawing.FontStyle]::Regular)
+    $headerSubtitle.Text = "You're ready to launch Teams Always Green."
+    $headerSubtitle.Location = New-Object System.Drawing.Point(60, 36)
+
+    $header.Controls.Add($iconBox)
+    $header.Controls.Add($headerTitle)
+    $header.Controls.Add($headerSubtitle)
+
+    $separator = New-Object System.Windows.Forms.Panel
+    $separator.Width = 640
+    $separator.Height = 1
+    $separator.Location = New-Object System.Drawing.Point(16, 84)
+    $separator.BackColor = [System.Drawing.Color]::FromArgb(220, 220, 220)
+
+    $summaryGroup = New-Object System.Windows.Forms.GroupBox
+    $summaryGroup.Text = "Install summary"
+    $summaryGroup.Width = 640
+    $summaryGroup.Height = 170
+    $summaryGroup.Location = New-Object System.Drawing.Point(16, 92)
 
     $shortcutsText = if ($shortcutsCreated -and $shortcutsCreated.Count -gt 0) { $shortcutsCreated -join "; " } else { "None (portable mode)" }
     $modeText = if ($portableMode) { "Portable (no shortcuts)" } else { "Standard" }
 
-    $summaryLabel = New-Object System.Windows.Forms.Label
-    $summaryLabel.AutoSize = $false
-    $summaryLabel.Width = 520
-    $summaryLabel.Height = 130
-    $summaryLabel.Location = New-Object System.Drawing.Point(12, 10)
-    $summaryLabel.Text = @"
-Install Path: $installPath
-Mode: $modeText
-Integrity: $integrityStatus
-Shortcuts: $shortcutsText
-Setup Log: $logPath
-"@
+    $summaryTable = New-Object System.Windows.Forms.TableLayoutPanel
+    $summaryTable.ColumnCount = 2
+    $summaryTable.RowCount = 0
+    $summaryTable.Dock = [System.Windows.Forms.DockStyle]::Fill
+    $summaryTable.Padding = New-Object System.Windows.Forms.Padding(12, 18, 12, 10)
+    $summaryTable.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::AutoSize)))
+    $summaryTable.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Percent, 100)))
 
-    $card.Controls.Add($summaryLabel)
+    $addSummaryRow = {
+        param([string]$labelText, $valueControl)
+        $rowIndex = $summaryTable.RowCount
+        $summaryTable.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::AutoSize)))
+        $label = New-Object System.Windows.Forms.Label
+        $label.AutoSize = $true
+        $label.Font = New-Object System.Drawing.Font("Segoe UI", 9, [System.Drawing.FontStyle]::Bold)
+        $label.Text = $labelText
+        $label.Margin = New-Object System.Windows.Forms.Padding(0, 0, 10, 6)
+        $valueControl.Margin = New-Object System.Windows.Forms.Padding(0, 0, 0, 6)
+        $summaryTable.Controls.Add($label, 0, $rowIndex)
+        $summaryTable.Controls.Add($valueControl, 1, $rowIndex)
+        $summaryTable.RowCount++
+    }
+
+    $valueStyle = New-Object System.Drawing.Font("Segoe UI", 9, [System.Drawing.FontStyle]::Regular)
+    $maxValueWidth = 500
+    $toolTip = New-Object System.Windows.Forms.ToolTip
+
+    $valueInstall = New-Object System.Windows.Forms.Label
+    $valueInstall.Font = $valueStyle
+    $valueInstall.AutoSize = $true
+    $valueInstall.MaximumSize = New-Object System.Drawing.Size($maxValueWidth, 0)
+    $valueInstall.Text = $installPath
+    $toolTip.SetToolTip($valueInstall, $installPath)
+
+    $valueMode = New-Object System.Windows.Forms.Label
+    $valueMode.Font = $valueStyle
+    $valueMode.AutoSize = $true
+    $valueMode.MaximumSize = New-Object System.Drawing.Size($maxValueWidth, 0)
+    $valueMode.Text = $modeText
+
+    $valueIntegrity = New-Object System.Windows.Forms.Label
+    $valueIntegrity.Font = $valueStyle
+    $valueIntegrity.AutoSize = $true
+    $valueIntegrity.MaximumSize = New-Object System.Drawing.Size($maxValueWidth, 0)
+    $valueIntegrity.Text = $integrityStatus
+
+    $valueShortcuts = New-Object System.Windows.Forms.Label
+    $valueShortcuts.Font = $valueStyle
+    $valueShortcuts.AutoSize = $true
+    $valueShortcuts.MaximumSize = New-Object System.Drawing.Size($maxValueWidth, 0)
+    $valueShortcuts.Text = $shortcutsText
+
+    $valueLog = New-Object System.Windows.Forms.LinkLabel
+    $valueLog.Font = $valueStyle
+    $valueLog.AutoSize = $true
+    $valueLog.MaximumSize = New-Object System.Drawing.Size($maxValueWidth, 0)
+    $valueLog.Text = $logPath
+    $valueLog.LinkBehavior = [System.Windows.Forms.LinkBehavior]::HoverUnderline
+    $toolTip.SetToolTip($valueLog, $logPath)
+    $valueLog.Add_LinkClicked({
+        try { Start-Process "notepad.exe" $logPath } catch { }
+    })
+
+    & $addSummaryRow "Install Path:" $valueInstall
+    & $addSummaryRow "Mode:" $valueMode
+    & $addSummaryRow "Integrity:" $valueIntegrity
+    & $addSummaryRow "Shortcuts:" $valueShortcuts
+    & $addSummaryRow "Setup Log:" $valueLog
+
+    $summaryGroup.Controls.Add($summaryTable)
+
+    $note = New-Object System.Windows.Forms.Label
+    $note.AutoSize = $true
+    $note.Font = New-Object System.Drawing.Font("Segoe UI", 8.5, [System.Drawing.FontStyle]::Regular)
+    $note.ForeColor = [System.Drawing.Color]::FromArgb(90, 90, 90)
+    $note.Text = "Tip: You can open Settings any time from the tray icon."
+    $note.Location = New-Object System.Drawing.Point(18, 270)
 
     $buttonLaunch = New-Object System.Windows.Forms.Button
     $buttonLaunch.Text = "Launch"
     $buttonLaunch.Width = 90
-    $buttonLaunch.Location = New-Object System.Drawing.Point(16, 210)
+    $buttonLaunch.Font = New-Object System.Drawing.Font("Segoe UI", 9, [System.Drawing.FontStyle]::Bold)
+    $buttonLaunch.Location = New-Object System.Drawing.Point(16, 300)
 
     $buttonSettings = New-Object System.Windows.Forms.Button
     $buttonSettings.Text = "Settings"
     $buttonSettings.Width = 90
-    $buttonSettings.Location = New-Object System.Drawing.Point(116, 210)
+    $buttonSettings.Location = New-Object System.Drawing.Point(116, 300)
 
     $buttonFolder = New-Object System.Windows.Forms.Button
     $buttonFolder.Text = "Open Folder"
     $buttonFolder.Width = 110
-    $buttonFolder.Location = New-Object System.Drawing.Point(216, 210)
+    $buttonFolder.Location = New-Object System.Drawing.Point(216, 300)
 
     $buttonClose = New-Object System.Windows.Forms.Button
     $buttonClose.Text = "Close"
     $buttonClose.Width = 90
-    $buttonClose.Location = New-Object System.Drawing.Point(446, 210)
+    $buttonClose.Location = New-Object System.Drawing.Point(546, 300)
 
     $buttonLaunch.DialogResult = [System.Windows.Forms.DialogResult]::Yes
     $buttonSettings.DialogResult = [System.Windows.Forms.DialogResult]::Retry
@@ -379,8 +472,10 @@ Setup Log: $logPath
     $form.AcceptButton = $buttonLaunch
     $form.CancelButton = $buttonClose
 
-    $form.Controls.Add($title)
-    $form.Controls.Add($card)
+    $form.Controls.Add($header)
+    $form.Controls.Add($separator)
+    $form.Controls.Add($summaryGroup)
+    $form.Controls.Add($note)
     $form.Controls.Add($buttonLaunch)
     $form.Controls.Add($buttonSettings)
     $form.Controls.Add($buttonFolder)
