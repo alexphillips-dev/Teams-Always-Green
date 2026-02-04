@@ -167,52 +167,110 @@ function Show-Welcome {
     param([System.Windows.Forms.Form]$owner)
     $form = New-Object System.Windows.Forms.Form
     $form.Text = "Teams Always Green - Welcome"
-    $form.Width = 520
-    $form.Height = 300
+    $form.Width = 600
+    $form.Height = 380
     $form.StartPosition = "CenterScreen"
     $form.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::FixedDialog
     $form.MaximizeBox = $false
     $form.MinimizeBox = $false
     $form.TopMost = $true
 
+    $headerPanel = New-Object System.Windows.Forms.Panel
+    $headerPanel.Width = 560
+    $headerPanel.Height = 52
+    $headerPanel.Location = New-Object System.Drawing.Point(16, 12)
+    $headerPanel.BackColor = $form.BackColor
+
+    $iconBox = New-Object System.Windows.Forms.PictureBox
+    $iconBox.Size = New-Object System.Drawing.Size(32, 32)
+    $iconBox.Location = New-Object System.Drawing.Point(0, 6)
+    $iconBox.SizeMode = [System.Windows.Forms.PictureBoxSizeMode]::StretchImage
+    $iconPath = $null
+    $localRoot = $PSScriptRoot
+    if (-not $localRoot -and $PSCommandPath) {
+        $localRoot = Split-Path -Parent $PSCommandPath
+    }
+    if ($localRoot) {
+        $iconPath = Join-Path $localRoot "Meta\Icons\Tray_Icon.ico"
+    }
+    if ($iconPath -and (Test-Path $iconPath)) {
+        try { $iconBox.Image = (New-Object System.Drawing.Icon($iconPath)).ToBitmap() } catch { }
+    }
+    if (-not $iconBox.Image) {
+        $iconBox.Image = [System.Drawing.SystemIcons]::Information.ToBitmap()
+    }
+
     $title = New-Object System.Windows.Forms.Label
     $title.AutoSize = $true
     $title.Font = New-Object System.Drawing.Font("Segoe UI", 12, [System.Drawing.FontStyle]::Bold)
     $title.Text = "Welcome to Teams Always Green"
-    $title.Location = New-Object System.Drawing.Point(16, 12)
+    $title.Location = New-Object System.Drawing.Point(44, 4)
+
+    $tagline = New-Object System.Windows.Forms.Label
+    $tagline.AutoSize = $true
+    $tagline.Font = New-Object System.Drawing.Font("Segoe UI", 9, [System.Drawing.FontStyle]::Regular)
+    $tagline.Text = "Stay available without micromanaging your status."
+    $tagline.Location = New-Object System.Drawing.Point(44, 26)
+
+    $headerPanel.Controls.Add($iconBox)
+    $headerPanel.Controls.Add($title)
+    $headerPanel.Controls.Add($tagline)
+
+    $card = New-Object System.Windows.Forms.Panel
+    $card.BorderStyle = [System.Windows.Forms.BorderStyle]::FixedSingle
+    $card.Width = 552
+    $card.Height = 210
+    $card.Location = New-Object System.Drawing.Point(16, 72)
 
     $body = New-Object System.Windows.Forms.Label
     $body.AutoSize = $false
-    $body.Width = 470
-    $body.Height = 160
-    $body.Location = New-Object System.Drawing.Point(16, 44)
+    $body.Width = 520
+    $body.Height = 190
+    $body.Location = New-Object System.Drawing.Point(12, 10)
     $body.Text = @"
-This quick setup will install the app and create any shortcuts you choose.
+Quick setup will install the app and walk you through the choices below.
 
-What happens next:
- - Choose an install folder (default is Documents\Teams Always Green)
- - Optional: enable portable mode (no shortcuts)
- - Download and verify app files
- - Summary with Launch / Settings / Open Folder
+Steps:
+  1) Choose an install folder (default is Documents\Teams Always Green)
+  2) Choose whether to create shortcuts
+  3) Download and verify app files
+  4) Review the summary and launch
+
+This setup will:
+  • Install the app files into a single folder
+  • Optionally create Start Menu/Desktop/Startup shortcuts
+
+This setup does not:
+  • Change your Teams settings
+  • Run anything in the background without your permission
 "@
+
+    $card.Controls.Add($body)
+
+    $shortcutsBox = New-Object System.Windows.Forms.CheckBox
+    $shortcutsBox.Text = "Create Start Menu/Desktop shortcuts (Recommended)"
+    $shortcutsBox.Checked = $true
+    $shortcutsBox.AutoSize = $true
+    $shortcutsBox.Location = New-Object System.Drawing.Point(24, 292)
 
     $continue = New-Object System.Windows.Forms.Button
     $continue.Text = "Continue"
     $continue.Width = 100
-    $continue.Location = New-Object System.Drawing.Point(300, 220)
+    $continue.Location = New-Object System.Drawing.Point(340, 320)
 
     $cancel = New-Object System.Windows.Forms.Button
     $cancel.Text = "Cancel"
     $cancel.Width = 100
-    $cancel.Location = New-Object System.Drawing.Point(410, 220)
+    $cancel.Location = New-Object System.Drawing.Point(450, 320)
 
     $continue.DialogResult = [System.Windows.Forms.DialogResult]::OK
     $cancel.DialogResult = [System.Windows.Forms.DialogResult]::Cancel
     $form.AcceptButton = $continue
     $form.CancelButton = $cancel
 
-    $form.Controls.Add($title)
-    $form.Controls.Add($body)
+    $form.Controls.Add($headerPanel)
+    $form.Controls.Add($card)
+    $form.Controls.Add($shortcutsBox)
     $form.Controls.Add($continue)
     $form.Controls.Add($cancel)
     if ($owner) {
@@ -220,7 +278,10 @@ What happens next:
     } else {
         $result = $form.ShowDialog()
     }
-    return ($result -eq [System.Windows.Forms.DialogResult]::OK)
+    return @{
+        Proceed = ($result -eq [System.Windows.Forms.DialogResult]::OK)
+        CreateShortcuts = [bool]$shortcutsBox.Checked
+    }
 }
 
 function Show-SetupSummary {
@@ -312,15 +373,20 @@ Setup Log: $logPath
 Write-SetupLog "Quick setup started."
 
 $setupOwner = New-SetupOwner
-$continue = Show-Welcome -owner $setupOwner
-if (-not $continue) {
+$welcome = Show-Welcome -owner $setupOwner
+if (-not $welcome.Proceed) {
     Write-SetupLog "Install canceled at welcome screen."
     Write-Host "Install canceled."
     if ($setupOwner -and -not $setupOwner.IsDisposed) { $setupOwner.Close() }
     exit 1
 }
+if (-not $welcome.CreateShortcuts) {
+    Write-SetupLog "Welcome: shortcuts disabled (portable mode selected)."
+} else {
+    Write-SetupLog "Welcome: shortcuts enabled."
+}
 
-$step1 = Show-SetupPrompt -message "Step 1 of 4: Choose the install folder location." -title "Install Location" -buttons ([System.Windows.Forms.MessageBoxButtons]::OKCancel) -icon ([System.Windows.Forms.MessageBoxIcon]::Information) -owner $setupOwner
+$step1 = Show-SetupPrompt -message "Step 2 of 4: Choose the install folder location." -title "Install Location" -buttons ([System.Windows.Forms.MessageBoxButtons]::OKCancel) -icon ([System.Windows.Forms.MessageBoxIcon]::Information) -owner $setupOwner
 if ($step1 -ne [System.Windows.Forms.DialogResult]::OK) {
     Write-SetupLog "Install canceled at install location step."
     Write-Host "Install canceled."
@@ -381,10 +447,7 @@ $portableMarker = Join-Path $installPath "Meta\PortableMode.txt"
 if (Test-Path $portableMarker) {
     $portableMode = $true
 } else {
-    $portableMode = (Show-SetupPrompt -message (
-        "Step 2 of 4: Use portable mode?`n`nPortable mode skips Start Menu/Desktop/Startup shortcuts.",
-        "Portable Mode"
-    ) -title "Portable Mode" -buttons ([System.Windows.Forms.MessageBoxButtons]::YesNo) -icon ([System.Windows.Forms.MessageBoxIcon]::Question) -owner $setupOwner) -eq [System.Windows.Forms.DialogResult]::Yes
+    $portableMode = (-not [bool]$welcome.CreateShortcuts)
 }
 $folders = @(
     "Debug",
