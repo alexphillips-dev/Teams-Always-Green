@@ -864,6 +864,18 @@ if (-not $portableMode) {
 
 Write-Host "Installed Teams Always Green to: $installPath"
 Write-Host "Setup log: $logPath"
+if (-not $portableMode) {
+    $pinMessage = @"
+Teams Always Green runs in the system tray.
+
+To keep it visible:
+1) Click the ^ arrow in the taskbar.
+2) Drag the Teams Always Green icon onto the taskbar tray.
+   - Or open Settings > Personalization > Taskbar > Other system tray icons.
+"@
+    [void](Show-SetupPrompt -message $pinMessage -title "Pin to Tray" -buttons ([System.Windows.Forms.MessageBoxButtons]::OK) -icon ([System.Windows.Forms.MessageBoxIcon]::Information) -owner $setupOwner)
+    Write-SetupLog "Pin-to-tray tip shown."
+}
 Write-SetupLog "Install completed. Showing summary."
 
 $action = Show-SetupSummary -installPath $installPath -integrityStatus $integrityStatus -portableMode $portableMode -shortcutsCreated $shortcutsCreated -logPath $logPath
