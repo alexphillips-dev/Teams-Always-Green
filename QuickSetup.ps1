@@ -1383,12 +1383,12 @@ function Show-SetupWizard {
     $form.Controls.Add($btnNext)
     $form.Controls.Add($btnCancel)
 
-    $step = 0
+    $stepRef = [ref]0
     $downloadComplete = $false
 
     $showStep = {
         param([int]$index)
-        $step = $index
+        $stepRef.Value = $index
         $panelWelcome.Visible = ($index -eq 0)
         $panelLocation.Visible = ($index -eq 1)
         $panelDownload.Visible = ($index -eq 2)
@@ -1406,11 +1406,12 @@ function Show-SetupWizard {
 
     $btnCancel.Add_Click({ $state.Cancelled = $true; $form.Close() })
     $btnBack.Add_Click({
-        if ($step -eq 1) { & $showStep 0 }
+        if ($stepRef.Value -eq 1) { & $showStep 0 }
+        elseif ($stepRef.Value -eq 2 -and -not $downloadComplete) { & $showStep 1 }
     })
 
     $btnNext.Add_Click({
-        if ($step -eq 0) {
+        if ($stepRef.Value -eq 0) {
             $state.CreateShortcuts = [bool]$chkShortcuts.Checked
             $state.EnableStartup = [bool]$chkStartup.Checked
             $defaultBase = [Environment]::GetFolderPath("MyDocuments")
@@ -1418,7 +1419,7 @@ function Show-SetupWizard {
             & $showStep 1
             return
         }
-        if ($step -eq 1) {
+        if ($stepRef.Value -eq 1) {
             if ([string]::IsNullOrWhiteSpace($locText.Text)) {
                 $defaultBase = [Environment]::GetFolderPath("MyDocuments")
                 $locText.Text = (Join-Path $defaultBase "Teams Always Green")
