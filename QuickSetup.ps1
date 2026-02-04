@@ -24,6 +24,7 @@ function Cleanup-SetupTempFiles {
     $paths = @()
     if ($script:WelcomeTempIconPath) { $paths += $script:WelcomeTempIconPath }
     $paths += (Join-Path $tempRoot "TeamsAlwaysGreen-Welcome.ico")
+    $paths += (Join-Path $tempRoot "TeamsAlwaysGreen-QuickSetup.log")
     foreach ($path in ($paths | Select-Object -Unique)) {
         if ($path -and (Test-Path $path)) {
             try { Remove-Item -Path $path -Force -ErrorAction Stop } catch { }
@@ -35,8 +36,11 @@ function Cleanup-SetupTempFiles {
         }
     } catch {
     }
-    if ($logPath -and (Test-Path $logPath)) {
-        try { Remove-Item -Path $logPath -Force -ErrorAction Stop } catch { }
+    try {
+        Get-ChildItem -Path $tempRoot -Filter "teams-always-green-run.*" -ErrorAction SilentlyContinue | ForEach-Object {
+            try { Remove-Item -Path $_.FullName -Force -ErrorAction Stop } catch { }
+        }
+    } catch {
     }
 }
 
@@ -540,8 +544,8 @@ $welcome = Show-Welcome -owner $setupOwner
 if (-not $welcome.Proceed) {
     Write-SetupLog "Install canceled at welcome screen."
     Write-Host "Install canceled."
-    Cleanup-SetupTempFiles -success $true
     if ($setupOwner -and -not $setupOwner.IsDisposed) { $setupOwner.Close() }
+    Cleanup-SetupTempFiles -success $true
     exit 1
 }
 if (-not $welcome.CreateShortcuts) {
