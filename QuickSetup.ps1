@@ -274,6 +274,24 @@ function New-ProgressForm {
     return $ui
 }
 
+function New-ProgressDialog {
+    param(
+        [string]$title = "Preparing...",
+        [bool]$showDetails = $false
+    )
+    $ui = New-ProgressForm
+    if ($ui -and $ui.Label -and -not [string]::IsNullOrWhiteSpace($title)) {
+        $ui.Label.Text = $title
+    }
+    if ($ui -and $ui.DetailsList) {
+        $ui.DetailsList.Visible = [bool]$showDetails
+        if ($ui.DetailsLink) {
+            $ui.DetailsLink.Text = if ($ui.DetailsList.Visible) { "Hide details" } else { "Show details" }
+        }
+    }
+    return $ui
+}
+
 function Update-Progress($ui, [int]$current, [int]$total, [string]$message) {
     if (-not $ui) { return }
     $pct = 0
