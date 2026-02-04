@@ -1279,14 +1279,16 @@ function Show-SetupWizard {
 
     $dlDetailsList = New-Object System.Windows.Forms.ListBox
     $dlDetailsList.Width = 560
-    $dlDetailsList.Height = 80
+    $dlDetailsList.Height = 160
     $dlDetailsList.Location = New-Object System.Drawing.Point(0, 78)
+    $dlDetailsList.HorizontalScrollbar = $true
+    $dlDetailsList.IntegralHeight = $false
     $dlDetailsList.Visible = $false
 
     $dlCancel = New-Object System.Windows.Forms.Button
     $dlCancel.Text = "Cancel Download"
     $dlCancel.Width = 130
-    $dlCancel.Location = New-Object System.Drawing.Point(0, 168)
+    $dlCancel.Location = New-Object System.Drawing.Point(0, 248)
 
     $panelDownload.Controls.Add($dlLabel)
     $panelDownload.Controls.Add($dlProgress)
