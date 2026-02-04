@@ -227,7 +227,7 @@ function Show-Welcome {
     $tagline.AutoSize = $true
     $tagline.Font = New-Object System.Drawing.Font("Segoe UI", 9, [System.Drawing.FontStyle]::Regular)
     $tagline.Text = "Stay available without micromanaging your status."
-    $tagline.Location = New-Object System.Drawing.Point(44, 26)
+    $tagline.Location = New-Object System.Drawing.Point(44, 28)
 
     $headerPanel.Controls.Add($iconBox)
     $headerPanel.Controls.Add($title)
