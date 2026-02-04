@@ -316,12 +316,18 @@ function Show-SetupSummary {
     $form = New-Object System.Windows.Forms.Form
     $form.Text = "Teams Always Green - Setup Complete"
     $form.Width = 680
-    $form.Height = 380
+    $form.Height = 410
     $form.StartPosition = "CenterScreen"
     $form.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::FixedDialog
     $form.MaximizeBox = $false
     $form.MinimizeBox = $false
     $form.BackColor = [System.Drawing.Color]::White
+    try {
+        $windowIconPath = Join-Path $installPath "Meta\Icons\Tray_Icon.ico"
+        if (Test-Path $windowIconPath) {
+            $form.Icon = New-Object System.Drawing.Icon($windowIconPath)
+        }
+    } catch { }
 
     $header = New-Object System.Windows.Forms.Panel
     $header.Width = 640
@@ -360,7 +366,7 @@ function Show-SetupSummary {
     $summaryGroup = New-Object System.Windows.Forms.GroupBox
     $summaryGroup.Text = "Install summary"
     $summaryGroup.Width = 640
-    $summaryGroup.Height = 170
+    $summaryGroup.Height = 200
     $summaryGroup.Location = New-Object System.Drawing.Point(16, 92)
 
     $shortcutsText = if ($shortcutsCreated -and $shortcutsCreated.Count -gt 0) { $shortcutsCreated -join "; " } else { "None (portable mode)" }
@@ -442,28 +448,28 @@ function Show-SetupSummary {
     $note.Font = New-Object System.Drawing.Font("Segoe UI", 8.5, [System.Drawing.FontStyle]::Regular)
     $note.ForeColor = [System.Drawing.Color]::FromArgb(90, 90, 90)
     $note.Text = "Tip: You can open Settings any time from the tray icon."
-    $note.Location = New-Object System.Drawing.Point(18, 270)
+    $note.Location = New-Object System.Drawing.Point(18, 290)
 
     $buttonLaunch = New-Object System.Windows.Forms.Button
     $buttonLaunch.Text = "Launch"
     $buttonLaunch.Width = 90
     $buttonLaunch.Font = New-Object System.Drawing.Font("Segoe UI", 9, [System.Drawing.FontStyle]::Bold)
-    $buttonLaunch.Location = New-Object System.Drawing.Point(16, 300)
+    $buttonLaunch.Location = New-Object System.Drawing.Point(16, 320)
 
     $buttonSettings = New-Object System.Windows.Forms.Button
     $buttonSettings.Text = "Settings"
     $buttonSettings.Width = 90
-    $buttonSettings.Location = New-Object System.Drawing.Point(116, 300)
+    $buttonSettings.Location = New-Object System.Drawing.Point(116, 320)
 
     $buttonFolder = New-Object System.Windows.Forms.Button
     $buttonFolder.Text = "Open Folder"
     $buttonFolder.Width = 110
-    $buttonFolder.Location = New-Object System.Drawing.Point(216, 300)
+    $buttonFolder.Location = New-Object System.Drawing.Point(216, 320)
 
     $buttonClose = New-Object System.Windows.Forms.Button
     $buttonClose.Text = "Close"
     $buttonClose.Width = 90
-    $buttonClose.Location = New-Object System.Drawing.Point(546, 300)
+    $buttonClose.Location = New-Object System.Drawing.Point(546, 320)
 
     $buttonLaunch.DialogResult = [System.Windows.Forms.DialogResult]::Yes
     $buttonSettings.DialogResult = [System.Windows.Forms.DialogResult]::Retry
