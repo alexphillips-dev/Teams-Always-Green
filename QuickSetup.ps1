@@ -1413,7 +1413,7 @@ function Show-SetupWizard {
 
     $stepRef = [ref]0
     $allowSummary = $false
-    $downloadComplete = $false
+    $state.DownloadComplete = $false
 
     $showStep = {
         param([int]$index)
@@ -1428,7 +1428,7 @@ function Show-SetupWizard {
         $btnNext.Visible = ($index -lt 3)
         $btnCancel.Visible = ($index -lt 3)
         if ($index -eq 2) {
-            $btnNext.Enabled = $downloadComplete
+            $btnNext.Enabled = $state.DownloadComplete
         } elseif ($index -eq 3) {
             $btnBack.Enabled = $false
             $btnNext.Enabled = $false
@@ -1443,12 +1443,12 @@ function Show-SetupWizard {
     $btnCancel.Add_Click({ $state.Cancelled = $true; $form.Close() })
     $btnBack.Add_Click({
         if ($stepRef.Value -eq 1) { & $showStep 0 }
-        elseif ($stepRef.Value -eq 2 -and -not $downloadComplete) { & $showStep 1 }
+        elseif ($stepRef.Value -eq 2 -and -not $state.DownloadComplete) { & $showStep 1 }
     })
 
     $btnNext.Add_Click({
         if ($stepRef.Value -eq 2) {
-            if (-not $downloadComplete) { return }
+            if (-not $state.DownloadComplete) { return }
             $allowSummary = $true
             $sumInstall.Text = $state.InstallPath
             $sumMode.Text = if ($state.PortableMode) { "Portable (no shortcuts)" } else { "Standard" }
@@ -1637,7 +1637,7 @@ function Show-SetupWizard {
             }
 
             Update-Progress $downloadUi $total $total "Step 2 of 4: Download complete. Click Next to continue."
-            $downloadComplete = $true
+            $state.DownloadComplete = $true
             $btnNext.Enabled = $true
             $state.ShortcutsCreated = Finalize-Install -installPath $state.InstallPath -targetScript $targetScript -portableMode $state.PortableMode -enableStartup $state.EnableStartup
             return
