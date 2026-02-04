@@ -9,7 +9,9 @@ if ([string]::IsNullOrWhiteSpace($tempRoot)) { $tempRoot = $env:TMP }
 if ([string]::IsNullOrWhiteSpace($tempRoot)) { $tempRoot = [System.IO.Path]::GetTempPath() }
 if ([string]::IsNullOrWhiteSpace($tempRoot)) { $tempRoot = (Get-Location).Path }
 $logPath = Join-Path $tempRoot "TeamsAlwaysGreen-QuickSetup.log"
+$script:DisableSetupLog = $false
 function Write-SetupLog([string]$message) {
+    if ($script:DisableSetupLog) { return }
     try {
         $line = "[{0}] {1}" -f (Get-Date).ToString("yyyy-MM-dd HH:mm:ss"), $message
         Add-Content -Path $logPath -Value $line
@@ -20,7 +22,7 @@ function Write-SetupLog([string]$message) {
 function Cleanup-SetupTempFiles {
     param([bool]$success)
     if (-not $success) { return }
-    Write-SetupLog "Cleaning up QuickSetup temp files."
+    $script:DisableSetupLog = $true
     $paths = @()
     if ($script:WelcomeTempIconPath) { $paths += $script:WelcomeTempIconPath }
     $paths += (Join-Path $tempRoot "TeamsAlwaysGreen-Welcome.ico")
@@ -46,19 +48,17 @@ function Cleanup-SetupTempFiles {
     # Schedule a delayed cleanup to handle files still locked by the shell/editor.
     try {
         $cleanupScript = Join-Path $tempRoot ("TeamsAlwaysGreen-Cleanup-" + [Guid]::NewGuid().ToString("N") + ".ps1")
+        $targetsLine = ('$targets = @("{0}\TeamsAlwaysGreen-QuickSetup.log","{0}\TeamsAlwaysGreen-Welcome.ico","{0}\teams-always-green-run.err","{0}\teams-always-green-run.out")' -f $tempRoot)
         $lines = @(
             '$ErrorActionPreference = "SilentlyContinue"'
             'Start-Sleep -Seconds 2'
-            ('Remove-Item -Force -ErrorAction SilentlyContinue "{0}\TeamsAlwaysGreen-QuickSetup.log"' -f $tempRoot)
-            ('Remove-Item -Force -ErrorAction SilentlyContinue "{0}\TeamsAlwaysGreen-Welcome.ico"' -f $tempRoot)
-            ('Remove-Item -Force -ErrorAction SilentlyContinue "{0}\teams-always-green-run.err"' -f $tempRoot)
-            ('Remove-Item -Force -ErrorAction SilentlyContinue "{0}\teams-always-green-run.out"' -f $tempRoot)
+            $targetsLine
+            'foreach ($t in $targets) { if ([string]::IsNullOrWhiteSpace($t)) { continue }; for ($i=0; $i -lt 5; $i++) { Remove-Item -Force -ErrorAction SilentlyContinue $t; if (-not (Test-Path $t)) { break }; Start-Sleep -Milliseconds 400 } }'
             ('Get-ChildItem -Path "{0}" -Filter "TeamsAlwaysGreen-QuickSetup*.ps1" -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue' -f $tempRoot)
             ('Remove-Item -Force -ErrorAction SilentlyContinue "{0}"' -f $cleanupScript)
         )
         Set-Content -Path $cleanupScript -Value ($lines -join "`r`n") -Encoding ASCII
         Start-Process "$env:WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe" -ArgumentList "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$cleanupScript`"" -WindowStyle Hidden
-        Write-SetupLog "Scheduled delayed temp cleanup."
     } catch {
     }
 }
