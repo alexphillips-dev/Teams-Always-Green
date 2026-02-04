@@ -54,7 +54,7 @@ function Cleanup-SetupTempFiles {
             "del /f /q `"$($tempRoot)\TeamsAlwaysGreen-Welcome.ico`"",
             "del /f /q `"$($tempRoot)\teams-always-green-run.err`"",
             "del /f /q `"$($tempRoot)\teams-always-green-run.out`"",
-            ('for %%F in ("{0}") do del /f /q "%%~fF"' -f $pattern),
+            ('del /f /q "{0}"' -f $pattern),
             "del /f /q `"$cleanupCmd`""
         )
         Set-Content -Path $cleanupCmd -Value ($lines -join "`r`n") -Encoding ASCII
