@@ -322,10 +322,11 @@ function Show-SetupSummary {
     $form.MaximizeBox = $false
     $form.MinimizeBox = $false
     $form.BackColor = [System.Drawing.Color]::White
+    $form.ShowIcon = $true
     $windowIconPath = Join-Path $installPath "Meta\Icons\Tray_Icon.ico"
     try {
         if (Test-Path $windowIconPath) {
-            $form.Icon = New-Object System.Drawing.Icon($windowIconPath)
+            $form.Icon = New-Object System.Drawing.Icon($windowIconPath, 32, 32)
         } else {
             $form.Icon = [System.Drawing.SystemIcons]::Application
         }
@@ -345,7 +346,7 @@ function Show-SetupSummary {
     $iconBox.SizeMode = [System.Windows.Forms.PictureBoxSizeMode]::StretchImage
     try {
         if (Test-Path $windowIconPath) {
-            $iconBox.Image = [System.Drawing.Icon]::ExtractAssociatedIcon($windowIconPath).ToBitmap()
+            $iconBox.Image = (New-Object System.Drawing.Icon($windowIconPath, 32, 32)).ToBitmap()
         } else {
             $iconBox.Image = [System.Drawing.SystemIcons]::Information.ToBitmap()
         }
