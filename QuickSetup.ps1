@@ -1085,7 +1085,7 @@ function Show-SetupWizard {
     $form = New-Object System.Windows.Forms.Form
     $form.Text = "Teams Always Green - Setup"
     $form.Width = 640
-    $form.Height = 480
+    $form.Height = 430
     $form.StartPosition = "CenterScreen"
     $form.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::FixedDialog
     $form.MaximizeBox = $false
@@ -1409,6 +1409,9 @@ function Show-SetupWizard {
     $form.Controls.Add($panelLocation)
     $form.Controls.Add($panelDownload)
     $form.Controls.Add($panelSummary)
+    $baseFormHeight = $form.Height
+    $summaryFormHeight = [Math]::Max(380, $baseFormHeight - 30)
+
     $form.Controls.Add($btnBack)
     $form.Controls.Add($btnNext)
     $form.Controls.Add($btnCancel)
@@ -1425,6 +1428,11 @@ function Show-SetupWizard {
         $panelLocation.Visible = ($index -eq 1)
         $panelDownload.Visible = ($index -eq 2)
         $panelSummary.Visible = ($index -eq 3)
+        if ($index -eq 3) {
+            $form.Height = $summaryFormHeight
+        } else {
+            $form.Height = $baseFormHeight
+        }
         $btnBack.Enabled = ($index -gt 0 -and $index -lt 3)
         $btnBack.Visible = ($index -lt 3)
         $btnNext.Visible = ($index -lt 3)
