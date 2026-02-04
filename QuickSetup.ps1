@@ -1394,10 +1394,12 @@ function Show-SetupWizard {
     $form.Controls.Add($btnCancel)
 
     $stepRef = [ref]0
+    $allowSummary = $false
     $downloadComplete = $false
 
     $showStep = {
         param([int]$index)
+        if ($index -eq 3 -and -not $allowSummary) { return }
         $stepRef.Value = $index
         $panelWelcome.Visible = ($index -eq 0)
         $panelLocation.Visible = ($index -eq 1)
@@ -1429,6 +1431,7 @@ function Show-SetupWizard {
     $btnNext.Add_Click({
         if ($stepRef.Value -eq 2) {
             if (-not $downloadComplete) { return }
+            $allowSummary = $true
             $sumInstall.Text = $state.InstallPath
             $sumMode.Text = if ($state.PortableMode) { "Portable (no shortcuts)" } else { "Standard" }
             $sumIntegrity.Text = $state.IntegrityStatus
