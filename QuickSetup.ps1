@@ -45,20 +45,19 @@ function Cleanup-SetupTempFiles {
 
     # Schedule a delayed cleanup to handle files still locked by the shell/editor.
     try {
-        $cleanupCmd = Join-Path $tempRoot ("TeamsAlwaysGreen-Cleanup-" + [Guid]::NewGuid().ToString("N") + ".cmd")
-        $pattern = Join-Path $tempRoot "TeamsAlwaysGreen-QuickSetup*.ps1"
+        $cleanupScript = Join-Path $tempRoot ("TeamsAlwaysGreen-Cleanup-" + [Guid]::NewGuid().ToString("N") + ".ps1")
         $lines = @(
-            "@echo off",
-            "timeout /t 2 >nul",
-            "del /f /q `"$($tempRoot)\TeamsAlwaysGreen-QuickSetup.log`"",
-            "del /f /q `"$($tempRoot)\TeamsAlwaysGreen-Welcome.ico`"",
-            "del /f /q `"$($tempRoot)\teams-always-green-run.err`"",
-            "del /f /q `"$($tempRoot)\teams-always-green-run.out`"",
-            ('del /f /q "{0}"' -f $pattern),
-            "del /f /q `"$cleanupCmd`""
+            '$ErrorActionPreference = "SilentlyContinue"'
+            'Start-Sleep -Seconds 2'
+            ('Remove-Item -Force -ErrorAction SilentlyContinue "{0}\TeamsAlwaysGreen-QuickSetup.log"' -f $tempRoot)
+            ('Remove-Item -Force -ErrorAction SilentlyContinue "{0}\TeamsAlwaysGreen-Welcome.ico"' -f $tempRoot)
+            ('Remove-Item -Force -ErrorAction SilentlyContinue "{0}\teams-always-green-run.err"' -f $tempRoot)
+            ('Remove-Item -Force -ErrorAction SilentlyContinue "{0}\teams-always-green-run.out"' -f $tempRoot)
+            ('Get-ChildItem -Path "{0}" -Filter "TeamsAlwaysGreen-QuickSetup*.ps1" -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue' -f $tempRoot)
+            ('Remove-Item -Force -ErrorAction SilentlyContinue "{0}"' -f $cleanupScript)
         )
-        Set-Content -Path $cleanupCmd -Value ($lines -join "`r`n") -Encoding ASCII
-        Start-Process "$env:WINDIR\System32\cmd.exe" -ArgumentList "/c `"$cleanupCmd`"" -WindowStyle Hidden
+        Set-Content -Path $cleanupScript -Value ($lines -join "`r`n") -Encoding ASCII
+        Start-Process "$env:WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe" -ArgumentList "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$cleanupScript`"" -WindowStyle Hidden
         Write-SetupLog "Scheduled delayed temp cleanup."
     } catch {
     }
