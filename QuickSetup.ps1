@@ -3,6 +3,10 @@
 
 Add-Type -AssemblyName System.Windows.Forms
 $ErrorActionPreference = 'Stop'
+trap {
+    Write-Host ("QuickSetup error at line {0}: {1}" -f $_.InvocationInfo.ScriptLineNumber, $_.Exception.Message)
+    throw
+}
 
 $tempRoot = $env:TEMP
 if ([string]::IsNullOrWhiteSpace($tempRoot)) { $tempRoot = $env:TMP }
