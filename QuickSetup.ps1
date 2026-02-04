@@ -1392,17 +1392,17 @@ function Show-SetupWizard {
     $btnBack = New-Object System.Windows.Forms.Button
     $btnBack.Text = "Back"
     $btnBack.Width = 90
-    $btnBack.Location = New-Object System.Drawing.Point(340, 380)
+    # Position set after sizing.
 
     $btnNext = New-Object System.Windows.Forms.Button
     $btnNext.Text = "Next"
     $btnNext.Width = 90
-    $btnNext.Location = New-Object System.Drawing.Point(440, 380)
+    # Position set after sizing.
 
     $btnCancel = New-Object System.Windows.Forms.Button
     $btnCancel.Text = "Cancel"
     $btnCancel.Width = 90
-    $btnCancel.Location = New-Object System.Drawing.Point(540, 380)
+    # Position set after sizing.
 
     $form.Controls.Add($title)
     $form.Controls.Add($panelWelcome)
@@ -1411,6 +1411,13 @@ function Show-SetupWizard {
     $form.Controls.Add($panelSummary)
     $baseFormHeight = $form.Height
     $summaryFormHeight = [Math]::Max(440, $baseFormHeight - 60)
+    $positionNavButtons = {
+        $buttonsY = $form.ClientSize.Height - 50
+        $btnCancel.Location = New-Object System.Drawing.Point($form.ClientSize.Width - $btnCancel.Width - 16, $buttonsY)
+        $btnNext.Location = New-Object System.Drawing.Point($btnCancel.Left - $btnNext.Width - 10, $buttonsY)
+        $btnBack.Location = New-Object System.Drawing.Point($btnNext.Left - $btnBack.Width - 10, $buttonsY)
+    }
+    & $positionNavButtons
 
     $form.Controls.Add($btnBack)
     $form.Controls.Add($btnNext)
@@ -1433,6 +1440,7 @@ function Show-SetupWizard {
         } else {
             $form.Height = $baseFormHeight
         }
+        & $positionNavButtons
         $btnBack.Enabled = ($index -gt 0 -and $index -lt 3)
         $btnBack.Visible = ($index -lt 3)
         $btnNext.Visible = ($index -lt 3)
