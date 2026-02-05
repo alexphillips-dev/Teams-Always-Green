@@ -2654,18 +2654,28 @@ $clearLogButton = New-Object System.Windows.Forms.Button
     }
     $script:UpdateTabLayouts = $updateTabLayouts
 
+    $script:SettingsTabBuildPending = $false
     $tabControl.Add_SelectedIndexChanged({
         if (-not $script:SettingsTabControl.SelectedTab) { return }
-        $title = if ($script:GetSettingsTabKey) { & $script:GetSettingsTabKey $script:SettingsTabControl.SelectedTab } else { [string]$script:SettingsTabControl.SelectedTab.Text }
-        if ($title -eq "Profiles") {
-            if ($script:BuildProfilesTab) { & $script:BuildProfilesTab }
-        } elseif ($title -eq "Diagnostics") {
-            if ($script:BuildDiagnosticsTab) { & $script:BuildDiagnosticsTab }
-        } elseif ($title -eq "Logging") {
-            if ($script:BuildLoggingTab) { & $script:BuildLoggingTab }
-        } elseif ($title -eq "About") {
-            if ($script:BuildAboutTab) { & $script:BuildAboutTab }
-        }
+        if ($script:SettingsTabBuildPending) { return }
+        $script:SettingsTabBuildPending = $true
+        $script:SettingsForm.BeginInvoke([Action]{
+            try {
+                if (-not $script:SettingsTabControl.SelectedTab) { return }
+                $title = if ($script:GetSettingsTabKey) { & $script:GetSettingsTabKey $script:SettingsTabControl.SelectedTab } else { [string]$script:SettingsTabControl.SelectedTab.Text }
+                if ($title -eq "Profiles") {
+                    if ($script:BuildProfilesTab) { & $script:BuildProfilesTab }
+                } elseif ($title -eq "Diagnostics") {
+                    if ($script:BuildDiagnosticsTab) { & $script:BuildDiagnosticsTab }
+                } elseif ($title -eq "Logging") {
+                    if ($script:BuildLoggingTab) { & $script:BuildLoggingTab }
+                } elseif ($title -eq "About") {
+                    if ($script:BuildAboutTab) { & $script:BuildAboutTab }
+                }
+            } finally {
+                $script:SettingsTabBuildPending = $false
+            }
+        }) | Out-Null
     })
 
     $profileGroup = New-Object System.Windows.Forms.GroupBox
@@ -5298,6 +5308,17 @@ $clearLogButton = New-Object System.Windows.Forms.Button
         $script:SettingsUiRefreshInProgress = $true
         $script:Now = Get-Date
         $step = "init"
+        if (-not $script:SettingsStatusCache) { $script:SettingsStatusCache = @{} }
+        $getCachedValue = {
+            param([string]$key, $value, [ScriptBlock]$compute)
+            if ($script:SettingsStatusCache.ContainsKey($key)) {
+                $entry = $script:SettingsStatusCache[$key]
+                if ($entry -and $entry.Value -eq $value) { return $entry.Result }
+            }
+            $result = & $compute
+            $script:SettingsStatusCache[$key] = @{ Value = $value; Result = $result }
+            return $result
+        }
         if (-not ($script:SettingsSetText -is [scriptblock])) {
             $script:SettingsSetText = {
                 param($control, $text)
@@ -5490,8 +5511,20 @@ $clearLogButton = New-Object System.Windows.Forms.Button
                 if (Test-Path $logPath) {
                     try { $logBytes = (Get-Item -Path $logPath).Length } catch { $logBytes = 0 }
                 }
-                $maxBytes = [long]($script:SettingsLogMaxBox.Value * 1024)
-                if ($script:SettingsSetText -is [scriptblock]) { & $script:SettingsSetText $script:SettingsLogSizeValue "$(& $script:FormatSize $logBytes) / $(& $script:FormatSize $maxBytes)" }
+                $now = Get-Date
+                $shouldRefresh = $true
+                if ($script:SettingsLoggingStatusLastUpdate -and $script:SettingsLoggingStatusLastBytes -eq $logBytes) {
+                    if (($now - $script:SettingsLoggingStatusLastUpdate).TotalSeconds -lt 2) { $shouldRefresh = $false }
+                }
+                if ($shouldRefresh) {
+                    $maxBytes = [long]($script:SettingsLogMaxBox.Value * 1024)
+                    $logSizeText = & $getCachedValue ("LogSizeText:{0}:{1}" -f $logBytes, $maxBytes) "$logBytes|$maxBytes" {
+                        "$(& $script:FormatSize $logBytes) / $(& $script:FormatSize $maxBytes)"
+                    }
+                    if ($script:SettingsSetText -is [scriptblock]) { & $script:SettingsSetText $script:SettingsLogSizeValue $logSizeText }
+                    $script:SettingsLoggingStatusLastUpdate = $now
+                    $script:SettingsLoggingStatusLastBytes = $logBytes
+                }
             }
 
             $step = "DiagnosticsTab"
@@ -5525,7 +5558,8 @@ $clearLogButton = New-Object System.Windows.Forms.Button
                     if (Test-Path $logPath) {
                         try { $diagBytes = (Get-Item -Path $logPath).Length } catch { $diagBytes = 0 }
                     }
-                    if ($diagLogSizeControl -and ($script:SettingsSetText -is [scriptblock])) { & $script:SettingsSetText $diagLogSizeControl (& $script:FormatSize $diagBytes) }
+                    $diagSizeText = & $getCachedValue ("DiagLogSize:{0}" -f $diagBytes) $diagBytes { & $script:FormatSize $diagBytes }
+                    if ($diagLogSizeControl -and ($script:SettingsSetText -is [scriptblock])) { & $script:SettingsSetText $diagLogSizeControl $diagSizeText }
                     if ($diagLogRotateControl -and ($script:SettingsSetText -is [scriptblock])) { & $script:SettingsSetText $diagLogRotateControl ([string]$script:LogRotationCount) }
                     if ($script:LastLogWriteTime) {
                         if ($diagLogWriteControl -and ($script:SettingsSetText -is [scriptblock])) { & $script:SettingsSetText $diagLogWriteControl (Format-LocalTime $script:LastLogWriteTime) }
@@ -5565,6 +5599,7 @@ $clearLogButton = New-Object System.Windows.Forms.Button
     }
     $script:UpdateSettingsStatus = $updateSettingsStatus
 
+    $script:SettingsFirstPaintDone = $false
     $script:SettingsStatusTimer = New-Object System.Windows.Forms.Timer
     $script:SettingsStatusTimer.Interval = 1000
     $script:SettingsStatusTimer.Add_Tick({
@@ -5576,6 +5611,7 @@ $clearLogButton = New-Object System.Windows.Forms.Button
 
     $updateStatusTimerState = {
         if ($script:isShuttingDown -or $script:CleanupDone) { return }
+        if (-not $script:SettingsFirstPaintDone) { return }
         $targetForm = $script:SettingsForm
         if (-not $targetForm -or $targetForm.IsDisposed) { return }
         $shouldRun = ($targetForm.Visible -and $targetForm.WindowState -ne [System.Windows.Forms.FormWindowState]::Minimized)
@@ -5594,8 +5630,18 @@ $clearLogButton = New-Object System.Windows.Forms.Button
         Invoke-SettingsShownStep "Apply-SettingsFontSize" { Apply-SettingsFontSize ([int]$settings.SettingsFontSize) }
         if ($script:UpdateAppearancePreview) { Invoke-SettingsShownStep "UpdateAppearancePreview" { & $script:UpdateAppearancePreview } }
         if ($script:UpdateTabLayouts) { Invoke-SettingsShownStep "UpdateTabLayouts" { & $script:UpdateTabLayouts } }
-        if ($script:UpdateSettingsStatus) { Invoke-SettingsShownStep "UpdateSettingsStatus" { & $script:UpdateSettingsStatus } }
-        if ($script:UpdateStatusTimerState) { Invoke-SettingsShownStep "UpdateStatusTimerState" { & $script:UpdateStatusTimerState } }
+        if ($script:UpdateSettingsStatus) {
+            Invoke-SettingsShownStep "UpdateSettingsStatus" {
+                $script:SettingsForm.BeginInvoke([Action]{
+                    if ($script:UpdateSettingsStatus) { & $script:UpdateSettingsStatus }
+                    $script:SettingsFirstPaintDone = $true
+                    if ($script:UpdateStatusTimerState) { & $script:UpdateStatusTimerState }
+                }) | Out-Null
+            }
+        } else {
+            $script:SettingsFirstPaintDone = $true
+            if ($script:UpdateStatusTimerState) { Invoke-SettingsShownStep "UpdateStatusTimerState" { & $script:UpdateStatusTimerState } }
+        }
     })
 
     $form.Add_SizeChanged({
