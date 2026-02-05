@@ -5308,7 +5308,8 @@ $clearLogButton = New-Object System.Windows.Forms.Button
         $script:SettingsUiRefreshInProgress = $true
         $script:Now = Get-Date
         $step = "init"
-        if (-not $script:SettingsStatusCache) { $script:SettingsStatusCache = @{} }
+        $statusCacheVar = Get-Variable -Name SettingsStatusCache -Scope Script -ErrorAction SilentlyContinue
+        if (-not $statusCacheVar -or -not $statusCacheVar.Value) { $script:SettingsStatusCache = @{} }
         $getCachedValue = {
             param([string]$key, $value, [ScriptBlock]$compute)
             if ($script:SettingsStatusCache.ContainsKey($key)) {
