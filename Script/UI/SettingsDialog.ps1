@@ -4282,7 +4282,9 @@ $clearLogButton = New-Object System.Windows.Forms.Button
             }
         }
         foreach ($child in $control.Controls) {
-            & $applyTooltips $child
+            if ($script:ApplySettingsTooltips) {
+                & $script:ApplySettingsTooltips $child
+            }
         }
     }
     $script:ApplySettingsTooltips = $applyTooltips
