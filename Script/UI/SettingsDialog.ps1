@@ -5449,12 +5449,20 @@ $clearLogButton = New-Object System.Windows.Forms.Button
                 $step = "StatusTab-Schedule"
                 $scheduleText = Format-ScheduleStatus
                 $scheduleStatusControl = & $getSettingsControl 'SettingsScheduleStatusValue'
-                if ($scheduleStatusControl -and ($script:SettingsSetText -is [scriptblock])) {
-                    & $script:SettingsSetText $scheduleStatusControl $scheduleText
+                try {
+                    if ($scheduleStatusControl -and ($script:SettingsSetText -is [scriptblock])) {
+                        & $script:SettingsSetText $scheduleStatusControl $scheduleText
+                    }
+                } catch {
+                    # ignore transient UI updates
                 }
                 $safeModeStatusControl = & $getSettingsControl 'SettingsSafeModeStatusValue'
-                if ($safeModeStatusControl -and ($script:SettingsSetText -is [scriptblock])) {
-                    & $script:SettingsSetText $safeModeStatusControl (if ($script:safeModeActive) { "On (Fails=$($script:toggleFailCount))" } else { "Off" })
+                try {
+                    if ($safeModeStatusControl -and ($script:SettingsSetText -is [scriptblock])) {
+                        & $script:SettingsSetText $safeModeStatusControl (if ($script:safeModeActive) { "On (Fails=$($script:toggleFailCount))" } else { "Off" })
+                    }
+                } catch {
+                    # ignore transient UI updates
                 }
                 $step = "StatusTab-Keyboard"
                 $caps = [System.Windows.Forms.Control]::IsKeyLocked([System.Windows.Forms.Keys]::CapsLock)
