@@ -2592,13 +2592,13 @@ $clearLogButton = New-Object System.Windows.Forms.Button
                 $script:AboutGroup.Width = $panelWidth
             }
             if ($script:AboutLayout) {
-                $layoutWidth = [Math]::Max(300, $panelWidth - 20)
+                $layoutWidth = [Math]::Max(320, $panelWidth - 20)
+                $script:AboutLayout.AutoSize = $true
                 $script:AboutLayout.Width = $layoutWidth
                 $script:AboutLayout.MinimumSize = New-Object System.Drawing.Size($layoutWidth, 0)
-                $script:AboutLayout.MaximumSize = New-Object System.Drawing.Size($layoutWidth, 2000)
-                $script:AboutLayout.Height = $script:AboutLayout.PreferredSize.Height
+                $script:AboutLayout.MaximumSize = New-Object System.Drawing.Size($layoutWidth, 0)
             }
-            $valueWidth = [Math]::Max(260, $panelWidth - 140)
+            $valueWidth = [Math]::Max(260, $panelWidth - 120)
             if ($script:AboutTitleLabel) {
                 $script:AboutTitleLabel.MaximumSize = New-Object System.Drawing.Size($valueWidth, 0)
             }
@@ -2650,8 +2650,9 @@ $clearLogButton = New-Object System.Windows.Forms.Button
     $aboutLayout = New-Object System.Windows.Forms.TableLayoutPanel
     $aboutLayout.ColumnCount = 2
     $aboutLayout.RowCount = 20
-    $aboutLayout.AutoSize = $false
-    $aboutLayout.Dock = "Fill"
+    $aboutLayout.AutoSize = $true
+    $aboutLayout.AutoSizeMode = [System.Windows.Forms.AutoSizeMode]::GrowAndShrink
+    $aboutLayout.Dock = "Top"
     $aboutLayout.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::AutoSize)))
     $aboutLayout.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Percent, 100)))
     $script:AboutGroup = $aboutGroup
