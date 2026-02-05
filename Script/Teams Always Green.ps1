@@ -668,6 +668,7 @@ if (-not (Get-Command -Name Write-LogEx -ErrorAction SilentlyContinue)) {
 }
 
 $script:LogThrottle = @{}
+$script:BootTimer = $null
 
 function Write-LogThrottled([string]$key, [string]$message, [string]$level = "INFO", [int]$minSeconds = 10) {
     if ([string]::IsNullOrWhiteSpace($key)) { return }
@@ -688,7 +689,8 @@ if (-not $script:BootTimer) {
 }
 function Write-BootStage([string]$label) {
     try {
-        if (-not $script:BootTimer) {
+        $timerVar = Get-Variable -Name BootTimer -Scope Script -ErrorAction SilentlyContinue
+        if (-not $timerVar -or -not $timerVar.Value) {
             $script:BootTimer = [System.Diagnostics.Stopwatch]::StartNew()
         }
         $elapsed = $script:BootTimer.ElapsedMilliseconds
