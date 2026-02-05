@@ -3690,7 +3690,7 @@ $clearLogButton = New-Object System.Windows.Forms.Button
                 if ($script:ValidateFoldersButton) { & $script:AddSettingRow $panel "Validate Folders" $script:ValidateFoldersButton | Out-Null }
                 if ($script:AddSpacerRow) { & $script:AddSpacerRow $panel }
                 if ($script:LogMaxSizePanel) { & $script:AddSettingRow $panel "Log Max Size (KB)" $script:LogMaxSizePanel | Out-Null }
-                $script:ErrorLabels["Log Max Size (KB)"] = & $addErrorRow $panel
+                if ($script:AddErrorRow) { $script:ErrorLabels["Log Max Size (KB)"] = & $script:AddErrorRow $panel }
                 & $script:AddSettingRow $panel "Log Retention (days)" $script:logRetentionBox | Out-Null
                 if ($script:ViewLogButton) { & $script:AddSettingRow $panel "Open Log File" $script:ViewLogButton | Out-Null }
                 if ($script:ViewLogTailButton) { & $script:AddSettingRow $panel "Open Log Tail" $script:ViewLogTailButton | Out-Null }
@@ -5252,19 +5252,34 @@ $clearLogButton = New-Object System.Windows.Forms.Button
     $setTextIfChanged = {
         param($control, $text)
         if ($null -eq $control) { return }
+        if (-not $control.PSObject.Properties.Match('Text')) { return }
         $newText = [string]$text
-        if ($control.Text -ne $newText) { $control.Text = $newText }
+        try {
+            if ($control.Text -ne $newText) { $control.Text = $newText }
+        } catch {
+            return
+        }
     }
     $setVisibleIfChanged = {
         param($control, $visible)
         if ($null -eq $control) { return }
+        if (-not $control.PSObject.Properties.Match('Visible')) { return }
         $newVisible = [bool]$visible
-        if ($control.Visible -ne $newVisible) { $control.Visible = $newVisible }
+        try {
+            if ($control.Visible -ne $newVisible) { $control.Visible = $newVisible }
+        } catch {
+            return
+        }
     }
     $setForeColorIfChanged = {
         param($control, $color)
         if ($null -eq $control) { return }
-        if ($control.ForeColor -ne $color) { $control.ForeColor = $color }
+        if (-not $control.PSObject.Properties.Match('ForeColor')) { return }
+        try {
+            if ($control.ForeColor -ne $color) { $control.ForeColor = $color }
+        } catch {
+            return
+        }
     }
     $script:SettingsSetText = $setTextIfChanged
     $script:SettingsSetVisible = $setVisibleIfChanged
@@ -5279,23 +5294,38 @@ $clearLogButton = New-Object System.Windows.Forms.Button
             $script:SettingsSetText = {
                 param($control, $text)
                 if ($null -eq $control) { return }
+                if (-not $control.PSObject.Properties.Match('Text')) { return }
                 $newText = [string]$text
-                if ($control.Text -ne $newText) { $control.Text = $newText }
+                try {
+                    if ($control.Text -ne $newText) { $control.Text = $newText }
+                } catch {
+                    return
+                }
             }
         }
         if (-not ($script:SettingsSetVisible -is [scriptblock])) {
             $script:SettingsSetVisible = {
                 param($control, $visible)
                 if ($null -eq $control) { return }
+                if (-not $control.PSObject.Properties.Match('Visible')) { return }
                 $newVisible = [bool]$visible
-                if ($control.Visible -ne $newVisible) { $control.Visible = $newVisible }
+                try {
+                    if ($control.Visible -ne $newVisible) { $control.Visible = $newVisible }
+                } catch {
+                    return
+                }
             }
         }
         if (-not ($script:SettingsSetForeColor -is [scriptblock])) {
             $script:SettingsSetForeColor = {
                 param($control, $color)
                 if ($null -eq $control) { return }
-                if ($control.ForeColor -ne $color) { $control.ForeColor = $color }
+                if (-not $control.PSObject.Properties.Match('ForeColor')) { return }
+                try {
+                    if ($control.ForeColor -ne $color) { $control.ForeColor = $color }
+                } catch {
+                    return
+                }
             }
         }
         try {
