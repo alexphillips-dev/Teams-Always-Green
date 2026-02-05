@@ -5275,6 +5275,29 @@ $clearLogButton = New-Object System.Windows.Forms.Button
         $script:SettingsUiRefreshInProgress = $true
         $script:Now = Get-Date
         $step = "init"
+        if (-not ($script:SettingsSetText -is [scriptblock])) {
+            $script:SettingsSetText = {
+                param($control, $text)
+                if ($null -eq $control) { return }
+                $newText = [string]$text
+                if ($control.Text -ne $newText) { $control.Text = $newText }
+            }
+        }
+        if (-not ($script:SettingsSetVisible -is [scriptblock])) {
+            $script:SettingsSetVisible = {
+                param($control, $visible)
+                if ($null -eq $control) { return }
+                $newVisible = [bool]$visible
+                if ($control.Visible -ne $newVisible) { $control.Visible = $newVisible }
+            }
+        }
+        if (-not ($script:SettingsSetForeColor -is [scriptblock])) {
+            $script:SettingsSetForeColor = {
+                param($control, $color)
+                if ($null -eq $control) { return }
+                if ($control.ForeColor -ne $color) { $control.ForeColor = $color }
+            }
+        }
         try {
         $targetForm = $script:SettingsForm
         if (-not $targetForm -or $targetForm.IsDisposed) { return }
