@@ -5406,12 +5406,28 @@ $clearLogButton = New-Object System.Windows.Forms.Button
                 }
                 if ($script:SettingsFunLongestPauseValue) {
                     $longestPause = 0
-                    if ($funStats.ContainsKey("LongestPauseMinutes")) { $longestPause = [int]$funStats["LongestPauseMinutes"] }
+                    try {
+                        if ($funStats -is [System.Collections.IDictionary] -and $funStats.ContainsKey("LongestPauseMinutes")) {
+                            $longestPause = [int]$funStats["LongestPauseMinutes"]
+                        } elseif ($funStats -and $funStats.PSObject.Properties.Match("LongestPauseMinutes").Count -gt 0) {
+                            $longestPause = [int]$funStats.LongestPauseMinutes
+                        }
+                    } catch {
+                        $longestPause = 0
+                    }
                     if ($script:SettingsSetText -is [scriptblock]) { & $script:SettingsSetText $script:SettingsFunLongestPauseValue (if ($longestPause -gt 0) { "$longestPause min" } else { "N/A" }) }
                 }
                 if ($script:SettingsFunTotalRunValue) {
                     $totalRun = 0.0
-                    if ($funStats.ContainsKey("TotalRunMinutes")) { $totalRun = [double]$funStats["TotalRunMinutes"] }
+                    try {
+                        if ($funStats -is [System.Collections.IDictionary] -and $funStats.ContainsKey("TotalRunMinutes")) {
+                            $totalRun = [double]$funStats["TotalRunMinutes"]
+                        } elseif ($funStats -and $funStats.PSObject.Properties.Match("TotalRunMinutes").Count -gt 0) {
+                            $totalRun = [double]$funStats.TotalRunMinutes
+                        }
+                    } catch {
+                        $totalRun = 0.0
+                    }
                     if ($script:SettingsSetText -is [scriptblock]) { & $script:SettingsSetText $script:SettingsFunTotalRunValue (Format-TotalRunTime $totalRun) }
                 }
                 $step = "StatusTab-Schedule"
