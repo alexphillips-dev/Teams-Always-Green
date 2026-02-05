@@ -1898,7 +1898,9 @@ function Show-SettingsDialog {
 
     $logFilesLabel = New-Object System.Windows.Forms.Label
     $logFilesLabel.AutoSize = $true
-    $logFilesLabel.Text = "Teams-Always-Green.log, Teams-Always-Green.log.#, Teams-Always-Green.fallback.log, Teams-Always-Green.bootstrap.log"
+    $script:LogFilesListText = "Teams-Always-Green.log, Teams-Always-Green.log.#, Teams-Always-Green.fallback.log, Teams-Always-Green.bootstrap.log"
+    $logFilesLabel.Text = $script:LogFilesListText
+    $logFilesLabel.Tag = "Log Files List"
     $script:logFilesLabel = $logFilesLabel
 
     $viewLogButton = New-Object System.Windows.Forms.Button
@@ -2053,6 +2055,7 @@ $clearLogButton = New-Object System.Windows.Forms.Button
         if ($script:StatusPausedColorButton) { $script:StatusPausedColorButton.Text = (L "Change...") }
         if ($script:StatusStoppedColorButton) { $script:StatusStoppedColorButton.Text = (L "Change...") }
         if ($script:UpdateAppearancePreview) { & $script:UpdateAppearancePreview }
+        if ($script:logFilesLabel -and $script:LogFilesListText) { $script:logFilesLabel.Text = $script:LogFilesListText }
     }
     $validateFoldersButton.Add_Click({
         $results = Validate-FolderPaths
