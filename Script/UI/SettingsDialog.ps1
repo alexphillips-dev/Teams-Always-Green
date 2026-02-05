@@ -99,6 +99,7 @@ function Show-SettingsDialog {
     }
 
     $toolTip = New-Object System.Windows.Forms.ToolTip
+    $script:SettingsToolTip = $toolTip
 
     $statusBadgePanel = New-Object System.Windows.Forms.FlowLayoutPanel
     $statusBadgePanel.FlowDirection = "LeftToRight"
@@ -4192,7 +4193,11 @@ $clearLogButton = New-Object System.Windows.Forms.Button
     $setToolTip = {
         param($control, [string]$text)
         if ($control -and -not [string]::IsNullOrWhiteSpace($text)) {
-            $toolTip.SetToolTip($control, $text)
+            if ($script:SettingsToolTip) {
+                $script:SettingsToolTip.SetToolTip($control, $text)
+            } elseif ($toolTip) {
+                $toolTip.SetToolTip($control, $text)
+            }
         }
     }
     $script:SetSettingsToolTip = $setToolTip
@@ -5354,8 +5359,8 @@ $clearLogButton = New-Object System.Windows.Forms.Button
                         $statusText = "Paused"
                     }
                 }
-                if ($script:SettingsSetText) { & $script:SettingsSetText $script:SettingsStatusValue $statusText }
-                if ($script:SettingsSetForeColor) { & $script:SettingsSetForeColor $script:SettingsStatusValue $script:StatusStateColor }
+                if ($script:SettingsSetText -is [scriptblock]) { & $script:SettingsSetText $script:SettingsStatusValue $statusText }
+                if ($script:SettingsSetForeColor -is [scriptblock]) { & $script:SettingsSetForeColor $script:SettingsStatusValue $script:StatusStateColor }
                 $nextText = Format-NextInfo
                 if ($script:isPaused) {
                     if ($pauseUntilText -and $pauseUntilText -ne "N/A") {
@@ -5364,69 +5369,69 @@ $clearLogButton = New-Object System.Windows.Forms.Button
                         $nextText = "Paused"
                     }
                 }
-                if ($script:SettingsSetText) { & $script:SettingsSetText $script:SettingsNextValue $nextText }
+                if ($script:SettingsSetText -is [scriptblock]) { & $script:SettingsSetText $script:SettingsNextValue $nextText }
                 $uptimeSpan = (Get-Date) - $script:AppStartTime
-                if ($script:SettingsSetText) { & $script:SettingsSetText $script:SettingsUptimeValue ("{0}h {1}m" -f [int]$uptimeSpan.TotalHours, $uptimeSpan.Minutes) }
+                if ($script:SettingsSetText -is [scriptblock]) { & $script:SettingsSetText $script:SettingsUptimeValue ("{0}h {1}m" -f [int]$uptimeSpan.TotalHours, $uptimeSpan.Minutes) }
                 if ($script:LastToggleResultTime) {
-                    if ($script:SettingsSetText) { & $script:SettingsSetText $script:SettingsLastToggleValue "$($script:LastToggleResult) - $(Format-LocalTime $script:LastToggleResultTime)" }
+                    if ($script:SettingsSetText -is [scriptblock]) { & $script:SettingsSetText $script:SettingsLastToggleValue "$($script:LastToggleResult) - $(Format-LocalTime $script:LastToggleResultTime)" }
                 } else {
-                    if ($script:SettingsSetText) { & $script:SettingsSetText $script:SettingsLastToggleValue $script:LastToggleResult }
+                    if ($script:SettingsSetText -is [scriptblock]) { & $script:SettingsSetText $script:SettingsLastToggleValue $script:LastToggleResult }
                 }
-                if ($script:SettingsSetText) { & $script:SettingsSetText $script:SettingsNextCountdownValue "N/A" }
+                if ($script:SettingsSetText -is [scriptblock]) { & $script:SettingsSetText $script:SettingsNextCountdownValue "N/A" }
                 if ($script:isRunning -and -not $script:isPaused -and -not $script:isScheduleBlocked -and $script:nextToggleTime) {
                     $remaining = [int][Math]::Max(0, ($script:nextToggleTime - (Get-Date)).TotalSeconds)
-                    if ($script:SettingsSetText) { & $script:SettingsSetText $script:SettingsNextCountdownValue "$remaining s ($($script:nextToggleTime.ToString("T")))" }
+                    if ($script:SettingsSetText -is [scriptblock]) { & $script:SettingsSetText $script:SettingsNextCountdownValue "$remaining s ($($script:nextToggleTime.ToString("T")))" }
                 }
-                if ($script:SettingsSetText) { & $script:SettingsSetText $script:SettingsProfileStatusValue ([string]$settings.ActiveProfile) }
+                if ($script:SettingsSetText -is [scriptblock]) { & $script:SettingsSetText $script:SettingsProfileStatusValue ([string]$settings.ActiveProfile) }
                 if ($script:SettingsToggleCurrentValue) {
-                    if ($script:SettingsSetText) { & $script:SettingsSetText $script:SettingsToggleCurrentValue ([string]$script:tickCount) }
+                    if ($script:SettingsSetText -is [scriptblock]) { & $script:SettingsSetText $script:SettingsToggleCurrentValue ([string]$script:tickCount) }
                 }
                 if ($script:SettingsToggleLifetimeValue) {
-                    if ($script:SettingsSetText) { & $script:SettingsSetText $script:SettingsToggleLifetimeValue ([string]$settings.ToggleCount) }
+                    if ($script:SettingsSetText -is [scriptblock]) { & $script:SettingsSetText $script:SettingsToggleLifetimeValue ([string]$settings.ToggleCount) }
                 }
                 $step = "StatusTab-FunStats"
                 $funStats = Ensure-FunStats $settings
                 if ($script:SettingsFunDailyValue) {
-                    if ($script:SettingsSetText) { & $script:SettingsSetText $script:SettingsFunDailyValue ([string](Get-DailyToggleCount $funStats (Get-Date))) }
+                    if ($script:SettingsSetText -is [scriptblock]) { & $script:SettingsSetText $script:SettingsFunDailyValue ([string](Get-DailyToggleCount $funStats (Get-Date))) }
                 }
                 $streaks = Get-ToggleStreaks $funStats
                 if ($script:SettingsFunStreakCurrentValue) {
-                    if ($script:SettingsSetText) { & $script:SettingsSetText $script:SettingsFunStreakCurrentValue "$($streaks.Current) days" }
+                    if ($script:SettingsSetText -is [scriptblock]) { & $script:SettingsSetText $script:SettingsFunStreakCurrentValue "$($streaks.Current) days" }
                 }
                 if ($script:SettingsFunStreakBestValue) {
-                    if ($script:SettingsSetText) { & $script:SettingsSetText $script:SettingsFunStreakBestValue "$($streaks.Best) days" }
+                    if ($script:SettingsSetText -is [scriptblock]) { & $script:SettingsSetText $script:SettingsFunStreakBestValue "$($streaks.Best) days" }
                 }
                 if ($script:SettingsFunMostActiveHourValue) {
-                    if ($script:SettingsSetText) { & $script:SettingsSetText $script:SettingsFunMostActiveHourValue (Get-MostActiveHourLabel $funStats) }
+                    if ($script:SettingsSetText -is [scriptblock]) { & $script:SettingsSetText $script:SettingsFunMostActiveHourValue (Get-MostActiveHourLabel $funStats) }
                 }
                 if ($script:SettingsFunLongestPauseValue) {
                     $longestPause = 0
                     if ($funStats.ContainsKey("LongestPauseMinutes")) { $longestPause = [int]$funStats["LongestPauseMinutes"] }
-                    if ($script:SettingsSetText) { & $script:SettingsSetText $script:SettingsFunLongestPauseValue (if ($longestPause -gt 0) { "$longestPause min" } else { "N/A" }) }
+                    if ($script:SettingsSetText -is [scriptblock]) { & $script:SettingsSetText $script:SettingsFunLongestPauseValue (if ($longestPause -gt 0) { "$longestPause min" } else { "N/A" }) }
                 }
                 if ($script:SettingsFunTotalRunValue) {
                     $totalRun = 0.0
                     if ($funStats.ContainsKey("TotalRunMinutes")) { $totalRun = [double]$funStats["TotalRunMinutes"] }
-                    if ($script:SettingsSetText) { & $script:SettingsSetText $script:SettingsFunTotalRunValue (Format-TotalRunTime $totalRun) }
+                    if ($script:SettingsSetText -is [scriptblock]) { & $script:SettingsSetText $script:SettingsFunTotalRunValue (Format-TotalRunTime $totalRun) }
                 }
                 $step = "StatusTab-Schedule"
                 $scheduleText = Format-ScheduleStatus
-                if ($script:SettingsSetText) { & $script:SettingsSetText $script:SettingsScheduleStatusValue $scheduleText }
-                if ($script:SettingsSetText) { & $script:SettingsSetText $script:SettingsSafeModeStatusValue (if ($script:safeModeActive) { "On (Fails=$($script:toggleFailCount))" } else { "Off" }) }
+                if ($script:SettingsSetText -is [scriptblock]) { & $script:SettingsSetText $script:SettingsScheduleStatusValue $scheduleText }
+                if ($script:SettingsSetText -is [scriptblock]) { & $script:SettingsSetText $script:SettingsSafeModeStatusValue (if ($script:safeModeActive) { "On (Fails=$($script:toggleFailCount))" } else { "Off" }) }
                 $step = "StatusTab-Keyboard"
                 $caps = [System.Windows.Forms.Control]::IsKeyLocked([System.Windows.Forms.Keys]::CapsLock)
                 $num = [System.Windows.Forms.Control]::IsKeyLocked([System.Windows.Forms.Keys]::NumLock)
                 $scroll = [System.Windows.Forms.Control]::IsKeyLocked([System.Windows.Forms.Keys]::Scroll)
-                if ($script:SettingsSetText) { & $script:SettingsSetText $script:SettingsKeyboardValue ("Caps:{0} Num:{1} Scroll:{2}" -f ($(if ($caps) { "On" } else { "Off" })), ($(if ($num) { "On" } else { "Off" })), ($(if ($scroll) { "On" } else { "Off" }))) }
+                if ($script:SettingsSetText -is [scriptblock]) { & $script:SettingsSetText $script:SettingsKeyboardValue ("Caps:{0} Num:{1} Scroll:{2}" -f ($(if ($caps) { "On" } else { "Off" })), ($(if ($num) { "On" } else { "Off" })), ($(if ($scroll) { "On" } else { "Off" }))) }
             }
 
             $step = "HotkeysTab"
             if ($shouldUpdate -and $hotkeysPage -and $selectedTab -eq $hotkeysPage) {
-                if ($script:SettingsSetText) { & $script:SettingsSetText $script:SettingsHotkeyStatusValue $script:HotkeyStatusText }
+                if ($script:SettingsSetText -is [scriptblock]) { & $script:SettingsSetText $script:SettingsHotkeyStatusValue $script:HotkeyStatusText }
                 if ($script:SettingsHotkeyWarningLabel) {
                     $hasIssues = ($script:HotkeyStatusText -match "Failed|Issues")
-                    if ($script:SettingsSetText) { & $script:SettingsSetText $script:SettingsHotkeyWarningLabel "One or more hotkeys failed to register. Update them and click Validate." }
-                    if ($script:SettingsSetVisible) { & $script:SettingsSetVisible $script:SettingsHotkeyWarningLabel $hasIssues }
+                    if ($script:SettingsSetText -is [scriptblock]) { & $script:SettingsSetText $script:SettingsHotkeyWarningLabel "One or more hotkeys failed to register. Update them and click Validate." }
+                    if ($script:SettingsSetVisible -is [scriptblock]) { & $script:SettingsSetVisible $script:SettingsHotkeyWarningLabel $hasIssues }
                 }
             }
 
@@ -5437,36 +5442,36 @@ $clearLogButton = New-Object System.Windows.Forms.Button
                     try { $logBytes = (Get-Item -Path $logPath).Length } catch { $logBytes = 0 }
                 }
                 $maxBytes = [long]($script:SettingsLogMaxBox.Value * 1024)
-                if ($script:SettingsSetText) { & $script:SettingsSetText $script:SettingsLogSizeValue "$(& $script:FormatSize $logBytes) / $(& $script:FormatSize $maxBytes)" }
+                if ($script:SettingsSetText -is [scriptblock]) { & $script:SettingsSetText $script:SettingsLogSizeValue "$(& $script:FormatSize $logBytes) / $(& $script:FormatSize $maxBytes)" }
             }
 
             $step = "DiagnosticsTab"
             if ($shouldUpdate -and $diagnosticsPage -and $selectedTab -eq $diagnosticsPage) {
                 if ($script:LastErrorMessage) {
                     $errorTime = if ($script:LastErrorTime) { Format-LocalTime $script:LastErrorTime } else { "Unknown" }
-                    if ($script:SettingsSetText) { & $script:SettingsSetText $script:SettingsDiagErrorValue "$errorTime - $($script:LastErrorMessage)" }
+                    if ($script:SettingsSetText -is [scriptblock]) { & $script:SettingsSetText $script:SettingsDiagErrorValue "$errorTime - $($script:LastErrorMessage)" }
                 } else {
-                    if ($script:SettingsSetText) { & $script:SettingsSetText $script:SettingsDiagErrorValue "None" }
+                    if ($script:SettingsSetText -is [scriptblock]) { & $script:SettingsSetText $script:SettingsDiagErrorValue "None" }
                 }
-                if ($script:SettingsSetText) { & $script:SettingsSetText $script:SettingsDiagRestartValue (Format-LocalTime $script:AppStartTime) }
-                if ($script:SettingsSetText) { & $script:SettingsSetText $script:SettingsDiagSafeModeValue ($(if ($script:safeModeActive) { "On" } else { "Off" })) }
-                if ($script:SettingsSetText) { & $script:SettingsSetText $script:SettingsDebugModeStatus (if ($script:DebugModeUntil) { "On (10 min)" } else { "Off" }) }
+                if ($script:SettingsSetText -is [scriptblock]) { & $script:SettingsSetText $script:SettingsDiagRestartValue (Format-LocalTime $script:AppStartTime) }
+                if ($script:SettingsSetText -is [scriptblock]) { & $script:SettingsSetText $script:SettingsDiagSafeModeValue ($(if ($script:safeModeActive) { "On" } else { "Off" })) }
+                if ($script:SettingsSetText -is [scriptblock]) { & $script:SettingsSetText $script:SettingsDebugModeStatus (if ($script:DebugModeUntil) { "On (10 min)" } else { "Off" }) }
                 if ($script:LastToggleResultTime) {
-                    if ($script:SettingsSetText) { & $script:SettingsSetText $script:SettingsDiagLastToggleValue "$($script:LastToggleResult) - $(Format-LocalTime $script:LastToggleResultTime)" }
+                    if ($script:SettingsSetText -is [scriptblock]) { & $script:SettingsSetText $script:SettingsDiagLastToggleValue "$($script:LastToggleResult) - $(Format-LocalTime $script:LastToggleResultTime)" }
                 } else {
-                    if ($script:SettingsSetText) { & $script:SettingsSetText $script:SettingsDiagLastToggleValue $script:LastToggleResult }
+                    if ($script:SettingsSetText -is [scriptblock]) { & $script:SettingsSetText $script:SettingsDiagLastToggleValue $script:LastToggleResult }
                 }
-                if ($script:SettingsSetText) { & $script:SettingsSetText $script:SettingsDiagFailValue ([string]$script:toggleFailCount) }
+                if ($script:SettingsSetText -is [scriptblock]) { & $script:SettingsSetText $script:SettingsDiagFailValue ([string]$script:toggleFailCount) }
                 $diagBytes = 0
                 if (Test-Path $logPath) {
                     try { $diagBytes = (Get-Item -Path $logPath).Length } catch { $diagBytes = 0 }
                 }
-                if ($script:SettingsSetText) { & $script:SettingsSetText $script:SettingsDiagLogSizeValue (& $script:FormatSize $diagBytes) }
-                if ($script:SettingsSetText) { & $script:SettingsSetText $script:SettingsDiagLogRotateValue ([string]$script:LogRotationCount) }
+                if ($script:SettingsSetText -is [scriptblock]) { & $script:SettingsSetText $script:SettingsDiagLogSizeValue (& $script:FormatSize $diagBytes) }
+                if ($script:SettingsSetText -is [scriptblock]) { & $script:SettingsSetText $script:SettingsDiagLogRotateValue ([string]$script:LogRotationCount) }
                 if ($script:LastLogWriteTime) {
-                    if ($script:SettingsSetText) { & $script:SettingsSetText $script:SettingsDiagLogWriteValue (Format-LocalTime $script:LastLogWriteTime) }
+                    if ($script:SettingsSetText -is [scriptblock]) { & $script:SettingsSetText $script:SettingsDiagLogWriteValue (Format-LocalTime $script:LastLogWriteTime) }
                 } else {
-                    if ($script:SettingsSetText) { & $script:SettingsSetText $script:SettingsDiagLogWriteValue "N/A" }
+                    if ($script:SettingsSetText -is [scriptblock]) { & $script:SettingsSetText $script:SettingsDiagLogWriteValue "N/A" }
                 }
             }
 
@@ -5476,10 +5481,10 @@ $clearLogButton = New-Object System.Windows.Forms.Button
                 if ($remainingSeconds -le 0) {
                     $script:SettingsResetConfirmState.Pending = $false
                     $script:SettingsResetConfirmState.Deadline = $null
-                    if ($script:SettingsSetText) { & $script:SettingsSetText $script:SettingsResetButton "Restore Defaults" }
+                    if ($script:SettingsSetText -is [scriptblock]) { & $script:SettingsSetText $script:SettingsResetButton "Restore Defaults" }
                 } else {
                     $script:SettingsResetConfirmState.Remaining = $remainingSeconds
-                    if ($script:SettingsSetText) { & $script:SettingsSetText $script:SettingsResetButton "Confirm Reset ($($script:SettingsResetConfirmState.Remaining))" }
+                    if ($script:SettingsSetText -is [scriptblock]) { & $script:SettingsSetText $script:SettingsResetButton "Confirm Reset ($($script:SettingsResetConfirmState.Remaining))" }
                 }
             }
         } catch {
@@ -5786,3 +5791,4 @@ function Show-LogTailDialog {
     & $loadTail
     [void]$form.ShowDialog()
 }
+
