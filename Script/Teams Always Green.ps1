@@ -5817,7 +5817,12 @@ function Write-StatusSnapshot([string]$state, [string]$lastText, [string]$nextTe
             DebugMode    = Get-DebugModeStatusText
         }
         $json = $payload | ConvertTo-Json -Depth 3
-        Set-Content -Path $script:StatusFilePath -Value $json -Encoding UTF8
+        if ($script:StatusFilePath -is [System.IO.FileInfo]) {
+            $script:StatusFilePath = $script:StatusFilePath.FullName
+        } elseif ($script:StatusFilePath -isnot [string]) {
+            $script:StatusFilePath = [string]$script:StatusFilePath
+        }
+        [System.IO.File]::WriteAllText($script:StatusFilePath, $json, (New-Object System.Text.UTF8Encoding($false)))
     } catch {
         Write-Log "Failed to write status snapshot." "WARN" $_.Exception "Status"
     }
@@ -6558,4 +6563,3 @@ function Ensure-AppFolders {
 }
 
 $script:MetaDir = Join-Path $script:DataRoot $script:FolderNames.Meta
-
