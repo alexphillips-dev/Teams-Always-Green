@@ -8,6 +8,29 @@ trap {
     throw
 }
 
+$script:QuickSetupStateDir = Join-Path $env:LOCALAPPDATA "TeamsAlwaysGreen"
+$script:QuickSetupLastPathFile = Join-Path $script:QuickSetupStateDir "QuickSetup.lastpath.txt"
+
+function Get-LastInstallBase {
+    try {
+        if (Test-Path $script:QuickSetupLastPathFile) {
+            $text = Get-Content -Path $script:QuickSetupLastPathFile -ErrorAction Stop | Select-Object -First 1
+            if (-not [string]::IsNullOrWhiteSpace($text)) { return $text.Trim() }
+        }
+    } catch { }
+    return [Environment]::GetFolderPath("MyDocuments")
+}
+
+function Set-LastInstallBase([string]$path) {
+    if ([string]::IsNullOrWhiteSpace($path)) { return }
+    try {
+        if (-not (Test-Path $script:QuickSetupStateDir)) {
+            New-Item -ItemType Directory -Path $script:QuickSetupStateDir -Force | Out-Null
+        }
+        Set-Content -Path $script:QuickSetupLastPathFile -Value $path -Encoding ASCII
+    } catch { }
+}
+
 $tempRoot = $env:TEMP
 if ([string]::IsNullOrWhiteSpace($tempRoot)) { $tempRoot = $env:TMP }
 if ([string]::IsNullOrWhiteSpace($tempRoot)) { $tempRoot = [System.IO.Path]::GetTempPath() }
@@ -1266,7 +1289,7 @@ function Show-SetupWizard {
     $locHint.Location = New-Object System.Drawing.Point(0, 82)
 
     $applyDefaultLocation = {
-        $defaultBase = [Environment]::GetFolderPath("MyDocuments")
+        $defaultBase = Get-LastInstallBase
         $locText.Text = $defaultBase
         $locText.ReadOnly = $true
         $locBrowse.Enabled = $false
@@ -1280,7 +1303,39 @@ function Show-SetupWizard {
             $locBrowse.Enabled = $true
         }
     })
+
+    $locStatus = New-Object System.Windows.Forms.Label
+    $locStatus.AutoSize = $true
+    $locStatus.Location = New-Object System.Drawing.Point(0, 104)
+
+    $updateLocationStatus = {
+        $base = $locText.Text
+        if ([string]::IsNullOrWhiteSpace($base)) {
+            $locStatus.Text = "Choose a folder to continue."
+            $locStatus.ForeColor = [System.Drawing.Color]::FromArgb(140, 80, 0)
+            return
+        }
+        if (-not (Test-Path $base)) {
+            $locStatus.Text = "Folder does not exist. You can create it on the next step."
+            $locStatus.ForeColor = [System.Drawing.Color]::FromArgb(140, 80, 0)
+            return
+        }
+        try {
+            $probePath = Join-Path $base ("write-test-{0}.tmp" -f [Guid]::NewGuid().ToString("N"))
+            Set-Content -Path $probePath -Value "ok" -Encoding ASCII -ErrorAction Stop
+            Remove-Item -Path $probePath -Force -ErrorAction SilentlyContinue
+            $locStatus.Text = "Writable folder detected."
+            $locStatus.ForeColor = [System.Drawing.Color]::FromArgb(0, 120, 60)
+        } catch {
+            $locStatus.Text = "Folder is not writable. Choose a different location."
+            $locStatus.ForeColor = [System.Drawing.Color]::FromArgb(170, 40, 40)
+        }
+    }
+
+    $locText.Add_TextChanged({ & $updateLocationStatus })
+    $locDefault.Add_CheckedChanged({ & $updateLocationStatus })
     & $applyDefaultLocation
+    & $updateLocationStatus
 
     $locBrowse.Add_Click({
         $dialog = New-Object System.Windows.Forms.FolderBrowserDialog
@@ -1296,6 +1351,7 @@ function Show-SetupWizard {
     $panelLocation.Controls.Add($locBrowse)
     $panelLocation.Controls.Add($locDefault)
     $panelLocation.Controls.Add($locHint)
+    $panelLocation.Controls.Add($locStatus)
 
     $panelDownload = New-Object System.Windows.Forms.Panel
     $panelDownload.Location = New-Object System.Drawing.Point(16, 44)
@@ -1320,6 +1376,12 @@ function Show-SetupWizard {
     $dlMeta.Text = "Files: 0/0"
     $dlMeta.Location = New-Object System.Drawing.Point(0, 54)
 
+    $dlSummary = New-Object System.Windows.Forms.Label
+    $dlSummary.AutoSize = $true
+    $dlSummary.Font = New-Object System.Drawing.Font("Segoe UI", 8.5)
+    $dlSummary.Text = ""
+    $dlSummary.Location = New-Object System.Drawing.Point(0, 72)
+
     $dlDetailsLink = New-Object System.Windows.Forms.LinkLabel
     $dlDetailsLink.Text = "Show details"
     $dlDetailsLink.AutoSize = $true
@@ -1328,7 +1390,7 @@ function Show-SetupWizard {
     $dlDetailsList = New-Object System.Windows.Forms.ListBox
     $dlDetailsList.Width = 560
     $dlDetailsList.Height = 160
-    $dlDetailsList.Location = New-Object System.Drawing.Point(0, 78)
+    $dlDetailsList.Location = New-Object System.Drawing.Point(0, 96)
     $dlDetailsList.HorizontalScrollbar = $true
     $dlDetailsList.IntegralHeight = $false
     $dlDetailsList.Visible = $false
@@ -1344,6 +1406,7 @@ function Show-SetupWizard {
     $panelDownload.Controls.Add($dlDetailsLink)
     $panelDownload.Controls.Add($dlDetailsList)
     $panelDownload.Controls.Add($dlCancel)
+    $panelDownload.Controls.Add($dlSummary)
 
     $panelSummary = New-Object System.Windows.Forms.Panel
     $panelSummary.Location = New-Object System.Drawing.Point(16, 44)
@@ -1373,12 +1436,14 @@ function Show-SetupWizard {
     $sumMode = New-Object System.Windows.Forms.Label
     $sumIntegrity = New-Object System.Windows.Forms.Label
     $sumShortcuts = New-Object System.Windows.Forms.Label
-    $sumLog = New-Object System.Windows.Forms.Label
+    $sumLog = New-Object System.Windows.Forms.LinkLabel
 
     foreach ($lbl in @($sumInstall,$sumMode,$sumIntegrity,$sumShortcuts,$sumLog)) {
         $lbl.AutoSize = $true
         $lbl.MaximumSize = New-Object System.Drawing.Size(420, 0)
     }
+    $sumLog.LinkBehavior = [System.Windows.Forms.LinkBehavior]::HoverUnderline
+    $sumLog.Add_LinkClicked({ if (Test-Path $logPath) { Start-Process $logPath } })
 
     $addRow = {
         param([string]$labelText, $valueLabel)
@@ -1429,6 +1494,17 @@ function Show-SetupWizard {
     $sumClose.Width = 90
     $sumClose.Location = New-Object System.Drawing.Point(490, 250)
 
+    $copyLog = New-Object System.Windows.Forms.Button
+    $copyLog.Text = "Copy log path"
+    $copyLog.Width = 110
+    $copyLog.Location = New-Object System.Drawing.Point(0, 280)
+    $copyLog.Add_Click({ try { [System.Windows.Forms.Clipboard]::SetText($logPath) } catch { } })
+
+    $openAfter = New-Object System.Windows.Forms.CheckBox
+    $openAfter.Text = "Open install folder after finish"
+    $openAfter.AutoSize = $true
+    $openAfter.Location = New-Object System.Drawing.Point(130, 282)
+
     $panelSummary.Controls.Add($summaryTitle)
     $panelSummary.Controls.Add($summaryGroup)
     $panelSummary.Controls.Add($pinTip)
@@ -1436,6 +1512,8 @@ function Show-SetupWizard {
     $panelSummary.Controls.Add($sumSettings)
     $panelSummary.Controls.Add($sumFolder)
     $panelSummary.Controls.Add($sumClose)
+    $panelSummary.Controls.Add($copyLog)
+    $panelSummary.Controls.Add($openAfter)
 
     $btnBack = New-Object System.Windows.Forms.Button
     $btnBack.Text = "Back"
@@ -1485,6 +1563,7 @@ function Show-SetupWizard {
     $stepRef = [ref]0
     $allowSummary = $false
     $state.DownloadComplete = $false
+    $state.OpenAfterFinish = $false
 
     $showStep = {
         param([int]$index)
@@ -1559,6 +1638,7 @@ function Show-SetupWizard {
                 & $applyDefaultLocation
             }
             $selectedBase = $locText.Text
+            Set-LastInstallBase $selectedBase
             try {
                 $root = [System.IO.Path]::GetPathRoot($selectedBase)
                 $drive = Get-PSDrive -Name $root.TrimEnd('\') -ErrorAction SilentlyContinue
@@ -1584,9 +1664,14 @@ function Show-SetupWizard {
             if (-not (Test-Path $state.InstallPath)) {
                 New-Item -ItemType Directory -Path $state.InstallPath -Force | Out-Null
             }
-            & $showStep 2
-
             $state.PortableMode = (-not $state.CreateShortcuts)
+            $shortcutsSummary = if ($state.CreateShortcuts) { "Shortcuts: Yes" } else { "Shortcuts: No" }
+            $startupSummary = if ($state.EnableStartup) { "Startup: Yes" } else { "Startup: No" }
+            $modeSummary = if ($state.PortableMode) { "Mode: Portable" } else { "Mode: Standard" }
+            if ($dlSummary) {
+                $dlSummary.Text = "Install to: $($state.InstallPath) | $modeSummary | $shortcutsSummary | $startupSummary"
+            }
+            & $showStep 2
             $targetScript = Join-Path $state.InstallPath "Script\Teams Always Green.ps1"
 
             $folders = @(
@@ -1754,10 +1839,10 @@ function Show-SetupWizard {
         }
     })
 
-    $sumLaunch.Add_Click({ $state.Action = "Launch"; $form.Close() })
-    $sumSettings.Add_Click({ $state.Action = "Settings"; $form.Close() })
-    $sumFolder.Add_Click({ $state.Action = "Folder"; $form.Close() })
-    $sumClose.Add_Click({ $state.Action = "Close"; $form.Close() })
+    $sumLaunch.Add_Click({ $state.OpenAfterFinish = [bool]$openAfter.Checked; $state.Action = "Launch"; $form.Close() })
+    $sumSettings.Add_Click({ $state.OpenAfterFinish = [bool]$openAfter.Checked; $state.Action = "Settings"; $form.Close() })
+    $sumFolder.Add_Click({ $state.OpenAfterFinish = [bool]$openAfter.Checked; $state.Action = "Folder"; $form.Close() })
+    $sumClose.Add_Click({ $state.OpenAfterFinish = [bool]$openAfter.Checked; $state.Action = "Close"; $form.Close() })
 
     & $showStep 0
     if ($owner) { $form.ShowDialog($owner) | Out-Null } else { $form.ShowDialog() | Out-Null }
@@ -1844,6 +1929,13 @@ if ($wizard.Action -eq "Launch") {
     Start-Process "$env:WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe" -ArgumentList "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$targetScript`" -SettingsOnly" -WorkingDirectory $installPath
 } elseif ($wizard.Action -eq "Folder") {
     Start-Process "explorer.exe" $installPath
+}
+
+if ($wizard.OpenAfterFinish -and $wizard.Action -ne "Folder") {
+    try {
+        Start-Process "explorer.exe" $installPath
+    } catch {
+    }
 }
 
 Cleanup-SetupTempFiles -success $true
