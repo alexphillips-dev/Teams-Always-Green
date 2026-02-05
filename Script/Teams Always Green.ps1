@@ -683,6 +683,20 @@ function Write-LogThrottled([string]$key, [string]$message, [string]$level = "IN
     Write-Log $message $level $null $key
 }
 
+if (-not $script:BootTimer) {
+    $script:BootTimer = [System.Diagnostics.Stopwatch]::StartNew()
+}
+function Write-BootStage([string]$label) {
+    try {
+        if (-not $script:BootTimer) {
+            $script:BootTimer = [System.Diagnostics.Stopwatch]::StartNew()
+        }
+        $elapsed = $script:BootTimer.ElapsedMilliseconds
+        Write-Log ("Boot: {0} +{1}ms" -f $label, $elapsed) "INFO" $null "Startup"
+    } catch {
+    }
+}
+
 function Invoke-SafeTimerAction([string]$name, [ScriptBlock]$action) {
     $guardsVar = Get-Variable -Name TimerGuards -Scope Script -ErrorAction SilentlyContinue
     if (-not $guardsVar -or -not $guardsVar.Value) { $script:TimerGuards = @{} }
@@ -4087,6 +4101,7 @@ if ((Get-ObjectKeys $settings.Profiles) -contains $settings.ActiveProfile) {
 }
 
 Sync-SettingsReference $settings
+Write-BootStage "Settings ready"
 
 Update-LogCategorySettings
 
@@ -4253,6 +4268,7 @@ if ($script:OverrideMinimalMode) {
     $script:MinimalModeActive = $false
     $script:MinimalModeReason = $null
 }
+Write-BootStage "Crash state handled"
 Set-ShutdownMarker "started"
 Write-Log "" "INFO" $null "Init"
 Write-Log "=======================================================================" "INFO" $null "Init"
@@ -4267,6 +4283,7 @@ Validate-RequiredFiles
 Log-FolderHealthOnce
 if (Get-Command -Name Start-LogSummaryTimer -ErrorAction SilentlyContinue) { Start-LogSummaryTimer }
 Purge-OldLogs
+Write-BootStage "Logs ready"
 $buildStamp = if ($appBuildTimestamp) { Format-DateTime $appBuildTimestamp } else { "Unknown" }
 $scriptHashValue = if ($appScriptHash) { $appScriptHash } else { "Unknown" }
 $configHashValue = "Unknown"
@@ -4312,6 +4329,7 @@ Write-Log ("Session path: LogPath={0}" -f $logPath) "INFO" $null "Init"
 Write-Log ("Session path: SettingsPath={0}" -f $settingsPath) "INFO" $null "Init"
 Write-Log ("Session path: StatePath={0}" -f $script:StatePath) "INFO" $null "Init"
 Save-StartupSnapshot
+Write-BootStage "Startup snapshot saved"
 Write-Log ("Metadata: BuildId={0} ScriptHash={1} SchemaVersion={2} ConfigHash={3} ProfileHash={4} StartupSource={5} SettingsAgeMin={6} ThemeMode={7} ThemeResolved={8} Hotkeys={9}" -f `
     $appBuildId, $scriptHashValue, $script:SettingsSchemaVersion, $configHashValue, $profileHashValue, $startupSource, $settingsAgeMinutes, $themeModeValue, $themeResolved, $hotkeyStatusValue) "DEBUG" $null "Init"
 Write-Log "Startup. ScriptPath=$scriptPath" "DEBUG" $null "Init"
@@ -6112,6 +6130,7 @@ Sync-SettingsReference $settings
 . "$PSScriptRoot\Tray\Menu.ps1"
 . "$PSScriptRoot\UI\SettingsDialog.ps1"
 . "$PSScriptRoot\UI\HistoryDialog.ps1"
+Write-BootStage "UI modules loaded"
 
 if (-not (Get-Command Set-MenuTooltip -ErrorAction SilentlyContinue)) {
     function Set-MenuTooltip([System.Windows.Forms.ToolStripItem]$item, [string]$text) {
@@ -6275,12 +6294,14 @@ $notifyIcon.Text = if ($script:isPaused) { "Teams-Always-Green (Paused)" } else 
 $notifyIcon.Visible = $false
 $notifyIcon.ContextMenuStrip = $contextMenu
 Write-Log "Tray icon created." "INFO" $null "Tray"
+Write-BootStage "Tray icon created"
 Apply-MenuFontSize ([int]$settings.FontSize)
 Update-ThemePreference
 Request-StatusUpdate
 Update-StatusText
 Update-LogLevelMenuChecks
 Register-Hotkeys
+Write-BootStage "Hotkeys registered"
 
 # Left-click shows status balloon; double-click toggles start/stop
 $notifyIcon.Add_Click({
@@ -6383,6 +6404,7 @@ $statusHeartbeatTimer.Start()
 
 $notifyIcon.Visible = $true
 Write-Log "Tray icon visible (startup complete)." "INFO" $null "Tray"
+Write-BootStage "Startup complete"
 try { Show-FirstRunToast } catch { }
 
 function Show-StartPrompt {
