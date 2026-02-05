@@ -2005,6 +2005,7 @@ $clearLogButton = New-Object System.Windows.Forms.Button
     $validateFoldersButton.Text = "Validate Folders"
     $validateFoldersButton.Width = 120
     $validateFoldersButton.Tag = "Validate Folders"
+    $script:ValidateFoldersButton = $validateFoldersButton
 
     $script:ApplySettingsLocalizationOverrides = {
         if ($script:SettingsStatusLabel) { $script:SettingsStatusLabel.Text = (L "Status") }
@@ -3681,19 +3682,19 @@ $clearLogButton = New-Object System.Windows.Forms.Button
         $panel.SuspendLayout()
         try {
             if ($script:AddSettingRow) {
-                & $script:AddSettingRow $panel "Log Folder" $logDirectoryPanel | Out-Null
-                & $script:AddSettingRow $panel "Log Files" $logFilesLabel | Out-Null
-                & $script:AddSettingRow $panel "Validate Folders" $validateFoldersButton | Out-Null
+                if ($script:logDirectoryPanel) { & $script:AddSettingRow $panel "Log Folder" $script:logDirectoryPanel | Out-Null }
+                if ($script:logFilesLabel) { & $script:AddSettingRow $panel "Log Files" $script:logFilesLabel | Out-Null }
+                if ($script:ValidateFoldersButton) { & $script:AddSettingRow $panel "Validate Folders" $script:ValidateFoldersButton | Out-Null }
                 if ($script:AddSpacerRow) { & $script:AddSpacerRow $panel }
-                & $script:AddSettingRow $panel "Log Max Size (KB)" $logMaxSizePanel | Out-Null
+                if ($script:LogMaxSizePanel) { & $script:AddSettingRow $panel "Log Max Size (KB)" $script:LogMaxSizePanel | Out-Null }
                 $script:ErrorLabels["Log Max Size (KB)"] = & $addErrorRow $panel
                 & $script:AddSettingRow $panel "Log Retention (days)" $script:logRetentionBox | Out-Null
-                & $script:AddSettingRow $panel "Open Log File" $viewLogButton | Out-Null
-                & $script:AddSettingRow $panel "Open Log Tail" $viewLogTailButton | Out-Null
-                & $script:AddSettingRow $panel "Export Log Tail" $exportLogTailButton | Out-Null
-                & $script:AddSettingRow $panel "Log Snapshot" $logSnapshotButton | Out-Null
-                & $script:AddSettingRow $panel "Clear Log" $clearLogButton | Out-Null
-                & $script:AddSettingRow $panel "Open Log Folder" $openLogFolderButton | Out-Null
+                if ($script:ViewLogButton) { & $script:AddSettingRow $panel "Open Log File" $script:ViewLogButton | Out-Null }
+                if ($script:ViewLogTailButton) { & $script:AddSettingRow $panel "Open Log Tail" $script:ViewLogTailButton | Out-Null }
+                if ($script:ExportLogTailButton) { & $script:AddSettingRow $panel "Export Log Tail" $script:ExportLogTailButton | Out-Null }
+                if ($script:LogSnapshotButton) { & $script:AddSettingRow $panel "Log Snapshot" $script:LogSnapshotButton | Out-Null }
+                if ($script:ClearLogButton) { & $script:AddSettingRow $panel "Clear Log" $script:ClearLogButton | Out-Null }
+                if ($script:OpenLogFolderButton) { & $script:AddSettingRow $panel "Open Log Folder" $script:OpenLogFolderButton | Out-Null }
             }
         } finally {
             $panel.ResumeLayout()
@@ -3855,6 +3856,7 @@ $clearLogButton = New-Object System.Windows.Forms.Button
     $logSizeValue.Margin = New-Object System.Windows.Forms.Padding(0, 4, 0, 0)
     $logMaxSizePanel.Controls.Add($script:logMaxBox, 0, 0) | Out-Null
     $logMaxSizePanel.Controls.Add($logSizeValue, 1, 0) | Out-Null
+    $script:LogMaxSizePanel = $logMaxSizePanel
 
     if ($tabControl.SelectedTab -and ((& $script:GetSettingsTabKey $tabControl.SelectedTab) -eq "Profiles")) {
         if ($script:BuildProfilesTab) { & $script:BuildProfilesTab }
@@ -4187,6 +4189,7 @@ $clearLogButton = New-Object System.Windows.Forms.Button
             $toolTip.SetToolTip($control, $text)
         }
     }
+    $script:SetSettingsToolTip = $setToolTip
 
     $settingTooltips = @{
         "Interval Seconds" = "How often Scroll Lock toggles while running. Minimum 5 seconds, maximum 24 hours."
@@ -4262,13 +4265,18 @@ $clearLogButton = New-Object System.Windows.Forms.Button
         "Export/Import Settings" = "Save settings to a file or load settings from a file."
         "Profile Read-only" = "Lock a profile to prevent edits. Turn off to allow changes."
     }
+    $script:SettingTooltips = $settingTooltips
 
     $applyTooltips = {
         param($control)
         if (-not $control) { return }
         $tag = [string]$control.Tag
-        if ($settingTooltips.ContainsKey($tag)) {
-            & $setToolTip $control $settingTooltips[$tag]
+        if ($script:SettingTooltips -and $script:SettingTooltips.ContainsKey($tag)) {
+            if ($script:SetSettingsToolTip) {
+                & $script:SetSettingsToolTip $control $script:SettingTooltips[$tag]
+            } elseif ($setToolTip) {
+                & $setToolTip $control $script:SettingTooltips[$tag]
+            }
         }
         foreach ($child in $control.Controls) {
             & $applyTooltips $child
