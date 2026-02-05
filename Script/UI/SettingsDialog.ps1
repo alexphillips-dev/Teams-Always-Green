@@ -2592,10 +2592,13 @@ $clearLogButton = New-Object System.Windows.Forms.Button
                 $script:AboutGroup.Width = $panelWidth
             }
             if ($script:AboutLayout) {
-                $script:AboutLayout.MaximumSize = New-Object System.Drawing.Size(($panelWidth - 20), 0)
-                $script:AboutLayout.Width = $panelWidth - 20
+                $layoutWidth = [Math]::Max(300, $panelWidth - 20)
+                $script:AboutLayout.Width = $layoutWidth
+                $script:AboutLayout.MinimumSize = New-Object System.Drawing.Size($layoutWidth, 0)
+                $script:AboutLayout.MaximumSize = New-Object System.Drawing.Size($layoutWidth, 2000)
+                $script:AboutLayout.Height = $script:AboutLayout.PreferredSize.Height
             }
-            $valueWidth = [Math]::Max(200, $panelWidth - 180)
+            $valueWidth = [Math]::Max(260, $panelWidth - 140)
             if ($script:AboutTitleLabel) {
                 $script:AboutTitleLabel.MaximumSize = New-Object System.Drawing.Size($valueWidth, 0)
             }
@@ -2647,7 +2650,7 @@ $clearLogButton = New-Object System.Windows.Forms.Button
     $aboutLayout = New-Object System.Windows.Forms.TableLayoutPanel
     $aboutLayout.ColumnCount = 2
     $aboutLayout.RowCount = 20
-    $aboutLayout.AutoSize = $true
+    $aboutLayout.AutoSize = $false
     $aboutLayout.Dock = "Fill"
     $aboutLayout.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::AutoSize)))
     $aboutLayout.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Percent, 100)))
@@ -5618,4 +5621,3 @@ function Show-LogTailDialog {
     & $loadTail
     [void]$form.ShowDialog()
 }
-
