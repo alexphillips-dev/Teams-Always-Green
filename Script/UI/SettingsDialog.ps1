@@ -5336,6 +5336,12 @@ $clearLogButton = New-Object System.Windows.Forms.Button
                 }
             }
         }
+        $getSettingsControl = {
+            param([string]$name)
+            $var = Get-Variable -Name $name -Scope Script -ErrorAction SilentlyContinue
+            if ($var) { return $var.Value }
+            return $null
+        }
         try {
         $targetForm = $script:SettingsForm
         if (-not $targetForm -or $targetForm.IsDisposed) { return }
@@ -5390,45 +5396,55 @@ $clearLogButton = New-Object System.Windows.Forms.Button
                     if ($script:SettingsSetText -is [scriptblock]) { & $script:SettingsSetText $script:SettingsToggleLifetimeValue ([string]$settings.ToggleCount) }
                 }
                 $step = "StatusTab-FunStats"
-                $funStats = Ensure-FunStats $settings
-                if ($script:SettingsFunDailyValue) {
-                    if ($script:SettingsSetText -is [scriptblock]) { & $script:SettingsSetText $script:SettingsFunDailyValue ([string](Get-DailyToggleCount $funStats (Get-Date))) }
-                }
-                $streaks = Get-ToggleStreaks $funStats
-                if ($script:SettingsFunStreakCurrentValue) {
-                    if ($script:SettingsSetText -is [scriptblock]) { & $script:SettingsSetText $script:SettingsFunStreakCurrentValue "$($streaks.Current) days" }
-                }
-                if ($script:SettingsFunStreakBestValue) {
-                    if ($script:SettingsSetText -is [scriptblock]) { & $script:SettingsSetText $script:SettingsFunStreakBestValue "$($streaks.Best) days" }
-                }
-                if ($script:SettingsFunMostActiveHourValue) {
-                    if ($script:SettingsSetText -is [scriptblock]) { & $script:SettingsSetText $script:SettingsFunMostActiveHourValue (Get-MostActiveHourLabel $funStats) }
-                }
-                if ($script:SettingsFunLongestPauseValue) {
-                    $longestPause = 0
-                    try {
-                        if ($funStats -is [System.Collections.IDictionary] -and $funStats.ContainsKey("LongestPauseMinutes")) {
-                            $longestPause = [int]$funStats["LongestPauseMinutes"]
-                        } elseif ($funStats -and $funStats.PSObject.Properties.Match("LongestPauseMinutes").Count -gt 0) {
-                            $longestPause = [int]$funStats.LongestPauseMinutes
-                        }
-                    } catch {
+                try {
+                    $funStats = Ensure-FunStats $settings
+                    $funDailyControl = & $getSettingsControl 'SettingsFunDailyValue'
+                    if ($funDailyControl) {
+                        if ($script:SettingsSetText -is [scriptblock]) { & $script:SettingsSetText $funDailyControl ([string](Get-DailyToggleCount $funStats (Get-Date))) }
+                    }
+                    $streaks = Get-ToggleStreaks $funStats
+                    $funStreakCurrentControl = & $getSettingsControl 'SettingsFunStreakCurrentValue'
+                    if ($funStreakCurrentControl) {
+                        if ($script:SettingsSetText -is [scriptblock]) { & $script:SettingsSetText $funStreakCurrentControl "$($streaks.Current) days" }
+                    }
+                    $funStreakBestControl = & $getSettingsControl 'SettingsFunStreakBestValue'
+                    if ($funStreakBestControl) {
+                        if ($script:SettingsSetText -is [scriptblock]) { & $script:SettingsSetText $funStreakBestControl "$($streaks.Best) days" }
+                    }
+                    $funMostActiveControl = & $getSettingsControl 'SettingsFunMostActiveHourValue'
+                    if ($funMostActiveControl) {
+                        if ($script:SettingsSetText -is [scriptblock]) { & $script:SettingsSetText $funMostActiveControl (Get-MostActiveHourLabel $funStats) }
+                    }
+                    $funLongestPauseControl = & $getSettingsControl 'SettingsFunLongestPauseValue'
+                    if ($funLongestPauseControl) {
                         $longestPause = 0
-                    }
-                    if ($script:SettingsSetText -is [scriptblock]) { & $script:SettingsSetText $script:SettingsFunLongestPauseValue (if ($longestPause -gt 0) { "$longestPause min" } else { "N/A" }) }
-                }
-                if ($script:SettingsFunTotalRunValue) {
-                    $totalRun = 0.0
-                    try {
-                        if ($funStats -is [System.Collections.IDictionary] -and $funStats.ContainsKey("TotalRunMinutes")) {
-                            $totalRun = [double]$funStats["TotalRunMinutes"]
-                        } elseif ($funStats -and $funStats.PSObject.Properties.Match("TotalRunMinutes").Count -gt 0) {
-                            $totalRun = [double]$funStats.TotalRunMinutes
+                        try {
+                            if ($funStats -is [System.Collections.IDictionary] -and $funStats.ContainsKey("LongestPauseMinutes")) {
+                                $longestPause = [int]$funStats["LongestPauseMinutes"]
+                            } elseif ($funStats -and $funStats.PSObject.Properties.Match("LongestPauseMinutes").Count -gt 0) {
+                                $longestPause = [int]$funStats.LongestPauseMinutes
+                            }
+                        } catch {
+                            $longestPause = 0
                         }
-                    } catch {
-                        $totalRun = 0.0
+                        if ($script:SettingsSetText -is [scriptblock]) { & $script:SettingsSetText $funLongestPauseControl (if ($longestPause -gt 0) { "$longestPause min" } else { "N/A" }) }
                     }
-                    if ($script:SettingsSetText -is [scriptblock]) { & $script:SettingsSetText $script:SettingsFunTotalRunValue (Format-TotalRunTime $totalRun) }
+                    $funTotalRunControl = & $getSettingsControl 'SettingsFunTotalRunValue'
+                    if ($funTotalRunControl) {
+                        $totalRun = 0.0
+                        try {
+                            if ($funStats -is [System.Collections.IDictionary] -and $funStats.ContainsKey("TotalRunMinutes")) {
+                                $totalRun = [double]$funStats["TotalRunMinutes"]
+                            } elseif ($funStats -and $funStats.PSObject.Properties.Match("TotalRunMinutes").Count -gt 0) {
+                                $totalRun = [double]$funStats.TotalRunMinutes
+                            }
+                        } catch {
+                            $totalRun = 0.0
+                        }
+                        if ($script:SettingsSetText -is [scriptblock]) { & $script:SettingsSetText $funTotalRunControl (Format-TotalRunTime $totalRun) }
+                    }
+                } catch {
+                    # swallow to avoid UI spam; outer logger will still catch severe issues elsewhere
                 }
                 $step = "StatusTab-Schedule"
                 $scheduleText = Format-ScheduleStatus
@@ -5463,31 +5479,44 @@ $clearLogButton = New-Object System.Windows.Forms.Button
 
             $step = "DiagnosticsTab"
             if ($shouldUpdate -and $diagnosticsPage -and $selectedTab -eq $diagnosticsPage) {
-                if ($script:LastErrorMessage) {
-                    $errorTime = if ($script:LastErrorTime) { Format-LocalTime $script:LastErrorTime } else { "Unknown" }
-                    if ($script:SettingsSetText -is [scriptblock]) { & $script:SettingsSetText $script:SettingsDiagErrorValue "$errorTime - $($script:LastErrorMessage)" }
-                } else {
-                    if ($script:SettingsSetText -is [scriptblock]) { & $script:SettingsSetText $script:SettingsDiagErrorValue "None" }
-                }
-                if ($script:SettingsSetText -is [scriptblock]) { & $script:SettingsSetText $script:SettingsDiagRestartValue (Format-LocalTime $script:AppStartTime) }
-                if ($script:SettingsSetText -is [scriptblock]) { & $script:SettingsSetText $script:SettingsDiagSafeModeValue ($(if ($script:safeModeActive) { "On" } else { "Off" })) }
-                if ($script:SettingsSetText -is [scriptblock]) { & $script:SettingsSetText $script:SettingsDebugModeStatus (if ($script:DebugModeUntil) { "On (10 min)" } else { "Off" }) }
-                if ($script:LastToggleResultTime) {
-                    if ($script:SettingsSetText -is [scriptblock]) { & $script:SettingsSetText $script:SettingsDiagLastToggleValue "$($script:LastToggleResult) - $(Format-LocalTime $script:LastToggleResultTime)" }
-                } else {
-                    if ($script:SettingsSetText -is [scriptblock]) { & $script:SettingsSetText $script:SettingsDiagLastToggleValue $script:LastToggleResult }
-                }
-                if ($script:SettingsSetText -is [scriptblock]) { & $script:SettingsSetText $script:SettingsDiagFailValue ([string]$script:toggleFailCount) }
-                $diagBytes = 0
-                if (Test-Path $logPath) {
-                    try { $diagBytes = (Get-Item -Path $logPath).Length } catch { $diagBytes = 0 }
-                }
-                if ($script:SettingsSetText -is [scriptblock]) { & $script:SettingsSetText $script:SettingsDiagLogSizeValue (& $script:FormatSize $diagBytes) }
-                if ($script:SettingsSetText -is [scriptblock]) { & $script:SettingsSetText $script:SettingsDiagLogRotateValue ([string]$script:LogRotationCount) }
-                if ($script:LastLogWriteTime) {
-                    if ($script:SettingsSetText -is [scriptblock]) { & $script:SettingsSetText $script:SettingsDiagLogWriteValue (Format-LocalTime $script:LastLogWriteTime) }
-                } else {
-                    if ($script:SettingsSetText -is [scriptblock]) { & $script:SettingsSetText $script:SettingsDiagLogWriteValue "N/A" }
+                try {
+                    $diagErrorControl = & $getSettingsControl 'SettingsDiagErrorValue'
+                    $diagRestartControl = & $getSettingsControl 'SettingsDiagRestartValue'
+                    $diagSafeModeControl = & $getSettingsControl 'SettingsDiagSafeModeValue'
+                    $debugModeStatusControl = & $getSettingsControl 'SettingsDebugModeStatus'
+                    $diagLastToggleControl = & $getSettingsControl 'SettingsDiagLastToggleValue'
+                    $diagFailControl = & $getSettingsControl 'SettingsDiagFailValue'
+                    $diagLogSizeControl = & $getSettingsControl 'SettingsDiagLogSizeValue'
+                    $diagLogRotateControl = & $getSettingsControl 'SettingsDiagLogRotateValue'
+                    $diagLogWriteControl = & $getSettingsControl 'SettingsDiagLogWriteValue'
+                    if ($script:LastErrorMessage) {
+                        $errorTime = if ($script:LastErrorTime) { Format-LocalTime $script:LastErrorTime } else { "Unknown" }
+                        if ($diagErrorControl -and ($script:SettingsSetText -is [scriptblock])) { & $script:SettingsSetText $diagErrorControl "$errorTime - $($script:LastErrorMessage)" }
+                    } else {
+                        if ($diagErrorControl -and ($script:SettingsSetText -is [scriptblock])) { & $script:SettingsSetText $diagErrorControl "None" }
+                    }
+                    if ($diagRestartControl -and ($script:SettingsSetText -is [scriptblock])) { & $script:SettingsSetText $diagRestartControl (Format-LocalTime $script:AppStartTime) }
+                    if ($diagSafeModeControl -and ($script:SettingsSetText -is [scriptblock])) { & $script:SettingsSetText $diagSafeModeControl ($(if ($script:safeModeActive) { "On" } else { "Off" })) }
+                    if ($debugModeStatusControl -and ($script:SettingsSetText -is [scriptblock])) { & $script:SettingsSetText $debugModeStatusControl (if ($script:DebugModeUntil) { "On (10 min)" } else { "Off" }) }
+                    if ($script:LastToggleResultTime) {
+                        if ($diagLastToggleControl -and ($script:SettingsSetText -is [scriptblock])) { & $script:SettingsSetText $diagLastToggleControl "$($script:LastToggleResult) - $(Format-LocalTime $script:LastToggleResultTime)" }
+                    } else {
+                        if ($diagLastToggleControl -and ($script:SettingsSetText -is [scriptblock])) { & $script:SettingsSetText $diagLastToggleControl $script:LastToggleResult }
+                    }
+                    if ($diagFailControl -and ($script:SettingsSetText -is [scriptblock])) { & $script:SettingsSetText $diagFailControl ([string]$script:toggleFailCount) }
+                    $diagBytes = 0
+                    if (Test-Path $logPath) {
+                        try { $diagBytes = (Get-Item -Path $logPath).Length } catch { $diagBytes = 0 }
+                    }
+                    if ($diagLogSizeControl -and ($script:SettingsSetText -is [scriptblock])) { & $script:SettingsSetText $diagLogSizeControl (& $script:FormatSize $diagBytes) }
+                    if ($diagLogRotateControl -and ($script:SettingsSetText -is [scriptblock])) { & $script:SettingsSetText $diagLogRotateControl ([string]$script:LogRotationCount) }
+                    if ($script:LastLogWriteTime) {
+                        if ($diagLogWriteControl -and ($script:SettingsSetText -is [scriptblock])) { & $script:SettingsSetText $diagLogWriteControl (Format-LocalTime $script:LastLogWriteTime) }
+                    } else {
+                        if ($diagLogWriteControl -and ($script:SettingsSetText -is [scriptblock])) { & $script:SettingsSetText $diagLogWriteControl "N/A" }
+                    }
+                } catch {
+                    # swallow to avoid UI spam on diagnostics refresh
                 }
             }
 
