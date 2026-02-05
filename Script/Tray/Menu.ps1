@@ -272,6 +272,18 @@ function Show-PauseUntilDialog {
         $form.Close()
     })
 
+ $contextMenu.Add_Opening({
+     if ($script:TrayMenuOpening) { return }
+     $script:TrayMenuOpening = $true
+     try {
+         if (Get-Command Update-TrayLabels -ErrorAction SilentlyContinue) { Update-TrayLabels }
+         if (Get-Command Localize-MenuItems -ErrorAction SilentlyContinue) { Localize-MenuItems $contextMenu.Items }
+         if ($updateProfilesMenu) { & $updateProfilesMenu }
+     } finally {
+         $script:TrayMenuOpening = $false
+     }
+ })
+
     $cancelButton = New-Object System.Windows.Forms.Button
     $cancelButton.Text = "Cancel"
     $cancelButton.Width = 80
@@ -464,7 +476,6 @@ $runOnceNowItem.Add_Click({
 })
 Update-TrayLabels
 Localize-MenuItems $contextMenu.Items
-
 
 
 
