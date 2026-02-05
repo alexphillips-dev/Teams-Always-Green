@@ -35,6 +35,7 @@ function Show-SettingsDialog {
         }
         $form = New-Object System.Windows.Forms.Form
         $script:SettingsForm = $form
+        $form.SuspendLayout()
     $form.Text = "Settings"
     $form.StartPosition = "CenterScreen"
     $form.FormBorderStyle = "Sizable"
@@ -66,12 +67,17 @@ function Show-SettingsDialog {
     $mainPanel.AutoScroll = $false
     $mainPanel.Padding = New-Object System.Windows.Forms.Padding(10, 10, 10, 10)
     $script:MainPanel = $mainPanel
+    $mainPanel.SuspendLayout()
 
     $tabControl = New-Object System.Windows.Forms.TabControl
     $tabControl.Dock = "Fill"
     $script:SettingsTabControl = $tabControl
     $script:ProfilesTabLoaded = $false
     $script:DiagnosticsTabLoaded = $false
+    $script:LoggingTabLoaded = $false
+    $script:AboutTabLoaded = $false
+    $script:SettingsLayoutDirty = $true
+    $tabControl.SuspendLayout()
 
     $script:GetSettingsTabKey = {
         param($tab)
@@ -687,7 +693,21 @@ function Show-SettingsDialog {
         if ($script:SettingsSearchBox) { $script:SettingsSearchBox.Text = "" }
     })
 
+    $script:SettingsSearchTimer = New-Object System.Windows.Forms.Timer
+    $script:SettingsSearchTimer.Interval = 250
+    $script:SettingsSearchTimer.Add_Tick({
+        $script:SettingsSearchTimer.Stop()
+        if ($script:ApplySettingsSearchFilter) {
+            & $script:ApplySettingsSearchFilter $script:SettingsSearchBox.Text
+        }
+    })
+
     $script:SettingsSearchBox.Add_TextChanged({
+        if ($script:SettingsSearchTimer) {
+            $script:SettingsSearchTimer.Stop()
+            $script:SettingsSearchTimer.Start()
+            return
+        }
         if ($script:ApplySettingsSearchFilter) { & $script:ApplySettingsSearchFilter $script:SettingsSearchBox.Text }
     })
 
@@ -2517,6 +2537,8 @@ $clearLogButton = New-Object System.Windows.Forms.Button
     $script:ApplySettingsSearchFilter = {
         param([string]$text)
         $needle = if ($text) { $text.Trim().ToLowerInvariant() } else { "" }
+        if ($script:SettingsSearchLast -eq $needle) { return }
+        $script:SettingsSearchLast = $needle
         foreach ($panel in $script:SettingsTabPanels.Values) {
             if (-not $panel) { continue }
             $hasMatch = $false
@@ -2580,6 +2602,10 @@ $clearLogButton = New-Object System.Windows.Forms.Button
         }
         $targetTabControl = $script:SettingsTabControl
         if (-not $targetTabControl) { return }
+        $sizeKey = "{0}x{1}" -f $targetTabControl.Width, $targetTabControl.Height
+        if (-not $script:SettingsLayoutDirty -and $script:SettingsLayoutLast -eq $sizeKey) { return }
+        $script:SettingsLayoutLast = $sizeKey
+        $script:SettingsLayoutDirty = $false
         foreach ($page in $targetTabControl.TabPages) {
             $targetWidth = [Math]::Max(200, $page.ClientSize.Width - 30)
             & $updatePanelWidth $page $targetWidth
@@ -2627,6 +2653,10 @@ $clearLogButton = New-Object System.Windows.Forms.Button
             if ($script:BuildProfilesTab) { & $script:BuildProfilesTab }
         } elseif ($title -eq "Diagnostics") {
             if ($script:BuildDiagnosticsTab) { & $script:BuildDiagnosticsTab }
+        } elseif ($title -eq "Logging") {
+            if ($script:BuildLoggingTab) { & $script:BuildLoggingTab }
+        } elseif ($title -eq "About") {
+            if ($script:BuildAboutTab) { & $script:BuildAboutTab }
         }
     })
 
@@ -3644,6 +3674,57 @@ $clearLogButton = New-Object System.Windows.Forms.Button
         $script:DiagnosticsTabLoaded = $true
     }
 
+    $script:BuildLoggingTab = {
+        if ($script:LoggingTabLoaded) { return }
+        $panel = $script:SettingsTabPanels["Logging"]
+        if (-not $panel) { return }
+        $panel.SuspendLayout()
+        try {
+            if ($script:AddSettingRow) {
+                & $script:AddSettingRow $panel "Log Folder" $logDirectoryPanel | Out-Null
+                & $script:AddSettingRow $panel "Log Files" $logFilesLabel | Out-Null
+                & $script:AddSettingRow $panel "Validate Folders" $validateFoldersButton | Out-Null
+                if ($script:AddSpacerRow) { & $script:AddSpacerRow $panel }
+                & $script:AddSettingRow $panel "Log Max Size (KB)" $logMaxSizePanel | Out-Null
+                $script:ErrorLabels["Log Max Size (KB)"] = & $addErrorRow $panel
+                & $script:AddSettingRow $panel "Log Retention (days)" $script:logRetentionBox | Out-Null
+                & $script:AddSettingRow $panel "Open Log File" $viewLogButton | Out-Null
+                & $script:AddSettingRow $panel "Open Log Tail" $viewLogTailButton | Out-Null
+                & $script:AddSettingRow $panel "Export Log Tail" $exportLogTailButton | Out-Null
+                & $script:AddSettingRow $panel "Log Snapshot" $logSnapshotButton | Out-Null
+                & $script:AddSettingRow $panel "Clear Log" $clearLogButton | Out-Null
+                & $script:AddSettingRow $panel "Open Log Folder" $openLogFolderButton | Out-Null
+            }
+        } finally {
+            $panel.ResumeLayout()
+        }
+        if ($script:ApplySettingsTooltips) { & $script:ApplySettingsTooltips $panel }
+        Localize-ControlTree $panel
+        if ($script:ApplySettingsLocalizationOverrides) { & $script:ApplySettingsLocalizationOverrides }
+        $script:SettingsLayoutDirty = $true
+        if ($script:UpdateTabLayouts) { & $script:UpdateTabLayouts }
+        $script:LoggingTabLoaded = $true
+    }
+
+    $script:BuildAboutTab = {
+        if ($script:AboutTabLoaded) { return }
+        $panel = $script:SettingsTabPanels["About"]
+        if (-not $panel) { return }
+        $panel.SuspendLayout()
+        try {
+            if ($script:AddFullRow -and $script:AboutGroup) { & $script:AddFullRow $panel $script:AboutGroup }
+        } finally {
+            $panel.ResumeLayout()
+        }
+        if ($script:UpdateAboutValues) { & $script:UpdateAboutValues }
+        if ($script:ApplySettingsTooltips) { & $script:ApplySettingsTooltips $panel }
+        Localize-ControlTree $panel
+        if ($script:ApplySettingsLocalizationOverrides) { & $script:ApplySettingsLocalizationOverrides }
+        $script:SettingsLayoutDirty = $true
+        if ($script:UpdateTabLayouts) { & $script:UpdateTabLayouts }
+        $script:AboutTabLoaded = $true
+    }
+
     & $addFullRow $statusPanel $statusBadgePanel
     & $addFullRow $statusPanel $statusGroup
     & $addFullRow $statusPanel $toggleGroup
@@ -3696,8 +3777,6 @@ $clearLogButton = New-Object System.Windows.Forms.Button
     & $addSettingRow $appearancePanel "Status Colors" $statusColorsContainer | Out-Null
     & $addSettingRow $appearancePanel "Compact Mode" $script:compactModeBox | Out-Null
     if ($script:AddSpacerRow) { & $script:AddSpacerRow $appearancePanel }
-
-    & $addFullRow $aboutPanel $aboutGroup
 
     & $addSettingRow $schedulePanel "Schedule Override" $script:scheduleOverrideBox | Out-Null
     & $addSettingRow $schedulePanel "Schedule Enabled" $script:scheduleEnabledBox | Out-Null
@@ -3764,11 +3843,6 @@ $clearLogButton = New-Object System.Windows.Forms.Button
     & $addSettingRow $advancedPanel "Debug Mode" $debugModeButton | Out-Null
     & $addSettingRow $advancedPanel "Debug Status" $debugModeStatus | Out-Null
     if ($script:AddSpacerRow) { & $script:AddSpacerRow $advancedPanel }
-    & $addSettingRow $loggingPanel "Log Folder" $logDirectoryPanel | Out-Null
-    & $addSettingRow $loggingPanel "Log Files" $logFilesLabel | Out-Null
-    & $addSettingRow $loggingPanel "Validate Folders" $validateFoldersButton | Out-Null
-    if ($script:AddSpacerRow) { & $script:AddSpacerRow $loggingPanel }
-
     $logMaxSizePanel = New-Object System.Windows.Forms.TableLayoutPanel
     $logMaxSizePanel.ColumnCount = 2
     $logMaxSizePanel.RowCount = 1
@@ -3782,21 +3856,17 @@ $clearLogButton = New-Object System.Windows.Forms.Button
     $logMaxSizePanel.Controls.Add($script:logMaxBox, 0, 0) | Out-Null
     $logMaxSizePanel.Controls.Add($logSizeValue, 1, 0) | Out-Null
 
-    & $addSettingRow $loggingPanel "Log Max Size (KB)" $logMaxSizePanel | Out-Null
-    $script:ErrorLabels["Log Max Size (KB)"] = & $addErrorRow $loggingPanel
-    & $addSettingRow $loggingPanel "Log Retention (days)" $script:logRetentionBox | Out-Null
-    & $addSettingRow $loggingPanel "Open Log File" $viewLogButton | Out-Null
-    & $addSettingRow $loggingPanel "Open Log Tail" $viewLogTailButton | Out-Null
-    & $addSettingRow $loggingPanel "Export Log Tail" $exportLogTailButton | Out-Null
-    & $addSettingRow $loggingPanel "Log Snapshot" $logSnapshotButton | Out-Null
-    & $addSettingRow $loggingPanel "Clear Log" $clearLogButton | Out-Null
-    & $addSettingRow $loggingPanel "Open Log Folder" $openLogFolderButton | Out-Null
-
     if ($tabControl.SelectedTab -and ((& $script:GetSettingsTabKey $tabControl.SelectedTab) -eq "Profiles")) {
         if ($script:BuildProfilesTab) { & $script:BuildProfilesTab }
     }
     if ($tabControl.SelectedTab -and ((& $script:GetSettingsTabKey $tabControl.SelectedTab) -eq "Diagnostics")) {
         if ($script:BuildDiagnosticsTab) { & $script:BuildDiagnosticsTab }
+    }
+    if ($tabControl.SelectedTab -and ((& $script:GetSettingsTabKey $tabControl.SelectedTab) -eq "Logging")) {
+        if ($script:BuildLoggingTab) { & $script:BuildLoggingTab }
+    }
+    if ($tabControl.SelectedTab -and ((& $script:GetSettingsTabKey $tabControl.SelectedTab) -eq "About")) {
+        if ($script:BuildAboutTab) { & $script:BuildAboutTab }
     }
 
     foreach ($panel in @($statusPanel, $generalPanel, $schedulePanel, $hotkeyPanel, $loggingPanel, $profilesPanel, $diagnosticsPanel, $advancedPanel, $appearancePanel, $aboutPanel)) {
@@ -4204,6 +4274,7 @@ $clearLogButton = New-Object System.Windows.Forms.Button
             & $applyTooltips $child
         }
     }
+    $script:ApplySettingsTooltips = $applyTooltips
 
     foreach ($page in $script:SettingsTabControl.TabPages) {
         & $applyTooltips $page
@@ -5165,6 +5236,23 @@ $clearLogButton = New-Object System.Windows.Forms.Button
         return ("{0} B" -f $bytes)
     }
     $script:FormatSize = $formatSize
+    $setTextIfChanged = {
+        param($control, $text)
+        if ($null -eq $control) { return }
+        $newText = [string]$text
+        if ($control.Text -ne $newText) { $control.Text = $newText }
+    }
+    $setVisibleIfChanged = {
+        param($control, $visible)
+        if ($null -eq $control) { return }
+        $newVisible = [bool]$visible
+        if ($control.Visible -ne $newVisible) { $control.Visible = $newVisible }
+    }
+    $setForeColorIfChanged = {
+        param($control, $color)
+        if ($null -eq $control) { return }
+        if ($control.ForeColor -ne $color) { $control.ForeColor = $color }
+    }
 
     $updateSettingsStatus = {
         if ($script:isShuttingDown -or $script:SettingsUiRefreshInProgress) { return }
@@ -5194,8 +5282,8 @@ $clearLogButton = New-Object System.Windows.Forms.Button
                         $statusText = "Paused"
                     }
                 }
-                $script:SettingsStatusValue.Text = $statusText
-                $script:SettingsStatusValue.ForeColor = $script:StatusStateColor
+                & $setTextIfChanged $script:SettingsStatusValue $statusText
+                & $setForeColorIfChanged $script:SettingsStatusValue $script:StatusStateColor
                 $nextText = Format-NextInfo
                 if ($script:isPaused) {
                     if ($pauseUntilText -and $pauseUntilText -ne "N/A") {
@@ -5204,73 +5292,69 @@ $clearLogButton = New-Object System.Windows.Forms.Button
                         $nextText = "Paused"
                     }
                 }
-                $script:SettingsNextValue.Text = $nextText
+                & $setTextIfChanged $script:SettingsNextValue $nextText
                 $uptimeSpan = (Get-Date) - $script:AppStartTime
-                $script:SettingsUptimeValue.Text = ("{0}h {1}m" -f [int]$uptimeSpan.TotalHours, $uptimeSpan.Minutes)
+                & $setTextIfChanged $script:SettingsUptimeValue ("{0}h {1}m" -f [int]$uptimeSpan.TotalHours, $uptimeSpan.Minutes)
                 if ($script:LastToggleResultTime) {
-                    $script:SettingsLastToggleValue.Text = "$($script:LastToggleResult) - $(Format-LocalTime $script:LastToggleResultTime)"
+                    & $setTextIfChanged $script:SettingsLastToggleValue "$($script:LastToggleResult) - $(Format-LocalTime $script:LastToggleResultTime)"
                 } else {
-                    $script:SettingsLastToggleValue.Text = $script:LastToggleResult
+                    & $setTextIfChanged $script:SettingsLastToggleValue $script:LastToggleResult
                 }
-                $script:SettingsNextCountdownValue.Text = "N/A"
+                & $setTextIfChanged $script:SettingsNextCountdownValue "N/A"
                 if ($script:isRunning -and -not $script:isPaused -and -not $script:isScheduleBlocked -and $script:nextToggleTime) {
                     $remaining = [int][Math]::Max(0, ($script:nextToggleTime - (Get-Date)).TotalSeconds)
-                    $script:SettingsNextCountdownValue.Text = "$remaining s ($($script:nextToggleTime.ToString("T")))"
+                    & $setTextIfChanged $script:SettingsNextCountdownValue "$remaining s ($($script:nextToggleTime.ToString("T")))"
                 }
-                $script:SettingsProfileStatusValue.Text = [string]$settings.ActiveProfile
+                & $setTextIfChanged $script:SettingsProfileStatusValue ([string]$settings.ActiveProfile)
                 if ($script:SettingsToggleCurrentValue) {
-                    $script:SettingsToggleCurrentValue.Text = [string]$script:tickCount
+                    & $setTextIfChanged $script:SettingsToggleCurrentValue ([string]$script:tickCount)
                 }
                 if ($script:SettingsToggleLifetimeValue) {
-                    $script:SettingsToggleLifetimeValue.Text = [string]$settings.ToggleCount
+                    & $setTextIfChanged $script:SettingsToggleLifetimeValue ([string]$settings.ToggleCount)
                 }
                 $step = "StatusTab-FunStats"
                 $funStats = Ensure-FunStats $settings
                 if ($script:SettingsFunDailyValue) {
-                    $script:SettingsFunDailyValue.Text = [string](Get-DailyToggleCount $funStats (Get-Date))
+                    & $setTextIfChanged $script:SettingsFunDailyValue ([string](Get-DailyToggleCount $funStats (Get-Date)))
                 }
                 $streaks = Get-ToggleStreaks $funStats
                 if ($script:SettingsFunStreakCurrentValue) {
-                    $script:SettingsFunStreakCurrentValue.Text = "$($streaks.Current) days"
+                    & $setTextIfChanged $script:SettingsFunStreakCurrentValue "$($streaks.Current) days"
                 }
                 if ($script:SettingsFunStreakBestValue) {
-                    $script:SettingsFunStreakBestValue.Text = "$($streaks.Best) days"
+                    & $setTextIfChanged $script:SettingsFunStreakBestValue "$($streaks.Best) days"
                 }
                 if ($script:SettingsFunMostActiveHourValue) {
-                    $script:SettingsFunMostActiveHourValue.Text = Get-MostActiveHourLabel $funStats
+                    & $setTextIfChanged $script:SettingsFunMostActiveHourValue (Get-MostActiveHourLabel $funStats)
                 }
                 if ($script:SettingsFunLongestPauseValue) {
                     $longestPause = 0
                     if ($funStats.ContainsKey("LongestPauseMinutes")) { $longestPause = [int]$funStats["LongestPauseMinutes"] }
-                    $script:SettingsFunLongestPauseValue.Text = if ($longestPause -gt 0) { "$longestPause min" } else { "N/A" }
+                    & $setTextIfChanged $script:SettingsFunLongestPauseValue (if ($longestPause -gt 0) { "$longestPause min" } else { "N/A" })
                 }
                 if ($script:SettingsFunTotalRunValue) {
                     $totalRun = 0.0
                     if ($funStats.ContainsKey("TotalRunMinutes")) { $totalRun = [double]$funStats["TotalRunMinutes"] }
-                    $script:SettingsFunTotalRunValue.Text = Format-TotalRunTime $totalRun
+                    & $setTextIfChanged $script:SettingsFunTotalRunValue (Format-TotalRunTime $totalRun)
                 }
                 $step = "StatusTab-Schedule"
                 $scheduleText = Format-ScheduleStatus
-                $script:SettingsScheduleStatusValue.Text = $scheduleText
-                $script:SettingsSafeModeStatusValue.Text = if ($script:safeModeActive) { "On (Fails=$($script:toggleFailCount))" } else { "Off" }
+                & $setTextIfChanged $script:SettingsScheduleStatusValue $scheduleText
+                & $setTextIfChanged $script:SettingsSafeModeStatusValue (if ($script:safeModeActive) { "On (Fails=$($script:toggleFailCount))" } else { "Off" })
                 $step = "StatusTab-Keyboard"
                 $caps = [System.Windows.Forms.Control]::IsKeyLocked([System.Windows.Forms.Keys]::CapsLock)
                 $num = [System.Windows.Forms.Control]::IsKeyLocked([System.Windows.Forms.Keys]::NumLock)
                 $scroll = [System.Windows.Forms.Control]::IsKeyLocked([System.Windows.Forms.Keys]::Scroll)
-                $script:SettingsKeyboardValue.Text = "Caps:{0} Num:{1} Scroll:{2}" -f ($(if ($caps) { "On" } else { "Off" })), ($(if ($num) { "On" } else { "Off" })), ($(if ($scroll) { "On" } else { "Off" }))
+                & $setTextIfChanged $script:SettingsKeyboardValue ("Caps:{0} Num:{1} Scroll:{2}" -f ($(if ($caps) { "On" } else { "Off" })), ($(if ($num) { "On" } else { "Off" })), ($(if ($scroll) { "On" } else { "Off" })))
             }
 
             $step = "HotkeysTab"
             if ($shouldUpdate -and $hotkeysPage -and $selectedTab -eq $hotkeysPage) {
-                $script:SettingsHotkeyStatusValue.Text = $script:HotkeyStatusText
+                & $setTextIfChanged $script:SettingsHotkeyStatusValue $script:HotkeyStatusText
                 if ($script:SettingsHotkeyWarningLabel) {
                     $hasIssues = ($script:HotkeyStatusText -match "Failed|Issues")
-                    if ($hasIssues) {
-                        $script:SettingsHotkeyWarningLabel.Text = "One or more hotkeys failed to register. Update them and click Validate."
-                        $script:SettingsHotkeyWarningLabel.Visible = $true
-                    } else {
-                        $script:SettingsHotkeyWarningLabel.Visible = $false
-                    }
+                    & $setTextIfChanged $script:SettingsHotkeyWarningLabel "One or more hotkeys failed to register. Update them and click Validate."
+                    & $setVisibleIfChanged $script:SettingsHotkeyWarningLabel $hasIssues
                 }
             }
 
@@ -5281,36 +5365,36 @@ $clearLogButton = New-Object System.Windows.Forms.Button
                     try { $logBytes = (Get-Item -Path $logPath).Length } catch { $logBytes = 0 }
                 }
                 $maxBytes = [long]($script:SettingsLogMaxBox.Value * 1024)
-                $script:SettingsLogSizeValue.Text = "$(& $script:FormatSize $logBytes) / $(& $script:FormatSize $maxBytes)"
+                & $setTextIfChanged $script:SettingsLogSizeValue "$(& $script:FormatSize $logBytes) / $(& $script:FormatSize $maxBytes)"
             }
 
             $step = "DiagnosticsTab"
             if ($shouldUpdate -and $diagnosticsPage -and $selectedTab -eq $diagnosticsPage) {
                 if ($script:LastErrorMessage) {
                     $errorTime = if ($script:LastErrorTime) { Format-LocalTime $script:LastErrorTime } else { "Unknown" }
-                    $script:SettingsDiagErrorValue.Text = "$errorTime - $($script:LastErrorMessage)"
+                    & $setTextIfChanged $script:SettingsDiagErrorValue "$errorTime - $($script:LastErrorMessage)"
                 } else {
-                    $script:SettingsDiagErrorValue.Text = "None"
+                    & $setTextIfChanged $script:SettingsDiagErrorValue "None"
                 }
-                $script:SettingsDiagRestartValue.Text = Format-LocalTime $script:AppStartTime
-                $script:SettingsDiagSafeModeValue.Text = $(if ($script:safeModeActive) { "On" } else { "Off" })
-                $script:SettingsDebugModeStatus.Text = if ($script:DebugModeUntil) { "On (10 min)" } else { "Off" }
+                & $setTextIfChanged $script:SettingsDiagRestartValue (Format-LocalTime $script:AppStartTime)
+                & $setTextIfChanged $script:SettingsDiagSafeModeValue ($(if ($script:safeModeActive) { "On" } else { "Off" }))
+                & $setTextIfChanged $script:SettingsDebugModeStatus (if ($script:DebugModeUntil) { "On (10 min)" } else { "Off" })
                 if ($script:LastToggleResultTime) {
-                    $script:SettingsDiagLastToggleValue.Text = "$($script:LastToggleResult) - $(Format-LocalTime $script:LastToggleResultTime)"
+                    & $setTextIfChanged $script:SettingsDiagLastToggleValue "$($script:LastToggleResult) - $(Format-LocalTime $script:LastToggleResultTime)"
                 } else {
-                    $script:SettingsDiagLastToggleValue.Text = $script:LastToggleResult
+                    & $setTextIfChanged $script:SettingsDiagLastToggleValue $script:LastToggleResult
                 }
-                $script:SettingsDiagFailValue.Text = [string]$script:toggleFailCount
+                & $setTextIfChanged $script:SettingsDiagFailValue ([string]$script:toggleFailCount)
                 $diagBytes = 0
                 if (Test-Path $logPath) {
                     try { $diagBytes = (Get-Item -Path $logPath).Length } catch { $diagBytes = 0 }
                 }
-                $script:SettingsDiagLogSizeValue.Text = & $script:FormatSize $diagBytes
-                $script:SettingsDiagLogRotateValue.Text = [string]$script:LogRotationCount
+                & $setTextIfChanged $script:SettingsDiagLogSizeValue (& $script:FormatSize $diagBytes)
+                & $setTextIfChanged $script:SettingsDiagLogRotateValue ([string]$script:LogRotationCount)
                 if ($script:LastLogWriteTime) {
-                    $script:SettingsDiagLogWriteValue.Text = Format-LocalTime $script:LastLogWriteTime
+                    & $setTextIfChanged $script:SettingsDiagLogWriteValue (Format-LocalTime $script:LastLogWriteTime)
                 } else {
-                    $script:SettingsDiagLogWriteValue.Text = "N/A"
+                    & $setTextIfChanged $script:SettingsDiagLogWriteValue "N/A"
                 }
             }
 
@@ -5320,10 +5404,10 @@ $clearLogButton = New-Object System.Windows.Forms.Button
                 if ($remainingSeconds -le 0) {
                     $script:SettingsResetConfirmState.Pending = $false
                     $script:SettingsResetConfirmState.Deadline = $null
-                    $script:SettingsResetButton.Text = "Restore Defaults"
+                    & $setTextIfChanged $script:SettingsResetButton "Restore Defaults"
                 } else {
                     $script:SettingsResetConfirmState.Remaining = $remainingSeconds
-                    $script:SettingsResetButton.Text = "Confirm Reset ($($script:SettingsResetConfirmState.Remaining))"
+                    & $setTextIfChanged $script:SettingsResetButton "Confirm Reset ($($script:SettingsResetConfirmState.Remaining))"
                 }
             }
         } catch {
@@ -5397,6 +5481,11 @@ $clearLogButton = New-Object System.Windows.Forms.Button
             $script:SettingsStatusTimer.Dispose()
             $script:SettingsStatusTimer = $null
         }
+        if ($script:SettingsSearchTimer) {
+            $script:SettingsSearchTimer.Stop()
+            $script:SettingsSearchTimer.Dispose()
+            $script:SettingsSearchTimer = $null
+        }
         $script:SettingsForm = $null
     })
 
@@ -5407,6 +5496,9 @@ $clearLogButton = New-Object System.Windows.Forms.Button
         if ($sender -is [System.Windows.Forms.Form]) { $result = $sender.DialogResult }
         Write-Log "UI: Settings dialog closed. Result=$result Dirty=$script:SettingsDirty DurationSeconds=$durationSeconds" "DEBUG" $null "Settings-Dialog"
     })
+        if ($tabControl) { $tabControl.ResumeLayout($false) }
+        if ($mainPanel) { $mainPanel.ResumeLayout($false) }
+        if ($form) { $form.ResumeLayout($false); $form.PerformLayout() }
         Localize-ControlTree $form
         if ($script:ApplySettingsLocalizationOverrides) { & $script:ApplySettingsLocalizationOverrides }
         if ($script:UpdateAboutValues) { & $script:UpdateAboutValues }
