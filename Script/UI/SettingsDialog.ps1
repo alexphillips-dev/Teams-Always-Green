@@ -5448,13 +5448,22 @@ $clearLogButton = New-Object System.Windows.Forms.Button
                 }
                 $step = "StatusTab-Schedule"
                 $scheduleText = Format-ScheduleStatus
-                if ($script:SettingsSetText -is [scriptblock]) { & $script:SettingsSetText $script:SettingsScheduleStatusValue $scheduleText }
-                if ($script:SettingsSetText -is [scriptblock]) { & $script:SettingsSetText $script:SettingsSafeModeStatusValue (if ($script:safeModeActive) { "On (Fails=$($script:toggleFailCount))" } else { "Off" }) }
+                $scheduleStatusControl = & $getSettingsControl 'SettingsScheduleStatusValue'
+                if ($scheduleStatusControl -and ($script:SettingsSetText -is [scriptblock])) {
+                    & $script:SettingsSetText $scheduleStatusControl $scheduleText
+                }
+                $safeModeStatusControl = & $getSettingsControl 'SettingsSafeModeStatusValue'
+                if ($safeModeStatusControl -and ($script:SettingsSetText -is [scriptblock])) {
+                    & $script:SettingsSetText $safeModeStatusControl (if ($script:safeModeActive) { "On (Fails=$($script:toggleFailCount))" } else { "Off" })
+                }
                 $step = "StatusTab-Keyboard"
                 $caps = [System.Windows.Forms.Control]::IsKeyLocked([System.Windows.Forms.Keys]::CapsLock)
                 $num = [System.Windows.Forms.Control]::IsKeyLocked([System.Windows.Forms.Keys]::NumLock)
                 $scroll = [System.Windows.Forms.Control]::IsKeyLocked([System.Windows.Forms.Keys]::Scroll)
-                if ($script:SettingsSetText -is [scriptblock]) { & $script:SettingsSetText $script:SettingsKeyboardValue ("Caps:{0} Num:{1} Scroll:{2}" -f ($(if ($caps) { "On" } else { "Off" })), ($(if ($num) { "On" } else { "Off" })), ($(if ($scroll) { "On" } else { "Off" }))) }
+                $keyboardStatusControl = & $getSettingsControl 'SettingsKeyboardValue'
+                if ($keyboardStatusControl -and ($script:SettingsSetText -is [scriptblock])) {
+                    & $script:SettingsSetText $keyboardStatusControl ("Caps:{0} Num:{1} Scroll:{2}" -f ($(if ($caps) { "On" } else { "Off" })), ($(if ($num) { "On" } else { "Off" })), ($(if ($scroll) { "On" } else { "Off" })))
+                }
             }
 
             $step = "HotkeysTab"
