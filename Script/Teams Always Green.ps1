@@ -5725,7 +5725,14 @@ function Update-StatusText {
         if (Get-Command -Name Update-StatusBadges -ErrorAction SilentlyContinue) { Update-StatusBadges }
         Update-NotifyIconState
         Update-NotifyIconText $state
-        Write-StatusSnapshot $state $lastText $nextText $pauseUntilText $scheduleText
+        $settingsFormVar = Get-Variable -Name SettingsForm -Scope Script -ErrorAction SilentlyContinue
+        $settingsVisible = $false
+        if ($settingsFormVar -and $settingsFormVar.Value -and -not $settingsFormVar.Value.IsDisposed) {
+            $settingsVisible = [bool]$settingsFormVar.Value.Visible
+        }
+        if (-not $settingsVisible) {
+            Write-StatusSnapshot $state $lastText $nextText $pauseUntilText $scheduleText
+        }
     } finally {
         $script:Now = $null
         $script:StatusUpdateInProgress = $false
