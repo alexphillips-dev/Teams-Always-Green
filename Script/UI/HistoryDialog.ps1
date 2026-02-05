@@ -631,11 +631,29 @@
     $wrapMessagesBox.Checked = $wrapMessages
     $rowLimitBox.SelectedItem = [string]$maxRows
     & $setChipState $currentFilter
+    $script:HistoryLastLogWrite = $null
+    $script:HistoryLastLogSize = $null
 
     $loadHistory = {
+        param([bool]$force = $false)
         try {
             if (-not (Test-Path $logPath)) {
                 "" | Set-Content -Path $logPath -Encoding UTF8
+            }
+            if (-not $force) {
+                try {
+                    $info = Get-Item -Path $logPath -ErrorAction SilentlyContinue
+                    if ($info) {
+                        if ($script:HistoryLastLogWrite -and $script:HistoryLastLogSize -ne $null) {
+                            if ($info.LastWriteTime -eq $script:HistoryLastLogWrite -and $info.Length -eq $script:HistoryLastLogSize) {
+                                return
+                            }
+                        }
+                        $script:HistoryLastLogWrite = $info.LastWriteTime
+                        $script:HistoryLastLogSize = $info.Length
+                    }
+                } catch {
+                }
             }
             $lines = Get-Content -Path $logPath -Tail 2000
             $take = if ($maxRows -gt 0) { $maxRows } else { 200 }
@@ -757,7 +775,9 @@
     $refreshTimer.Interval = 2000
     $refreshTimer.Add_Tick({
         Invoke-SafeTimerAction "HistoryRefreshTimer" {
-            if ($autoRefresh.Checked) { & $loadHistory }
+            if (-not $autoRefresh.Checked) { return }
+            if (-not $form.Visible -or $form.WindowState -eq [System.Windows.Forms.FormWindowState]::Minimized) { return }
+            & $loadHistory $false
         }
     })
     $form.Add_FormClosing({
@@ -798,7 +818,7 @@
     })
     $refreshTimer.Start()
 
-    & $loadHistory
+    & $loadHistory $true
     if ($sourceFilterValue) {
         if ($sourceFilterValue -eq "All") {
             $sourceFilter.SelectedItem = $allLabel
@@ -819,4 +839,3 @@
 
     [void]$form.ShowDialog()
 }
-

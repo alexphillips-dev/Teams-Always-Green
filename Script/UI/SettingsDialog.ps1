@@ -5419,26 +5419,15 @@ $clearLogButton = New-Object System.Windows.Forms.Button
                 }
                 $step = "StatusTab-FunStats"
                 try {
-                    $funStats = Ensure-FunStats $settings
-                    $funDailyControl = & $getSettingsControl 'SettingsFunDailyValue'
-                    if ($funDailyControl) {
-                        if ($script:SettingsSetText -is [scriptblock]) { & $script:SettingsSetText $funDailyControl ([string](Get-DailyToggleCount $funStats (Get-Date))) }
+                    $cacheFresh = $false
+                    if ($script:FunStatsCache -and $script:FunStatsCache.Updated) {
+                        $cacheFresh = ((Get-Date) - $script:FunStatsCache.Updated).TotalSeconds -lt 10
                     }
-                    $streaks = Get-ToggleStreaks $funStats
-                    $funStreakCurrentControl = & $getSettingsControl 'SettingsFunStreakCurrentValue'
-                    if ($funStreakCurrentControl) {
-                        if ($script:SettingsSetText -is [scriptblock]) { & $script:SettingsSetText $funStreakCurrentControl "$($streaks.Current) days" }
-                    }
-                    $funStreakBestControl = & $getSettingsControl 'SettingsFunStreakBestValue'
-                    if ($funStreakBestControl) {
-                        if ($script:SettingsSetText -is [scriptblock]) { & $script:SettingsSetText $funStreakBestControl "$($streaks.Best) days" }
-                    }
-                    $funMostActiveControl = & $getSettingsControl 'SettingsFunMostActiveHourValue'
-                    if ($funMostActiveControl) {
-                        if ($script:SettingsSetText -is [scriptblock]) { & $script:SettingsSetText $funMostActiveControl (Get-MostActiveHourLabel $funStats) }
-                    }
-                    $funLongestPauseControl = & $getSettingsControl 'SettingsFunLongestPauseValue'
-                    if ($funLongestPauseControl) {
+                    if (-not $cacheFresh) {
+                        $funStats = Ensure-FunStats $settings
+                        $dailyCount = [string](Get-DailyToggleCount $funStats (Get-Date))
+                        $streaks = Get-ToggleStreaks $funStats
+                        $mostActive = Get-MostActiveHourLabel $funStats
                         $longestPause = 0
                         try {
                             if ($funStats -is [System.Collections.IDictionary] -and $funStats.ContainsKey("LongestPauseMinutes")) {
@@ -5449,10 +5438,6 @@ $clearLogButton = New-Object System.Windows.Forms.Button
                         } catch {
                             $longestPause = 0
                         }
-                        if ($script:SettingsSetText -is [scriptblock]) { & $script:SettingsSetText $funLongestPauseControl (if ($longestPause -gt 0) { "$longestPause min" } else { "N/A" }) }
-                    }
-                    $funTotalRunControl = & $getSettingsControl 'SettingsFunTotalRunValue'
-                    if ($funTotalRunControl) {
                         $totalRun = 0.0
                         try {
                             if ($funStats -is [System.Collections.IDictionary] -and $funStats.ContainsKey("TotalRunMinutes")) {
@@ -5463,6 +5448,43 @@ $clearLogButton = New-Object System.Windows.Forms.Button
                         } catch {
                             $totalRun = 0.0
                         }
+                        $script:FunStatsCache = @{
+                            Updated = Get-Date
+                            Daily = $dailyCount
+                            Streaks = $streaks
+                            MostActive = $mostActive
+                            LongestPause = $longestPause
+                            TotalRun = $totalRun
+                        }
+                    } else {
+                        $dailyCount = [string]$script:FunStatsCache.Daily
+                        $streaks = $script:FunStatsCache.Streaks
+                        $mostActive = $script:FunStatsCache.MostActive
+                        $longestPause = [int]$script:FunStatsCache.LongestPause
+                        $totalRun = [double]$script:FunStatsCache.TotalRun
+                    }
+                    $funDailyControl = & $getSettingsControl 'SettingsFunDailyValue'
+                    if ($funDailyControl) {
+                        if ($script:SettingsSetText -is [scriptblock]) { & $script:SettingsSetText $funDailyControl $dailyCount }
+                    }
+                    $funStreakCurrentControl = & $getSettingsControl 'SettingsFunStreakCurrentValue'
+                    if ($funStreakCurrentControl -and $streaks) {
+                        if ($script:SettingsSetText -is [scriptblock]) { & $script:SettingsSetText $funStreakCurrentControl "$($streaks.Current) days" }
+                    }
+                    $funStreakBestControl = & $getSettingsControl 'SettingsFunStreakBestValue'
+                    if ($funStreakBestControl -and $streaks) {
+                        if ($script:SettingsSetText -is [scriptblock]) { & $script:SettingsSetText $funStreakBestControl "$($streaks.Best) days" }
+                    }
+                    $funMostActiveControl = & $getSettingsControl 'SettingsFunMostActiveHourValue'
+                    if ($funMostActiveControl) {
+                        if ($script:SettingsSetText -is [scriptblock]) { & $script:SettingsSetText $funMostActiveControl $mostActive }
+                    }
+                    $funLongestPauseControl = & $getSettingsControl 'SettingsFunLongestPauseValue'
+                    if ($funLongestPauseControl) {
+                        if ($script:SettingsSetText -is [scriptblock]) { & $script:SettingsSetText $funLongestPauseControl (if ($longestPause -gt 0) { "$longestPause min" } else { "N/A" }) }
+                    }
+                    $funTotalRunControl = & $getSettingsControl 'SettingsFunTotalRunValue'
+                    if ($funTotalRunControl) {
                         if ($script:SettingsSetText -is [scriptblock]) { & $script:SettingsSetText $funTotalRunControl (Format-TotalRunTime $totalRun) }
                     }
                 } catch {
@@ -5602,7 +5624,7 @@ $clearLogButton = New-Object System.Windows.Forms.Button
 
     $script:SettingsFirstPaintDone = $false
     $script:SettingsStatusTimer = New-Object System.Windows.Forms.Timer
-    $script:SettingsStatusTimer.Interval = 1000
+    $script:SettingsStatusTimer.Interval = 2000
     $script:SettingsStatusTimer.Add_Tick({
         Invoke-SafeTimerAction "SettingsStatusTimer" {
             if ($script:isShuttingDown -or $script:CleanupDone) { return }
