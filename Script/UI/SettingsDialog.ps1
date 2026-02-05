@@ -5536,8 +5536,10 @@ $clearLogButton = New-Object System.Windows.Forms.Button
                 }
                 $now = Get-Date
                 $shouldRefresh = $true
-                if ($script:SettingsLoggingStatusLastUpdate -and $script:SettingsLoggingStatusLastBytes -eq $logBytes) {
-                    if (($now - $script:SettingsLoggingStatusLastUpdate).TotalSeconds -lt 2) { $shouldRefresh = $false }
+                $lastUpdateVar = Get-Variable -Name SettingsLoggingStatusLastUpdate -Scope Script -ErrorAction SilentlyContinue
+                $lastBytesVar = Get-Variable -Name SettingsLoggingStatusLastBytes -Scope Script -ErrorAction SilentlyContinue
+                if ($lastUpdateVar -and $lastUpdateVar.Value -and $lastBytesVar -and $lastBytesVar.Value -eq $logBytes) {
+                    if (($now - $lastUpdateVar.Value).TotalSeconds -lt 2) { $shouldRefresh = $false }
                 }
                 if ($shouldRefresh) {
                     $maxBytes = [long]($script:SettingsLogMaxBox.Value * 1024)
