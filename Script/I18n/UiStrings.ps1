@@ -56,7 +56,7 @@ $script:UiStrings = @{
         "Pause/Resume" = "Pause/Resume"
         "Start" = "Start"
         "Stop" = "Stop"
-        "Pause" = "Suspendre"
+        "Pause" = "Pause"
         "Resume" = "Resume"
         "Interval" = "Interval"
         "Pause until..." = "Pause until..."
@@ -1068,6 +1068,8 @@ foreach ($langKey in $script:UiStrings.Keys) {
 }
 
 $script:UiLanguage = "en"
+$script:UiStringCache = @{}
+$script:UiStringCacheLang = $null
 
 function Resolve-UiLanguage([string]$value) {
     $resolved = $value
@@ -1081,14 +1083,26 @@ function Resolve-UiLanguage([string]$value) {
 function L([string]$key, [string]$fallback = $null) {
     if ([string]::IsNullOrWhiteSpace($key)) { return "" }
     $lang = if ($script:UiLanguage) { $script:UiLanguage } else { "en" }
+    if ($script:UiStringCacheLang -ne $lang) {
+        $script:UiStringCache = @{}
+        $script:UiStringCacheLang = $lang
+    }
+    $cacheKey = "$lang|$key"
+    if ($script:UiStringCache.ContainsKey($cacheKey)) {
+        return $script:UiStringCache[$cacheKey]
+    }
+    $result = $null
     if ($script:UiStrings.ContainsKey($lang) -and $script:UiStrings[$lang].ContainsKey($key)) {
-        return $script:UiStrings[$lang][$key]
+        $result = $script:UiStrings[$lang][$key]
+    } elseif ($script:UiStrings.ContainsKey("en") -and $script:UiStrings["en"].ContainsKey($key)) {
+        $result = $script:UiStrings["en"][$key]
+    } elseif ($fallback -ne $null) {
+        $result = $fallback
+    } else {
+        $result = $key
     }
-    if ($script:UiStrings.ContainsKey("en") -and $script:UiStrings["en"].ContainsKey($key)) {
-        return $script:UiStrings["en"][$key]
-    }
-    if ($fallback -ne $null) { return $fallback }
-    return $key
+    $script:UiStringCache[$cacheKey] = $result
+    return $result
 }
 
 function Localize-StatusValue([string]$value) {
@@ -1158,5 +1172,3 @@ function Localize-MenuItems($items) {
         }
     }
 }
-
-
