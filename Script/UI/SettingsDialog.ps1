@@ -5792,7 +5792,8 @@ function Show-SettingsAlreadyOpenNotice {
     $topForm.Dispose()
 }
 
-$script:openSettingsItem = $script:openSettingsItem
+$openSettingsVar = Get-Variable -Name openSettingsItem -Scope Script -ErrorAction SilentlyContinue
+$script:openSettingsItem = if ($openSettingsVar) { $openSettingsVar.Value } else { $null }
 if (-not $script:openSettingsItem) {
     $script:openSettingsItem = New-Object System.Windows.Forms.ToolStripMenuItem("Settings...")
     Set-MenuTooltip $script:openSettingsItem "Open the settings window."
@@ -5810,10 +5811,12 @@ if (-not $script:openSettingsItem) {
             Ensure-SettingsDialogVisible
         }
     })
+    Set-Variable -Name openSettingsItem -Scope Script -Value $script:openSettingsItem -Force
 }
 $openSettingsItem = $script:openSettingsItem
 
-$script:openLogsFolderItem = $script:openLogsFolderItem
+$openLogsVar = Get-Variable -Name openLogsFolderItem -Scope Script -ErrorAction SilentlyContinue
+$script:openLogsFolderItem = if ($openLogsVar) { $openLogsVar.Value } else { $null }
 if (-not $script:openLogsFolderItem) {
     $script:openLogsFolderItem = New-Object System.Windows.Forms.ToolStripMenuItem("Open Logs Folder")
     Set-MenuTooltip $script:openLogsFolderItem "Open the Logs folder."
@@ -5830,10 +5833,12 @@ if (-not $script:openLogsFolderItem) {
             }
         }
     })
+    Set-Variable -Name openLogsFolderItem -Scope Script -Value $script:openLogsFolderItem -Force
 }
 $openLogsFolderItem = $script:openLogsFolderItem
 
-$script:openSettingsFolderItem = $script:openSettingsFolderItem
+$openSettingsFolderVar = Get-Variable -Name openSettingsFolderItem -Scope Script -ErrorAction SilentlyContinue
+$script:openSettingsFolderItem = if ($openSettingsFolderVar) { $openSettingsFolderVar.Value } else { $null }
 if (-not $script:openSettingsFolderItem) {
     $script:openSettingsFolderItem = New-Object System.Windows.Forms.ToolStripMenuItem("Open Settings Folder")
     $script:openSettingsFolderItem.Add_Click({
@@ -5847,10 +5852,12 @@ if (-not $script:openSettingsFolderItem) {
             Write-Log "Failed to open Settings folder." "ERROR" $_.Exception "Tray-Action"
         }
     })
+    Set-Variable -Name openSettingsFolderItem -Scope Script -Value $script:openSettingsFolderItem -Force
 }
 $openSettingsFolderItem = $script:openSettingsFolderItem
 
-$script:logsMenu = $script:logsMenu
+$logsMenuVar = Get-Variable -Name logsMenu -Scope Script -ErrorAction SilentlyContinue
+$script:logsMenu = if ($logsMenuVar) { $logsMenuVar.Value } else { $null }
 if (-not $script:logsMenu) {
     $script:logsMenu = New-Object System.Windows.Forms.ToolStripMenuItem("Logs")
     Set-MenuTooltip $script:logsMenu "Log tools and log level."
@@ -5877,6 +5884,7 @@ if (-not $script:logsMenu) {
     $script:logsMenu.DropDownItems.Add($logLevelMenu) | Out-Null
     $script:logsMenu.DropDownItems.Add($clearLogItem) | Out-Null
     if ($script:openLogsFolderItem) { $script:logsMenu.DropDownItems.Add($script:openLogsFolderItem) | Out-Null }
+    Set-Variable -Name logsMenu -Scope Script -Value $script:logsMenu -Force
 }
 $logsMenu = $script:logsMenu
 function Show-LogTailDialog {
