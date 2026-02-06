@@ -362,26 +362,28 @@ foreach ($level in $logLevelItems) {
     $logLevelMenu.DropDownItems.Add($levelItem) | Out-Null
 }
 
+$openSettingsItem = $null
 $openSettingsVar = Get-Variable -Name openSettingsItem -Scope Script -ErrorAction SilentlyContinue
-if ($openSettingsVar) { $script:openSettingsItem = $openSettingsVar.Value }
-if (-not $script:openSettingsItem) {
-    $script:openSettingsItem = New-Object System.Windows.Forms.ToolStripMenuItem("Settings...")
-    Set-MenuTooltip $script:openSettingsItem (L "Open the settings window.")
-    $script:openSettingsItem.Add_Click({
+if ($openSettingsVar) { $openSettingsItem = $openSettingsVar.Value }
+if (-not $openSettingsItem) {
+    $openSettingsItem = New-Object System.Windows.Forms.ToolStripMenuItem("Settings...")
+    Set-MenuTooltip $openSettingsItem (L "Open the settings window.")
+    $openSettingsItem.Add_Click({
         Invoke-TrayAction "Settings" {
             Write-Log "Tray action: Open Settings" "DEBUG" $null "Tray-Action"
             Show-SettingsDialog
         }
     })
+    Set-Variable -Name openSettingsItem -Scope Script -Value $openSettingsItem -Force
 }
-$openSettingsItem = $script:openSettingsItem
 
+$openLogsFolderItem = $null
 $openLogsVar = Get-Variable -Name openLogsFolderItem -Scope Script -ErrorAction SilentlyContinue
-if ($openLogsVar) { $script:openLogsFolderItem = $openLogsVar.Value }
-if (-not $script:openLogsFolderItem) {
-    $script:openLogsFolderItem = New-Object System.Windows.Forms.ToolStripMenuItem("Open Logs Folder")
-    Set-MenuTooltip $script:openLogsFolderItem (L "Open the Logs folder.")
-    $script:openLogsFolderItem.Add_Click({
+if ($openLogsVar) { $openLogsFolderItem = $openLogsVar.Value }
+if (-not $openLogsFolderItem) {
+    $openLogsFolderItem = New-Object System.Windows.Forms.ToolStripMenuItem("Open Logs Folder")
+    Set-MenuTooltip $openLogsFolderItem (L "Open the Logs folder.")
+    $openLogsFolderItem.Add_Click({
         Invoke-TrayAction "OpenLogsFolder" {
             try {
                 if (-not (Test-Path $script:LogDirectory)) {
@@ -394,14 +396,15 @@ if (-not $script:openLogsFolderItem) {
             }
         }
     })
+    Set-Variable -Name openLogsFolderItem -Scope Script -Value $openLogsFolderItem -Force
 }
-$openLogsFolderItem = $script:openLogsFolderItem
 
+$openSettingsFolderItem = $null
 $openSettingsFolderVar = Get-Variable -Name openSettingsFolderItem -Scope Script -ErrorAction SilentlyContinue
-if ($openSettingsFolderVar) { $script:openSettingsFolderItem = $openSettingsFolderVar.Value }
-if (-not $script:openSettingsFolderItem) {
-    $script:openSettingsFolderItem = New-Object System.Windows.Forms.ToolStripMenuItem("Open Settings Folder")
-    $script:openSettingsFolderItem.Add_Click({
+if ($openSettingsFolderVar) { $openSettingsFolderItem = $openSettingsFolderVar.Value }
+if (-not $openSettingsFolderItem) {
+    $openSettingsFolderItem = New-Object System.Windows.Forms.ToolStripMenuItem("Open Settings Folder")
+    $openSettingsFolderItem.Add_Click({
         try {
             if (-not (Test-Path $script:SettingsDirectory)) {
                 Ensure-Directory $script:SettingsDirectory "Settings" | Out-Null
@@ -412,22 +415,24 @@ if (-not $script:openSettingsFolderItem) {
             Write-Log "Failed to open Settings folder." "ERROR" $_.Exception "Tray-Action"
         }
     })
+    Set-Variable -Name openSettingsFolderItem -Scope Script -Value $openSettingsFolderItem -Force
 }
-$openSettingsFolderItem = $script:openSettingsFolderItem
 
+$logsMenu = $null
 $logsMenuVar = Get-Variable -Name logsMenu -Scope Script -ErrorAction SilentlyContinue
-if ($logsMenuVar) { $script:logsMenu = $logsMenuVar.Value }
-if (-not $script:logsMenu) {
-    $script:logsMenu = New-Object System.Windows.Forms.ToolStripMenuItem("Logs")
-    Set-MenuTooltip $script:logsMenu (L "Log tools and log level.")
+if ($logsMenuVar) { $logsMenu = $logsMenuVar.Value }
+if (-not $logsMenu) {
+    $logsMenu = New-Object System.Windows.Forms.ToolStripMenuItem("Logs")
+    Set-MenuTooltip $logsMenu (L "Log tools and log level.")
+    Set-Variable -Name logsMenu -Scope Script -Value $logsMenu -Force
 }
-$logsMenu = $script:logsMenu
 
+$clearLogItem = $null
 $clearLogVar = Get-Variable -Name clearLogItem -Scope Script -ErrorAction SilentlyContinue
-if ($clearLogVar) { $script:clearLogItem = $clearLogVar.Value }
-if (-not $script:clearLogItem) {
-    $script:clearLogItem = New-Object System.Windows.Forms.ToolStripMenuItem("Clear Log")
-    $script:clearLogItem.Add_Click({
+if ($clearLogVar) { $clearLogItem = $clearLogVar.Value }
+if (-not $clearLogItem) {
+    $clearLogItem = New-Object System.Windows.Forms.ToolStripMenuItem("Clear Log")
+    $clearLogItem.Add_Click({
         Invoke-TrayAction "ClearLog" {
             $result = [System.Windows.Forms.MessageBox]::Show(
                 "Clear the log file now?",
@@ -446,8 +451,8 @@ if (-not $script:clearLogItem) {
             }
         }
     })
+    Set-Variable -Name clearLogItem -Scope Script -Value $clearLogItem -Force
 }
-$clearLogItem = $script:clearLogItem
 
 $viewLogItem = New-Object System.Windows.Forms.ToolStripMenuItem("View Log")
 $viewLogItem.Add_Click({
@@ -593,4 +598,3 @@ $runOnceNowItem.Add_Click({
 })
 Update-TrayLabels
 Localize-MenuItems $contextMenu.Items
-
