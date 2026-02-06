@@ -2176,7 +2176,7 @@ function Write-DiagnosticsReport([string]$targetPath) {
     $lines += "Recent Actions:"
     $lines += (Get-RecentActionsLines)
     $lines += ""
-    $lines += "Date/Time Format: " + (if ($settings.UseSystemDateTimeFormat) { "System ($($settings.SystemDateTimeFormatMode))" } else { [string]$settings.DateTimeFormat })
+    $lines += "Date/Time Format: " + $(if ($settings.UseSystemDateTimeFormat) { "System ($($settings.SystemDateTimeFormatMode))" } else { [string]$settings.DateTimeFormat })
     if ($settings.ScrubDiagnostics) {
         $lines = Scrub-LogLines $lines
     }
@@ -3246,7 +3246,7 @@ function Migrate-Settings($settings) {
     if ($null -ne $schemaValue) { $current = [int]$schemaValue }
     if ($current -lt 2) {
         if (-not ($settings.PSObject.Properties.Name -contains "TooltipStyle")) {
-            Set-SettingsPropertyValue $settings "TooltipStyle" (if ([bool]$settings.MinimalTrayTooltip) { "Minimal" } else { "Standard" })
+            Set-SettingsPropertyValue $settings "TooltipStyle" $(if ([bool]$settings.MinimalTrayTooltip) { "Minimal" } else { "Standard" })
         }
         if (-not ($settings.PSObject.Properties.Name -contains "FontSize")) { Set-SettingsPropertyValue $settings "FontSize" 12 }
         if (-not ($settings.PSObject.Properties.Name -contains "SettingsFontSize")) { Set-SettingsPropertyValue $settings "SettingsFontSize" 12 }
@@ -4765,7 +4765,7 @@ function Save-Stats {
     if ($null -eq (Get-SettingsPropertyValue $settings "ToggleCount")) {
         Set-SettingsPropertyValue $settings "ToggleCount" 0
     }
-    Set-SettingsPropertyValue $settings "LastToggleTime" (if ($script:lastToggleTime) { $script:lastToggleTime.ToString("o") } else { $null })
+    Set-SettingsPropertyValue $settings "LastToggleTime" $(if ($script:lastToggleTime) { $script:lastToggleTime.ToString("o") } else { $null })
     Ensure-FunStats $settings | Out-Null
     Sync-StateFromSettings $settings
     Apply-StateToSettings $settings $script:AppState
