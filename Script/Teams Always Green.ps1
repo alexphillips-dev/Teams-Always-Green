@@ -5906,24 +5906,36 @@ function Show-FirstRunToast {
 function Do-Toggle([string]$source) {
     if ($script:isToggling) { return }
     $script:isToggling = $true
+    $step = "toggle"
     try {
         Invoke-ScrollLockToggleInternal
+        $step = "stats:ToggleCount"
         $script:toggleFailCount = 0
         $currentToggleCount = Get-SettingsPropertyValue $settings "ToggleCount"
         if ($null -eq $currentToggleCount) { $currentToggleCount = 0 }
         Set-SettingsPropertyValue $settings "ToggleCount" ([int]$currentToggleCount + 1)
+        $step = "stats:LastToggleTime"
         $script:tickCount++
         $script:lastToggleTime = Get-Date
         $script:LastToggleResult = "Success"
         $script:LastToggleResultTime = $script:lastToggleTime
         $script:LastToggleError = $null
+        $step = "stats:FunStats"
         Update-FunStatsOnToggle $script:lastToggleTime
+        $step = "stats:NextToggle"
         if ($script:isRunning) { Update-NextToggleTime }
+        $step = "ui:StatusUpdate"
         Request-StatusUpdate
+        $step = "state:SaveStats"
         Save-Stats
         Write-Log "Toggle succeeded (source=$source). ToggleCount=$($script:tickCount)" "INFO" $null "Do-Toggle"
     } catch {
-        Write-Log "Toggle failed (source=$source)." "ERROR" $_.Exception "Do-Toggle"
+        Write-Log ("Toggle failed (source={0}) at step={1}." -f $source, $step) "ERROR" $_.Exception "Do-Toggle"
+        try {
+            if ($_.InvocationInfo -and $_.InvocationInfo.PositionMessage) {
+                Write-Log ("Toggle failure location: {0}" -f $_.InvocationInfo.PositionMessage.Trim()) "ERROR" $null "Do-Toggle"
+            }
+        } catch { }
         $script:toggleFailCount++
         $script:LastToggleResult = "Failed"
         $script:LastToggleResultTime = Get-Date
