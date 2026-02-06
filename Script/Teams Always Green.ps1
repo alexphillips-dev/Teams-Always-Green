@@ -6170,8 +6170,13 @@ function Import-ScriptFunctionsToScriptScope([string]$path, [string]$tag) {
         try {
             Set-Item -Path ("Function:\script:{0}" -f $func.Name) -Value $func.ScriptBlock -Force
         } catch {
-            Write-Log ("{0}: Failed to register function {1}." -f $tag, $func.Name) "ERROR" $_.Exception $tag
+            Write-Log ("{0}: Failed to register function {1} in script scope." -f $tag, $func.Name) "ERROR" $_.Exception $tag
             return $false
+        }
+        try {
+            Set-Item -Path ("Function:\global:{0}" -f $func.Name) -Value $func.ScriptBlock -Force
+        } catch {
+            Write-Log ("{0}: Failed to register function {1} in global scope." -f $tag, $func.Name) "WARN" $_.Exception $tag
         }
     }
     return $true
@@ -6209,7 +6214,10 @@ function Ensure-HistoryUiLoaded {
 
 function Show-SettingsDialog {
     if (-not (Ensure-SettingsUiLoaded)) { return }
-    $cmd = Get-Command Show-SettingsDialog -CommandType Function -ErrorAction SilentlyContinue
+    $cmd = Get-Command global:Show-SettingsDialog -CommandType Function -ErrorAction SilentlyContinue
+    if (-not $cmd) {
+        $cmd = Get-Command Show-SettingsDialog -CommandType Function -ErrorAction SilentlyContinue
+    }
     if ($cmd -and $cmd.ScriptBlock -ne $MyInvocation.MyCommand.ScriptBlock) {
         & $cmd.ScriptBlock
         return
@@ -6219,7 +6227,10 @@ function Show-SettingsDialog {
 
 function Show-LogTailDialog {
     if (-not (Ensure-SettingsUiLoaded)) { return }
-    $cmd = Get-Command Show-LogTailDialog -CommandType Function -ErrorAction SilentlyContinue
+    $cmd = Get-Command global:Show-LogTailDialog -CommandType Function -ErrorAction SilentlyContinue
+    if (-not $cmd) {
+        $cmd = Get-Command Show-LogTailDialog -CommandType Function -ErrorAction SilentlyContinue
+    }
     if ($cmd -and $cmd.ScriptBlock -ne $MyInvocation.MyCommand.ScriptBlock) {
         & $cmd.ScriptBlock
         return
@@ -6229,7 +6240,10 @@ function Show-LogTailDialog {
 
 function Show-HistoryDialog {
     if (-not (Ensure-HistoryUiLoaded)) { return }
-    $cmd = Get-Command Show-HistoryDialog -CommandType Function -ErrorAction SilentlyContinue
+    $cmd = Get-Command global:Show-HistoryDialog -CommandType Function -ErrorAction SilentlyContinue
+    if (-not $cmd) {
+        $cmd = Get-Command Show-HistoryDialog -CommandType Function -ErrorAction SilentlyContinue
+    }
     if ($cmd -and $cmd.ScriptBlock -ne $MyInvocation.MyCommand.ScriptBlock) {
         & $cmd.ScriptBlock
         return
