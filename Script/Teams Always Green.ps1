@@ -6161,11 +6161,12 @@ function Import-ScriptFunctionsToScriptScope([string]$path, [string]$tag) {
         Write-Log ("{0}: UI module failed to load." -f $tag) "ERROR" $_.Exception $tag
         return $false
     }
-    if (-not $funcs -or $funcs.Count -eq 0) {
+    $funcList = @($funcs)
+    if (-not $funcList -or $funcList.Count -eq 0) {
         Write-Log ("{0}: No functions imported from UI module." -f $tag) "ERROR" $null $tag
         return $false
     }
-    foreach ($func in $funcs) {
+    foreach ($func in $funcList) {
         try {
             Set-Item -Path ("Function:\script:{0}" -f $func.Name) -Value $func.ScriptBlock -Force
         } catch {
