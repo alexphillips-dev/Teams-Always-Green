@@ -1246,6 +1246,26 @@ $script:UiStrings = @{
     }
 }
 
+function Normalize-UiStrings {
+    if (-not ($script:UiStrings -is [hashtable])) { return }
+    $base = $script:UiStrings["en"]
+    if (-not ($base -is [hashtable])) { return }
+    foreach ($langKey in $script:UiStrings.Keys) {
+        if ($langKey -eq "en") { continue }
+        $table = $script:UiStrings[$langKey]
+        if (-not ($table -is [hashtable])) {
+            $table = @{}
+            $script:UiStrings[$langKey] = $table
+        }
+        foreach ($key in $base.Keys) {
+            if (-not $table.ContainsKey($key)) {
+                $table[$key] = $base[$key]
+            }
+        }
+    }
+}
+Normalize-UiStrings
+
 $script:UiReverse = @{}
 foreach ($langKey in $script:UiStrings.Keys) {
     $table = $script:UiStrings[$langKey]
