@@ -6140,6 +6140,7 @@ Write-BootStage "Tray menu loaded"
 
 $script:SettingsUiLoaded = $false
 $script:HistoryUiLoaded = $false
+$script:ImportedUiFunctions = @{}
 
 function Import-ScriptFunctionsToScriptScope([string]$path, [string]$tag) {
     if ([string]::IsNullOrWhiteSpace($path)) { return $false }
@@ -6178,6 +6179,7 @@ function Import-ScriptFunctionsToScriptScope([string]$path, [string]$tag) {
         } catch {
             Write-Log ("{0}: Failed to register function {1} in global scope." -f $tag, $func.Name) "WARN" $_.Exception $tag
         }
+        $script:ImportedUiFunctions[$func.Name] = $func.ScriptBlock
     }
     return $true
 }
@@ -6214,6 +6216,10 @@ function Ensure-HistoryUiLoaded {
 
 function Show-SettingsDialog {
     if (-not (Ensure-SettingsUiLoaded)) { return }
+    if ($script:ImportedUiFunctions.ContainsKey("Show-SettingsDialog")) {
+        & $script:ImportedUiFunctions["Show-SettingsDialog"]
+        return
+    }
     $cmd = Get-Command global:Show-SettingsDialog -CommandType Function -ErrorAction SilentlyContinue
     if (-not $cmd) {
         $cmd = Get-Command Show-SettingsDialog -CommandType Function -ErrorAction SilentlyContinue
@@ -6227,6 +6233,10 @@ function Show-SettingsDialog {
 
 function Show-LogTailDialog {
     if (-not (Ensure-SettingsUiLoaded)) { return }
+    if ($script:ImportedUiFunctions.ContainsKey("Show-LogTailDialog")) {
+        & $script:ImportedUiFunctions["Show-LogTailDialog"]
+        return
+    }
     $cmd = Get-Command global:Show-LogTailDialog -CommandType Function -ErrorAction SilentlyContinue
     if (-not $cmd) {
         $cmd = Get-Command Show-LogTailDialog -CommandType Function -ErrorAction SilentlyContinue
@@ -6240,6 +6250,10 @@ function Show-LogTailDialog {
 
 function Show-HistoryDialog {
     if (-not (Ensure-HistoryUiLoaded)) { return }
+    if ($script:ImportedUiFunctions.ContainsKey("Show-HistoryDialog")) {
+        & $script:ImportedUiFunctions["Show-HistoryDialog"]
+        return
+    }
     $cmd = Get-Command global:Show-HistoryDialog -CommandType Function -ErrorAction SilentlyContinue
     if (-not $cmd) {
         $cmd = Get-Command Show-HistoryDialog -CommandType Function -ErrorAction SilentlyContinue
