@@ -977,6 +977,10 @@ function Show-SettingsDialog {
             [pscustomobject]@{ Code = "es"; Label = (L "Español") }
             [pscustomobject]@{ Code = "fr"; Label = (L "Français") }
             [pscustomobject]@{ Code = "de"; Label = (L "Deutsch") }
+            [pscustomobject]@{ Code = "it"; Label = (L "Italiano") }
+            [pscustomobject]@{ Code = "pt"; Label = (L "Português") }
+            [pscustomobject]@{ Code = "nl"; Label = (L "Nederlands") }
+            [pscustomobject]@{ Code = "pl"; Label = (L "Polski") }
         )
         $script:languageBox.DisplayMember = "Label"
         $script:languageBox.ValueMember = "Code"
