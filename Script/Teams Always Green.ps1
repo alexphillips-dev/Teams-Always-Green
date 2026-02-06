@@ -53,6 +53,8 @@ $script:TimerGuards = @{}
 $script:TrayMenu = $null
 $script:TrayMenuToolTip = $null
 $script:TrayMenuOpening = $false
+$script:DeferredStartupTimer = $null
+$script:DeferredStartupDone = $false
 $script:UpdateCache = @{
     CheckedAt     = $null
     Release       = $null
@@ -669,6 +671,10 @@ if (-not (Get-Command -Name Write-LogEx -ErrorAction SilentlyContinue)) {
 
 $script:LogThrottle = @{}
 $script:BootTimer = $null
+$script:HotkeysReady = $false
+$script:HotkeysPending = $false
+$script:FolderCheckTimer = $null
+$script:PostShowStatusTimer = $null
 
 function Write-LogThrottled([string]$key, [string]$message, [string]$level = "INFO", [int]$minSeconds = 10) {
     if ([string]::IsNullOrWhiteSpace($key)) { return }
@@ -697,6 +703,41 @@ function Write-BootStage([string]$label) {
         Write-Log ("Boot: {0} +{1}ms" -f $label, $elapsed) "INFO" $null "Startup"
     } catch {
     }
+}
+
+function Invoke-DeferredStartupTasks {
+    if ($script:DeferredStartupDone) { return }
+    if ($script:isShuttingDown -or $script:CleanupDone) { return }
+    $script:DeferredStartupDone = $true
+    Write-BootStage "Deferred startup begin"
+    if (-not $script:FolderCheckTimer) {
+        $script:FolderCheckTimer = New-Object System.Windows.Forms.Timer
+        $script:FolderCheckTimer.Interval = 2000
+        $script:FolderCheckTimer.Add_Tick({
+            Invoke-SafeTimerAction "FolderCheckTimer" {
+                try { $script:FolderCheckTimer.Stop() } catch { }
+                try { $script:FolderCheckTimer.Dispose() } catch { }
+                $script:FolderCheckTimer = $null
+                try { Validate-RequiredFiles } catch { }
+                try { Log-FolderHealthOnce } catch { }
+                Write-BootStage "Folder check done"
+            }
+        })
+        $script:FolderCheckTimer.Start()
+    }
+    try { if (Get-Command -Name Start-LogSummaryTimer -ErrorAction SilentlyContinue) { Start-LogSummaryTimer } } catch { }
+    try { Purge-OldLogs } catch { }
+    try { Save-StartupSnapshot } catch { }
+    try { Invoke-UpdateCheck } catch { }
+    try {
+        if (Get-Command -Name Get-EnvironmentSummary -ErrorAction SilentlyContinue) {
+            $envSummary = Get-EnvironmentSummary
+            if (-not [string]::IsNullOrWhiteSpace($envSummary)) {
+                Write-Log $envSummary "DEBUG" $null "Init"
+            }
+        }
+    } catch { }
+    Write-BootStage "Deferred startup done"
 }
 
 function Invoke-SafeTimerAction([string]$name, [ScriptBlock]$action) {
@@ -4170,8 +4211,6 @@ if ($script:LogMaxBytes -le 0) { $script:LogMaxBytes = 1048576 }
 $script:LogMaxTotalBytes = [long]$settings.LogMaxTotalBytes
 if ($script:LogMaxTotalBytes -le 0) { $script:LogMaxTotalBytes = 20971520 }
 
-Invoke-UpdateCheck
-
 # --- Global error trap and shutdown handling (cleanup) ---
 trap {
     try {
@@ -4281,59 +4320,13 @@ if ($script:LogLevel -eq "DEBUG") {
     Write-Log "=======================================================================" "INFO" $null "Init"
 }
 Write-Log (Get-PathHealthSummary) "DEBUG" $null "Init"
-Validate-RequiredFiles
-Log-FolderHealthOnce
-if (Get-Command -Name Start-LogSummaryTimer -ErrorAction SilentlyContinue) { Start-LogSummaryTimer }
-Purge-OldLogs
-Write-BootStage "Logs ready"
 $buildStamp = if ($appBuildTimestamp) { Format-DateTime $appBuildTimestamp } else { "Unknown" }
 $scriptHashValue = if ($appScriptHash) { $appScriptHash } else { "Unknown" }
-$configHashValue = "Unknown"
-try {
-    if (Test-Path $settingsPath) {
-        $configHashValue = (Get-FileHash -Algorithm SHA256 -Path $settingsPath -ErrorAction Stop).Hash
-    }
-} catch {
-    $configHashValue = "Unknown"
-}
-if ($configHashValue -and $configHashValue.Length -gt 12) { $configHashValue = $configHashValue.Substring(0, 12) }
-$profileHashValue = "Unknown"
-try {
-    $profileSnapshot = Get-ProfileSnapshot $settings
-    $profileHashValue = Get-SettingsSnapshotHash (Get-SettingsSnapshot $profileSnapshot)
-} catch {
-    $profileHashValue = "Unknown"
-}
-if ($profileHashValue -and $profileHashValue.Length -gt 12) { $profileHashValue = $profileHashValue.Substring(0, 12) }
-$startupSource = Get-StartupSource
-$settingsAgeMinutes = "Unknown"
-try {
-    if (Test-Path $settingsPath) {
-        $age = (Get-Date) - (Get-Item -Path $settingsPath).LastWriteTime
-        $settingsAgeMinutes = [Math]::Round($age.TotalMinutes, 1)
-    }
-} catch {
-    $settingsAgeMinutes = "Unknown"
-}
-$themeModeValue = if ($settings.PSObject.Properties.Name -contains "ThemeMode") { [string]$settings.ThemeMode } else { "Unknown" }
-$themeResolved = $themeModeValue
-if ($themeModeValue -eq "Auto") {
-    if (Get-Command -Name Get-SystemThemeIsDark -ErrorAction SilentlyContinue) {
-        $themeResolved = if (Get-SystemThemeIsDark) { "Dark" } else { "Light" }
-    } else {
-        $themeResolved = "Unknown"
-    }
-}
-$hotkeyStatusValue = if ($script:HotkeyStatusText) { $script:HotkeyStatusText } else { "Unknown" }
 Write-Log ("Session start: SessionID={0} Profile={1} LogLevel={2} Version={3} SchemaVersion={4} Build={5}" -f `
     $script:RunId, $settings.ActiveProfile, $settings.LogLevel, $appVersion, $script:SettingsSchemaVersion, $buildStamp) "INFO" $null "Init"
 Write-Log ("Session path: LogPath={0}" -f $logPath) "INFO" $null "Init"
 Write-Log ("Session path: SettingsPath={0}" -f $settingsPath) "INFO" $null "Init"
 Write-Log ("Session path: StatePath={0}" -f $script:StatePath) "INFO" $null "Init"
-Save-StartupSnapshot
-Write-BootStage "Startup snapshot saved"
-Write-Log ("Metadata: BuildId={0} ScriptHash={1} SchemaVersion={2} ConfigHash={3} ProfileHash={4} StartupSource={5} SettingsAgeMin={6} ThemeMode={7} ThemeResolved={8} Hotkeys={9}" -f `
-    $appBuildId, $scriptHashValue, $script:SettingsSchemaVersion, $configHashValue, $profileHashValue, $startupSource, $settingsAgeMinutes, $themeModeValue, $themeResolved, $hotkeyStatusValue) "DEBUG" $null "Init"
 Write-Log "Startup. ScriptPath=$scriptPath" "DEBUG" $null "Init"
 Write-Log "Startup. SettingsPath=$settingsPath" "DEBUG" $null "Init"
 Write-Log "Startup. LogPath=$logPath" "DEBUG" $null "Init"
@@ -4341,9 +4334,6 @@ $psVersion = $PSVersionTable.PSVersion
 $osVersion = [Environment]::OSVersion.VersionString
 $pidValue = $PID
 Write-Log "Environment. PID=$pidValue PSVersion=$psVersion OS=$osVersion" "DEBUG" $null "Init"
-Write-Log (Get-EnvironmentSummary) "DEBUG" $null "Init"
-Write-Log ("Settings snapshot. IntervalSeconds={0} QuietMode={1} MinimalTooltip={2} DisableBalloonTips={3} StartWithWindows={4} RememberChoice={5} StartOnLaunch={6} RunOnceOnLaunch={7} PauseUntil={8} PauseDurations={9} ScheduleEnabled={10} ScheduleStart={11} ScheduleEnd={12} ScheduleWeekdays={13} ScheduleSuspendUntil={14} SafeModeEnabled={15} SafeModeFailureThreshold={16} HotkeyToggle={17} HotkeyStartStop={18} HotkeyPauseResume={19} ToggleCount={20} LogLevel={21} LogMaxBytes={22} LogMaxTotalBytes={23} LogIncludeStackTrace={24} LogToEventLog={25} LogCategories={26}" -f `
-    $settings.IntervalSeconds, $settings.QuietMode, $settings.MinimalTrayTooltip, $settings.DisableBalloonTips, $settings.StartWithWindows, $settings.RememberChoice, $settings.StartOnLaunch, $settings.RunOnceOnLaunch, $settings.PauseUntil, $settings.PauseDurationsMinutes, $settings.ScheduleEnabled, $settings.ScheduleStart, $settings.ScheduleEnd, $settings.ScheduleWeekdays, $settings.ScheduleSuspendUntil, $settings.SafeModeEnabled, $settings.SafeModeFailureThreshold, $settings.HotkeyToggle, $settings.HotkeyStartStop, $settings.HotkeyPauseResume, $settings.ToggleCount, $settings.LogLevel, $settings.LogMaxBytes, $settings.LogMaxTotalBytes, $settings.LogIncludeStackTrace, $settings.LogToEventLog, ((Get-ObjectKeys $settings.LogCategories | Sort-Object | ForEach-Object { "$_=$(Get-ObjectValue $settings.LogCategories $_)" }) -join ",")) "DEBUG" $null "Init"
 
 # --- Startup shortcut management (create/remove) ---
 function Get-StartupShortcutPath {
@@ -5884,7 +5874,11 @@ function Apply-SettingsRuntime {
         $script:toggleFailCount = 0
     }
     Update-LogCategorySettings
-    Register-Hotkeys
+    if ($script:HotkeysReady) {
+        Register-Hotkeys
+    } else {
+        $script:HotkeysPending = $true
+    }
     Rebuild-PauseMenu
     Update-TrayLabels
     Update-NextToggleTime
@@ -6128,11 +6122,66 @@ function Soft-Restart {
 
 Sync-SettingsReference $settings
 
-# Load tray menu + settings/history dialogs after core functions are defined
+# Load tray menu after core functions are defined
 . "$PSScriptRoot\Tray\Menu.ps1"
-. "$PSScriptRoot\UI\SettingsDialog.ps1"
-. "$PSScriptRoot\UI\HistoryDialog.ps1"
-Write-BootStage "UI modules loaded"
+Write-BootStage "Tray menu loaded"
+
+$script:SettingsUiLoaded = $false
+$script:HistoryUiLoaded = $false
+
+function Ensure-SettingsUiLoaded {
+    if ($script:SettingsUiLoaded) { return $true }
+    try {
+        . "$PSScriptRoot\UI\SettingsDialog.ps1"
+        $script:SettingsUiLoaded = $true
+        return $true
+    } catch {
+        Write-Log "Failed to load Settings UI module." "ERROR" $_.Exception "Settings-UI"
+        return $false
+    }
+}
+
+function Ensure-HistoryUiLoaded {
+    if ($script:HistoryUiLoaded) { return $true }
+    try {
+        . "$PSScriptRoot\UI\HistoryDialog.ps1"
+        $script:HistoryUiLoaded = $true
+        return $true
+    } catch {
+        Write-Log "Failed to load History UI module." "ERROR" $_.Exception "History-UI"
+        return $false
+    }
+}
+
+function Show-SettingsDialog {
+    if (-not (Ensure-SettingsUiLoaded)) { return }
+    $cmd = Get-Command Show-SettingsDialog -CommandType Function -ErrorAction SilentlyContinue
+    if ($cmd -and $cmd.ScriptBlock -ne $MyInvocation.MyCommand.ScriptBlock) {
+        & $cmd.ScriptBlock
+        return
+    }
+    Write-Log "Show-SettingsDialog missing after load." "ERROR" $null "Settings-UI"
+}
+
+function Show-LogTailDialog {
+    if (-not (Ensure-SettingsUiLoaded)) { return }
+    $cmd = Get-Command Show-LogTailDialog -CommandType Function -ErrorAction SilentlyContinue
+    if ($cmd -and $cmd.ScriptBlock -ne $MyInvocation.MyCommand.ScriptBlock) {
+        & $cmd.ScriptBlock
+        return
+    }
+    Write-Log "Show-LogTailDialog missing after load." "ERROR" $null "Settings-UI"
+}
+
+function Show-HistoryDialog {
+    if (-not (Ensure-HistoryUiLoaded)) { return }
+    $cmd = Get-Command Show-HistoryDialog -CommandType Function -ErrorAction SilentlyContinue
+    if ($cmd -and $cmd.ScriptBlock -ne $MyInvocation.MyCommand.ScriptBlock) {
+        & $cmd.ScriptBlock
+        return
+    }
+    Write-Log "Show-HistoryDialog missing after load." "ERROR" $null "History-UI"
+}
 
 if (-not (Get-Command Set-MenuTooltip -ErrorAction SilentlyContinue)) {
     function Set-MenuTooltip([System.Windows.Forms.ToolStripItem]$item, [string]$text) {
@@ -6299,11 +6348,7 @@ Write-Log "Tray icon created." "INFO" $null "Tray"
 Write-BootStage "Tray icon created"
 Apply-MenuFontSize ([int]$settings.FontSize)
 Update-ThemePreference
-Request-StatusUpdate
-Update-StatusText
 Update-LogLevelMenuChecks
-Register-Hotkeys
-Write-BootStage "Hotkeys registered"
 
 # Left-click shows status balloon; double-click toggles start/stop
 $notifyIcon.Add_Click({
@@ -6332,6 +6377,7 @@ $contextMenu.Add_Opening({
     try {
         Update-ThemePreference
         Apply-MenuFontSize ([int]$settings.FontSize)
+        if (Get-Command Update-TrayLabels -ErrorAction SilentlyContinue) { Update-TrayLabels }
         Update-StatusText
         Set-StatusUpdateTimerEnabled $true
     } finally {
@@ -6407,7 +6453,44 @@ $statusHeartbeatTimer.Start()
 $notifyIcon.Visible = $true
 Write-Log "Tray icon visible (startup complete)." "INFO" $null "Tray"
 Write-BootStage "Startup complete"
+if (-not $script:PostShowStatusTimer) {
+    $script:PostShowStatusTimer = New-Object System.Windows.Forms.Timer
+    $script:PostShowStatusTimer.Interval = 250
+    $script:PostShowStatusTimer.Add_Tick({
+        Invoke-SafeTimerAction "PostShowStatusTimer" {
+            if ($script:PostShowStatusTimer) {
+                $script:PostShowStatusTimer.Stop()
+                $script:PostShowStatusTimer.Dispose()
+                $script:PostShowStatusTimer = $null
+            }
+            Request-StatusUpdate
+            Update-StatusText
+        }
+    })
+    $script:PostShowStatusTimer.Start()
+}
+
+$script:HotkeysReady = $true
+$script:HotkeysPending = $false
+Register-Hotkeys
+Write-BootStage "Hotkeys registered"
 try { Show-FirstRunToast } catch { }
+
+if (-not $script:DeferredStartupTimer) {
+    $script:DeferredStartupTimer = New-Object System.Windows.Forms.Timer
+    $script:DeferredStartupTimer.Interval = 1500
+    $script:DeferredStartupTimer.Add_Tick({
+        Invoke-SafeTimerAction "DeferredStartupTimer" {
+            if ($script:DeferredStartupTimer) {
+                $script:DeferredStartupTimer.Stop()
+                $script:DeferredStartupTimer.Dispose()
+                $script:DeferredStartupTimer = $null
+            }
+            Invoke-DeferredStartupTasks
+        }
+    })
+    $script:DeferredStartupTimer.Start()
+}
 
 function Show-StartPrompt {
     $form = New-Object System.Windows.Forms.Form

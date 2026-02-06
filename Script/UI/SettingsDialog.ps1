@@ -5792,77 +5792,93 @@ function Show-SettingsAlreadyOpenNotice {
     $topForm.Dispose()
 }
 
-$openSettingsItem = New-Object System.Windows.Forms.ToolStripMenuItem("Settings...")
-Set-MenuTooltip $openSettingsItem "Open the settings window."
-$openSettingsItem.Add_Click({
-    Invoke-TrayAction "Settings" {
-        Write-Log "Tray action: Open Settings" "DEBUG" $null "Tray-Action"
-        Write-Log "UI: Settings open requested from tray." "DEBUG" $null "Settings-Dialog"
-        if ($script:SettingsForm -and -not $script:SettingsForm.IsDisposed -and $script:SettingsForm.Visible) {
-            Show-SettingsAlreadyOpenNotice
-            $script:SettingsForm.WindowState = [System.Windows.Forms.FormWindowState]::Normal
-            $script:SettingsForm.BringToFront()
-            $script:SettingsForm.Activate()
-            return
-        }
-        Ensure-SettingsDialogVisible
-    }
-})
-
-$openLogsFolderItem = New-Object System.Windows.Forms.ToolStripMenuItem("Open Logs Folder")
-Set-MenuTooltip $openLogsFolderItem "Open the Logs folder."
-$openLogsFolderItem.Add_Click({
-    Invoke-TrayAction "OpenLogsFolder" {
-        try {
-            if (-not (Test-Path $script:LogDirectory)) {
-                Ensure-Directory $script:LogDirectory "Logs" | Out-Null
+$script:openSettingsItem = $script:openSettingsItem
+if (-not $script:openSettingsItem) {
+    $script:openSettingsItem = New-Object System.Windows.Forms.ToolStripMenuItem("Settings...")
+    Set-MenuTooltip $script:openSettingsItem "Open the settings window."
+    $script:openSettingsItem.Add_Click({
+        Invoke-TrayAction "Settings" {
+            Write-Log "Tray action: Open Settings" "DEBUG" $null "Tray-Action"
+            Write-Log "UI: Settings open requested from tray." "DEBUG" $null "Settings-Dialog"
+            if ($script:SettingsForm -and -not $script:SettingsForm.IsDisposed -and $script:SettingsForm.Visible) {
+                Show-SettingsAlreadyOpenNotice
+                $script:SettingsForm.WindowState = [System.Windows.Forms.FormWindowState]::Normal
+                $script:SettingsForm.BringToFront()
+                $script:SettingsForm.Activate()
+                return
             }
-            Start-Process -FilePath explorer.exe -ArgumentList ("`"{0}`"" -f $script:LogDirectory)
-            Write-Log "Tray action: Open Logs Folder" "DEBUG" $null "Tray-Action"
-        } catch {
-            Write-Log "Failed to open Logs folder." "ERROR" $_.Exception "Tray-Action"
+            Ensure-SettingsDialogVisible
         }
-    }
-})
+    })
+}
+$openSettingsItem = $script:openSettingsItem
 
-$openSettingsFolderItem = New-Object System.Windows.Forms.ToolStripMenuItem("Open Settings Folder")
-$openSettingsFolderItem.Add_Click({
-    try {
-        if (-not (Test-Path $script:SettingsDirectory)) {
-            Ensure-Directory $script:SettingsDirectory "Settings" | Out-Null
+$script:openLogsFolderItem = $script:openLogsFolderItem
+if (-not $script:openLogsFolderItem) {
+    $script:openLogsFolderItem = New-Object System.Windows.Forms.ToolStripMenuItem("Open Logs Folder")
+    Set-MenuTooltip $script:openLogsFolderItem "Open the Logs folder."
+    $script:openLogsFolderItem.Add_Click({
+        Invoke-TrayAction "OpenLogsFolder" {
+            try {
+                if (-not (Test-Path $script:LogDirectory)) {
+                    Ensure-Directory $script:LogDirectory "Logs" | Out-Null
+                }
+                Start-Process -FilePath explorer.exe -ArgumentList ("`"{0}`"" -f $script:LogDirectory)
+                Write-Log "Tray action: Open Logs Folder" "DEBUG" $null "Tray-Action"
+            } catch {
+                Write-Log "Failed to open Logs folder." "ERROR" $_.Exception "Tray-Action"
+            }
         }
-        Start-Process -FilePath explorer.exe -ArgumentList ("`"{0}`"" -f $script:SettingsDirectory)
-        Write-Log "Tray action: Open Settings Folder" "DEBUG" $null "Tray-Action"
-    } catch {
-        Write-Log "Failed to open Settings folder." "ERROR" $_.Exception "Tray-Action"
-    }
-})
+    })
+}
+$openLogsFolderItem = $script:openLogsFolderItem
 
-$logsMenu = New-Object System.Windows.Forms.ToolStripMenuItem("Logs")
-Set-MenuTooltip $logsMenu "Log tools and log level."
-$clearLogItem = New-Object System.Windows.Forms.ToolStripMenuItem("Clear Log")
-$clearLogItem.Add_Click({
-    Invoke-TrayAction "ClearLog" {
-        $result = [System.Windows.Forms.MessageBox]::Show(
-            "Clear the log file now?",
-            "Clear Log",
-            [System.Windows.Forms.MessageBoxButtons]::YesNo,
-            [System.Windows.Forms.MessageBoxIcon]::Question
-        )
-        if ($result -ne [System.Windows.Forms.DialogResult]::Yes) {
-            Write-Log "Clear log canceled." "INFO" $null "Clear-Log"
-            return
-        }
+$script:openSettingsFolderItem = $script:openSettingsFolderItem
+if (-not $script:openSettingsFolderItem) {
+    $script:openSettingsFolderItem = New-Object System.Windows.Forms.ToolStripMenuItem("Open Settings Folder")
+    $script:openSettingsFolderItem.Add_Click({
         try {
-            Clear-LogFile
+            if (-not (Test-Path $script:SettingsDirectory)) {
+                Ensure-Directory $script:SettingsDirectory "Settings" | Out-Null
+            }
+            Start-Process -FilePath explorer.exe -ArgumentList ("`"{0}`"" -f $script:SettingsDirectory)
+            Write-Log "Tray action: Open Settings Folder" "DEBUG" $null "Tray-Action"
         } catch {
-            Write-Log "Failed to clear log file." "ERROR" $_.Exception "Clear-Log"
+            Write-Log "Failed to open Settings folder." "ERROR" $_.Exception "Tray-Action"
         }
-    }
-})
-$logsMenu.DropDownItems.Add($logLevelMenu) | Out-Null
-$logsMenu.DropDownItems.Add($clearLogItem) | Out-Null
-$logsMenu.DropDownItems.Add($openLogsFolderItem) | Out-Null
+    })
+}
+$openSettingsFolderItem = $script:openSettingsFolderItem
+
+$script:logsMenu = $script:logsMenu
+if (-not $script:logsMenu) {
+    $script:logsMenu = New-Object System.Windows.Forms.ToolStripMenuItem("Logs")
+    Set-MenuTooltip $script:logsMenu "Log tools and log level."
+    $clearLogItem = New-Object System.Windows.Forms.ToolStripMenuItem("Clear Log")
+    $clearLogItem.Add_Click({
+        Invoke-TrayAction "ClearLog" {
+            $result = [System.Windows.Forms.MessageBox]::Show(
+                "Clear the log file now?",
+                "Clear Log",
+                [System.Windows.Forms.MessageBoxButtons]::YesNo,
+                [System.Windows.Forms.MessageBoxIcon]::Question
+            )
+            if ($result -ne [System.Windows.Forms.DialogResult]::Yes) {
+                Write-Log "Clear log canceled." "INFO" $null "Clear-Log"
+                return
+            }
+            try {
+                Clear-LogFile
+            } catch {
+                Write-Log "Failed to clear log file." "ERROR" $_.Exception "Clear-Log"
+            }
+        }
+    })
+    $script:logsMenu.DropDownItems.Add($logLevelMenu) | Out-Null
+    $script:logsMenu.DropDownItems.Add($clearLogItem) | Out-Null
+    if ($script:openLogsFolderItem) { $script:logsMenu.DropDownItems.Add($script:openLogsFolderItem) | Out-Null }
+}
+$logsMenu = $script:logsMenu
 function Show-LogTailDialog {
     $form = New-Object System.Windows.Forms.Form
     $form.Text = "Log (Tail)"
