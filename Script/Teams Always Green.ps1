@@ -6141,12 +6141,50 @@ Write-BootStage "Tray menu loaded"
 $script:SettingsUiLoaded = $false
 $script:HistoryUiLoaded = $false
 
+function Import-ScriptFunctionsToScriptScope([string]$path, [string]$tag) {
+    if ([string]::IsNullOrWhiteSpace($path)) { return $false }
+    $resolved = $null
+    try {
+        $resolved = (Resolve-Path -Path $path -ErrorAction Stop).Path
+    } catch {
+        Write-Log ("{0}: UI path not found: {1}" -f $tag, $path) "ERROR" $_.Exception $tag
+        return $false
+    }
+    $funcs = @()
+    try {
+        $funcs = & {
+            param($p)
+            . $p
+            Get-ChildItem Function:\ | Where-Object { $_.ScriptBlock -and $_.ScriptBlock.File -eq $p }
+        } $resolved
+    } catch {
+        Write-Log ("{0}: UI module failed to load." -f $tag) "ERROR" $_.Exception $tag
+        return $false
+    }
+    if (-not $funcs -or $funcs.Count -eq 0) {
+        Write-Log ("{0}: No functions imported from UI module." -f $tag) "ERROR" $null $tag
+        return $false
+    }
+    foreach ($func in $funcs) {
+        try {
+            Set-Item -Path ("Function:\script:{0}" -f $func.Name) -Value $func.ScriptBlock -Force
+        } catch {
+            Write-Log ("{0}: Failed to register function {1}." -f $tag, $func.Name) "ERROR" $_.Exception $tag
+            return $false
+        }
+    }
+    return $true
+}
+
 function Ensure-SettingsUiLoaded {
     if ($script:SettingsUiLoaded) { return $true }
     try {
-        . "$PSScriptRoot\UI\SettingsDialog.ps1"
-        $script:SettingsUiLoaded = $true
-        return $true
+        $ok = Import-ScriptFunctionsToScriptScope (Join-Path $PSScriptRoot "UI\SettingsDialog.ps1") "Settings-UI"
+        if ($ok) {
+            $script:SettingsUiLoaded = $true
+            return $true
+        }
+        return $false
     } catch {
         Write-Log "Failed to load Settings UI module." "ERROR" $_.Exception "Settings-UI"
         return $false
@@ -6156,9 +6194,12 @@ function Ensure-SettingsUiLoaded {
 function Ensure-HistoryUiLoaded {
     if ($script:HistoryUiLoaded) { return $true }
     try {
-        . "$PSScriptRoot\UI\HistoryDialog.ps1"
-        $script:HistoryUiLoaded = $true
-        return $true
+        $ok = Import-ScriptFunctionsToScriptScope (Join-Path $PSScriptRoot "UI\HistoryDialog.ps1") "History-UI"
+        if ($ok) {
+            $script:HistoryUiLoaded = $true
+            return $true
+        }
+        return $false
     } catch {
         Write-Log "Failed to load History UI module." "ERROR" $_.Exception "History-UI"
         return $false
