@@ -1319,6 +1319,7 @@ $appScriptHash = $null
 try {
     $appBuildTimestamp = (Get-Item -Path $scriptPath -ErrorAction Stop).LastWriteTime
     $appScriptHash = (Get-FileHash -Algorithm SHA256 -Path $scriptPath -ErrorAction Stop).Hash
+    Write-Log ("Build metadata: Id={0} Hash={1}" -f $appBuildId, $appScriptHash) "DEBUG" $null "Build"
 } catch {
     $appBuildTimestamp = $null
     $appScriptHash = $null
