@@ -12,6 +12,8 @@ function Show-SettingsDialog {
                 $settingsIconPath = Join-Path (Split-Path -Path $scriptPath -Parent) "Meta\\Icons\\Settings_Icon.ico"
                 if (Test-Path $settingsIconPath) {
                     try { $script:SettingsForm.Icon = New-Object System.Drawing.Icon($settingsIconPath) } catch { }
+                } elseif ($notifyIcon -and $notifyIcon.Icon) {
+                    try { $script:SettingsForm.Icon = New-Object System.Drawing.Icon($notifyIcon.Icon, 32, 32) } catch { $script:SettingsForm.Icon = [System.Drawing.SystemIcons]::Application }
                 }
                 Set-FormTaskbarIcon $script:SettingsForm $settingsIconPath
                 if (-not $script:SettingsForm.Visible) {
@@ -49,7 +51,7 @@ function Show-SettingsDialog {
     if (Test-Path $settingsIconPath) {
         $form.Icon = New-Object System.Drawing.Icon($settingsIconPath)
     } elseif ($notifyIcon -and $notifyIcon.Icon) {
-        $form.Icon = $notifyIcon.Icon
+        try { $form.Icon = New-Object System.Drawing.Icon($notifyIcon.Icon, 32, 32) } catch { $form.Icon = [System.Drawing.SystemIcons]::Application }
     } elseif (Test-Path $iconPath) {
         $form.Icon = New-Object System.Drawing.Icon($iconPath)
     } else {
@@ -2659,11 +2661,13 @@ $clearLogButton = New-Object System.Windows.Forms.Button
     $script:UpdateTabLayouts = $updateTabLayouts
 
     $script:SettingsTabBuildPending = $false
+    $script:SettingsTabBuildPendingOnShow = $false
     $tabControl.Add_SelectedIndexChanged({
         if (-not $script:SettingsTabControl.SelectedTab) { return }
         if ($script:SettingsTabBuildPending) { return }
+        if (-not $script:SettingsForm -or $script:SettingsForm.IsDisposed) { return }
         $script:SettingsTabBuildPending = $true
-        $script:SettingsForm.BeginInvoke([Action]{
+        $script:InvokeSettingsTabBuild = {
             try {
                 if (-not $script:SettingsTabControl.SelectedTab) { return }
                 $title = if ($script:GetSettingsTabKey) { & $script:GetSettingsTabKey $script:SettingsTabControl.SelectedTab } else { [string]$script:SettingsTabControl.SelectedTab.Text }
@@ -2679,7 +2683,19 @@ $clearLogButton = New-Object System.Windows.Forms.Button
             } finally {
                 $script:SettingsTabBuildPending = $false
             }
-        }) | Out-Null
+        }
+        if ($script:SettingsForm.IsHandleCreated) {
+            $script:SettingsForm.BeginInvoke([Action]$script:InvokeSettingsTabBuild) | Out-Null
+        } else {
+            if (-not $script:SettingsTabBuildPendingOnShow) {
+                $script:SettingsTabBuildPendingOnShow = $true
+                $script:SettingsForm.Add_Shown({
+                    if (-not $script:SettingsTabBuildPendingOnShow) { return }
+                    $script:SettingsTabBuildPendingOnShow = $false
+                    if ($script:InvokeSettingsTabBuild) { & $script:InvokeSettingsTabBuild }
+                })
+            }
+        }
     })
 
     $profileGroup = New-Object System.Windows.Forms.GroupBox
