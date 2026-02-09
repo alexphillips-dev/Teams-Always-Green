@@ -2,8 +2,8 @@
 
 [![Release](https://img.shields.io/github/v/release/alexphillips-dev/Teams-Always-Green?label=release&sort=semver)](https://github.com/alexphillips-dev/Teams-Always-Green/releases/latest)
 [![License](https://img.shields.io/github/license/alexphillips-dev/Teams-Always-Green)](LICENSE)
-[![Platform](https://img.shields.io/badge/Platform-Windows-blue)](README.md#quick-start-3-steps)
-[![PowerShell](https://img.shields.io/badge/PowerShell-5.1%20%7C%207.x-blue)](README.md#quick-start-3-steps)
+[![Platform](https://img.shields.io/badge/Platform-Windows-blue)](README.md#requirements)
+[![PowerShell](https://img.shields.io/badge/PowerShell-5.1%20%7C%207.x-blue)](README.md#requirements)
 
 Keep your Microsoft Teams status active without babysitting your keyboard. Teams Always Green is a lightweight Windows tray app that gently toggles Scroll Lock on a schedule you control -- so your status stays green while you focus on real work.
 
@@ -39,6 +39,13 @@ Optional: choose **portable mode** to skip shortcuts. Setup logs are saved to `%
 1) **Install** with Quick Setup.  
 2) **Start** from the tray icon.  
 3) **Customize** in Settings (schedule, profiles, hotkeys, logging).
+
+---
+
+## Requirements
+
+- Windows 10/11
+- PowerShell 5.1 or 7.x
 
 ---
 
