@@ -1,6 +1,8 @@
 ﻿# <img src="https://raw.githubusercontent.com/alexphillips-dev/Teams-Always-Green/refs/heads/main/Meta/Icons/Tray_Icon.ico" alt="Teams Always Green" width="28" height="28"> Teams Always Green
 
 [![Release](https://img.shields.io/github/v/release/alexphillips-dev/Teams-Always-Green?label=release&sort=semver)](https://github.com/alexphillips-dev/Teams-Always-Green/releases/latest)
+[![License](https://img.shields.io/github/license/alexphillips-dev/Teams-Always-Green)](LICENSE)
+[![Platform](https://img.shields.io/badge/Platform-Windows-blue)](README.md#quick-start-3-steps)
 
 Keep your Microsoft Teams status active without babysitting your keyboard. Teams Always Green is a lightweight Windows tray app that gently toggles Scroll Lock on a schedule you control -- so your status stays green while you focus on real work.
 
