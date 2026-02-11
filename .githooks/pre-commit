@@ -1,0 +1,19 @@
+#!/bin/sh
+
+if command -v pwsh >/dev/null 2>&1; then
+  PS_BIN="pwsh"
+elif command -v powershell >/dev/null 2>&1; then
+  PS_BIN="powershell"
+else
+  echo "pre-commit: PowerShell is required to run privacy checks."
+  exit 1
+fi
+
+"$PS_BIN" -NoLogo -NoProfile -ExecutionPolicy Bypass -File "Tools/Find-PrivacyLeaks.ps1" -Staged
+status=$?
+if [ $status -ne 0 ]; then
+  echo "pre-commit: blocked by privacy/security scan."
+  exit $status
+fi
+
+exit 0

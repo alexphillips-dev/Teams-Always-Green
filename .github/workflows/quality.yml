@@ -15,6 +15,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Run privacy/security scan
+        shell: pwsh
+        run: |
+          ./Tools/Find-PrivacyLeaks.ps1 -AllTracked
+
       - name: Install PowerShell modules
         shell: pwsh
         run: |
