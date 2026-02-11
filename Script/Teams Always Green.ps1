@@ -1,4 +1,4 @@
-﻿
+
 # Teams Always Green
 # PSScriptAnalyzerSettings -DisableRuleName PSUseApprovedVerbs
 # Main entry script for the app. This file owns startup, tray menu, timers,
@@ -65,6 +65,11 @@ $script:UpdateCache = @{
     LatestVersion = $null
 }
 $script:UpdateCacheTtlMinutes = 15
+$script:AboutCheckButton = $null
+$script:AboutCheckInProgress = $false
+$script:AboutUpdateJob = $null
+$script:AboutUpdatePollTimer = $null
+$script:UpdateAboutChecked = $null
 $ErrorActionPreference = 'Stop'
 
 Add-Type -AssemblyName System.Windows.Forms
@@ -86,6 +91,57 @@ function Get-PathHash([string]$text) {
     } finally {
         $sha.Dispose()
     }
+}
+
+function Get-StringSha256Hex([string]$text) {
+    if ($null -eq $text) { $text = "" }
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $bytes = [System.Text.Encoding]::UTF8.GetBytes([string]$text)
+        return (($sha.ComputeHash($bytes) | ForEach-Object { $_.ToString("X2") }) -join "")
+    } finally {
+        $sha.Dispose()
+    }
+}
+
+function Get-ProfileExportSignature([string]$name, $profile) {
+    $normalizedProfile = Migrate-ProfileSnapshot $profile
+    $canonicalPayload = [ordered]@{
+        FormatVersion = 1
+        Name = [string]$name
+        Profile = $normalizedProfile
+    }
+    $canonicalJson = $canonicalPayload | ConvertTo-Json -Depth 8 -Compress
+    return (Get-StringSha256Hex $canonicalJson)
+}
+
+function Test-ProfileExportSignature($payload) {
+    if (-not $payload) {
+        return [pscustomobject]@{ IsValid = $false; Reason = "Profile payload is missing." }
+    }
+    $hasProfile = $payload.PSObject.Properties.Name -contains "Profile"
+    if (-not $hasProfile) {
+        return [pscustomobject]@{ IsValid = $false; Reason = "Profile payload is missing Profile data." }
+    }
+    $hasSignature = $payload.PSObject.Properties.Name -contains "Signature"
+    if (-not $hasSignature -or [string]::IsNullOrWhiteSpace([string]$payload.Signature)) {
+        return [pscustomobject]@{ IsValid = $false; Reason = "Profile payload signature is missing." }
+    }
+    $algorithm = "SHA256"
+    if ($payload.PSObject.Properties.Name -contains "SignatureAlgorithm" -and -not [string]::IsNullOrWhiteSpace([string]$payload.SignatureAlgorithm)) {
+        $algorithm = [string]$payload.SignatureAlgorithm
+    }
+    if ($algorithm.ToUpperInvariant() -ne "SHA256") {
+        return [pscustomobject]@{ IsValid = $false; Reason = "Unsupported profile signature algorithm: $algorithm" }
+    }
+
+    $payloadName = if ($payload.PSObject.Properties.Name -contains "Name") { [string]$payload.Name } else { "Imported" }
+    $expected = Get-ProfileExportSignature $payloadName $payload.Profile
+    $actual = ([string]$payload.Signature).Trim().ToUpperInvariant()
+    if ($expected -ne $actual) {
+        return [pscustomobject]@{ IsValid = $false; Reason = "Profile signature mismatch." }
+    }
+    return [pscustomobject]@{ IsValid = $true; Reason = "" }
 }
 
 # --- Paths, Meta folder, and locator files (resolve root, ensure dirs) ---
@@ -135,6 +191,82 @@ function Normalize-PathText([string]$path) {
     }
 }
 
+function Get-CanonicalPath([string]$path) {
+    if ([string]::IsNullOrWhiteSpace($path)) { return "" }
+    $normalized = Normalize-PathText $path
+    if ([string]::IsNullOrWhiteSpace($normalized)) { return "" }
+    try {
+        return [System.IO.Path]::GetFullPath($normalized)
+    } catch {
+        return $normalized
+    }
+}
+
+function Test-UnsafeReparseItem($item) {
+    if ($null -eq $item) { return $false }
+    try {
+        if (-not ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint)) {
+            return $false
+        }
+    } catch {
+        return $false
+    }
+
+    $linkType = ""
+    try {
+        if ($item.PSObject.Properties.Name -contains "LinkType" -and $null -ne $item.LinkType) {
+            $linkType = [string]$item.LinkType
+        }
+    } catch {
+    }
+    if (-not [string]::IsNullOrWhiteSpace($linkType)) {
+        return $true
+    }
+
+    $targets = @()
+    try {
+        if ($item.PSObject.Properties.Name -contains "Target" -and $null -ne $item.Target) {
+            $targets = @($item.Target | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) })
+        }
+    } catch {
+    }
+    if ($targets.Count -gt 0) {
+        return $true
+    }
+
+    # Cloud/file-provider placeholder reparse points (for example OneDrive) do not
+    # indicate link redirection by themselves, so they are treated as trusted.
+    return $false
+}
+
+function Test-PathHasReparsePoint([string]$path, [string]$StopAtPath = $null, [switch]$IncludeStopPath) {
+    if ([string]::IsNullOrWhiteSpace($path)) { return $false }
+    $full = Get-CanonicalPath $path
+    if ([string]::IsNullOrWhiteSpace($full)) { return $false }
+    $stopFull = Get-CanonicalPath $StopAtPath
+    try {
+        $current = $full
+        while (-not [string]::IsNullOrWhiteSpace($current) -and (Test-Path $current)) {
+            $isStopPath = (-not [string]::IsNullOrWhiteSpace($stopFull)) -and
+                          $current.Equals($stopFull, [System.StringComparison]::OrdinalIgnoreCase)
+            if ($isStopPath -and -not $IncludeStopPath) { break }
+            try {
+                $item = Get-Item -LiteralPath $current -Force -ErrorAction Stop
+                if (Test-UnsafeReparseItem $item) {
+                    return $true
+                }
+            } catch {
+            }
+            if ($isStopPath) { break }
+            $parent = Split-Path -Path $current -Parent
+            if ([string]::IsNullOrWhiteSpace($parent) -or $parent -eq $current) { break }
+            $current = $parent
+        }
+    } catch {
+    }
+    return $false
+}
+
 function Convert-FromRelativePath([string]$value) {
     $normalized = Normalize-PathText $value
     if ([string]::IsNullOrWhiteSpace($normalized)) { return "" }
@@ -169,14 +301,28 @@ function Is-PathUnderRoot([string]$path, [string]$root) {
     }
 }
 
+function Test-TrustedDirectoryPath([string]$path, [string]$root, [bool]$allowExternal) {
+    $full = Get-CanonicalPath $path
+    if ([string]::IsNullOrWhiteSpace($full)) { return $false }
+    if (-not $allowExternal) {
+        if (-not (Is-PathUnderRoot $full $root)) { return $false }
+        if (Test-PathHasReparsePoint -Path $full -StopAtPath $root) { return $false }
+        return $true
+    }
+    if (Test-PathHasReparsePoint $full) { return $false }
+    return $true
+}
+
 function Sanitize-DirectorySetting([string]$value, [string]$defaultName, [string]$label, [bool]$allowExternal) {
     if ([string]::IsNullOrWhiteSpace($value)) { return "" }
     $resolved = Convert-FromRelativePath $value
-    if (-not $allowExternal) {
-        if (-not (Is-PathUnderRoot $resolved $script:DataRoot)) {
+    if (-not (Test-TrustedDirectoryPath $resolved $script:DataRoot $allowExternal)) {
+        if (-not $allowExternal -and -not (Is-PathUnderRoot $resolved $script:DataRoot)) {
             Write-PathWarningNow "$label path outside app folder blocked; using default."
-            return ""
+        } else {
+            Write-PathWarningNow "$label path uses a reparse point (junction/symlink) and was blocked."
         }
+        return ""
     }
     return Convert-ToRelativePathIfUnderRoot $resolved
 }
@@ -212,7 +358,11 @@ function Ensure-Directory([string]$path, [string]$label = "Directory") {
 function Resolve-DirectoryOrDefault([string]$inputPath, [string]$defaultPath, [string]$label) {
     $resolved = Convert-FromRelativePath $inputPath
     if ([string]::IsNullOrWhiteSpace($resolved)) { $resolved = $defaultPath }
-    $resolved = Normalize-PathText $resolved
+    $resolved = Get-CanonicalPath $resolved
+    if (-not (Test-TrustedDirectoryPath $resolved $script:DataRoot $true)) {
+        Write-PathWarningNow "$label path uses a junction/symlink; falling back to default path."
+        $resolved = Get-CanonicalPath $defaultPath
+    }
     Ensure-Directory $resolved $label | Out-Null
     if (-not (Test-DirectoryWritable $resolved)) {
         Write-PathWarningNow "$label directory not writable: $resolved. Falling back to $defaultPath."
@@ -237,16 +387,29 @@ function Harden-AppPermissions {
         $script:LogDirectory,
         $script:MetaDir
     ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) -and (Test-Path $_) }
+    $currentUser = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
     foreach ($path in $paths) {
         try {
             $acl = Get-Acl -Path $path
+            try { $acl.SetAccessRuleProtection($true, $true) } catch { }
             $rules = @($acl.Access) | Where-Object {
                 $_.AccessControlType -eq "Allow" -and
-                ($_.IdentityReference -match "Everyone|Users") -and
+                ($_.IdentityReference -match "Everyone|Users|Authenticated Users") -and
                 ($_.FileSystemRights -match "Write|Modify|FullControl")
             }
             foreach ($rule in $rules) {
                 $acl.RemoveAccessRule($rule) | Out-Null
+            }
+            if (-not [string]::IsNullOrWhiteSpace($currentUser)) {
+                $identity = New-Object System.Security.Principal.NTAccount($currentUser)
+                $userRule = New-Object System.Security.AccessControl.FileSystemAccessRule(
+                    $identity,
+                    [System.Security.AccessControl.FileSystemRights]::Modify,
+                    [System.Security.AccessControl.InheritanceFlags]"ContainerInherit, ObjectInherit",
+                    [System.Security.AccessControl.PropagationFlags]::None,
+                    [System.Security.AccessControl.AccessControlType]::Allow
+                )
+                $acl.SetAccessRule($userRule)
             }
             Set-Acl -Path $path -AclObject $acl
         } catch {
@@ -766,6 +929,48 @@ function Invoke-SafeTimerAction([string]$name, [ScriptBlock]$action) {
     }
 }
 
+function Invoke-UiSafeAction {
+    param(
+        [string]$Name,
+        [ScriptBlock]$Action,
+        [string]$Context = "UI",
+        [switch]$ShowDialog,
+        [string]$DialogTitle = "Error",
+        [string]$DialogMessagePrefix = "Action failed"
+    )
+    if (-not $Action) { return $false }
+    if ([string]::IsNullOrWhiteSpace($Name)) { $Name = "UI Action" }
+    try { Set-LastUserAction $Name $Context } catch { }
+    $actionStart = Get-Date
+    try {
+        $settingsVar = Get-Variable -Name settings -Scope Script -ErrorAction SilentlyContinue
+        $verboseUi = $false
+        if ($settingsVar -and $settingsVar.Value -and ($settingsVar.Value.PSObject.Properties.Name -contains "VerboseUiLogging")) {
+            $verboseUi = [bool]$settingsVar.Value.VerboseUiLogging
+        }
+        if ($verboseUi) {
+            Write-Log "UI: Action started: $Name" "DEBUG" $null $Context
+        }
+        & $Action
+        $elapsedMs = [int]((Get-Date) - $actionStart).TotalMilliseconds
+        $script:LogResultOverride = "OK"
+        Write-Log "UI: Action completed: $Name (ms=$elapsedMs)" "DEBUG" $null $Context
+        return $true
+    } catch {
+        $script:LogResultOverride = "Failed"
+        Write-Log "UI: Action failed: $Name" "ERROR" $_.Exception $Context
+        if ($ShowDialog) {
+            [System.Windows.Forms.MessageBox]::Show(
+                "$DialogMessagePrefix ($Name).`n$($_.Exception.Message)",
+                $DialogTitle,
+                [System.Windows.Forms.MessageBoxButtons]::OK,
+                [System.Windows.Forms.MessageBoxIcon]::Error
+            ) | Out-Null
+        }
+        return $false
+    }
+}
+
 function Clear-StaleRuntimeState([string]$reason) {
     try {
         $targets = @(
@@ -837,11 +1042,13 @@ function Validate-FolderPaths {
     foreach ($item in $paths) {
         $exists = Test-Path $item.Path
         $writable = if ($exists) { Test-DirectoryWritable $item.Path } else { $false }
+        $trusted = if ($exists) { -not (Test-PathHasReparsePoint $item.Path) } else { $true }
         $results += [pscustomobject]@{
             Name     = $item.Name
             Path     = $item.Path
             Exists   = $exists
             Writable = $writable
+            Trusted  = $trusted
         }
     }
     return $results
@@ -885,7 +1092,7 @@ function Invoke-HealthCheckDialog {
     ) | Out-Null
 }
 
-function Test-SettingsSchema($settings) {
+function Test-SettingsSchema($settings, [switch]$Strict) {
     $issues = @()
     $isCritical = $false
     $futureVersion = $false
@@ -921,6 +1128,7 @@ function Test-SettingsSchema($settings) {
     if ($settings) {
         $propertyNames = if ($settings -is [hashtable]) { $settings.Keys } else { $settings.PSObject.Properties.Name }
     }
+    $unknown = @()
     if ($script:DefaultSettingsKeys -and $script:DefaultSettingsKeys.Count -gt 0) {
         $missing = @()
         foreach ($key in $script:DefaultSettingsKeys) {
@@ -931,6 +1139,16 @@ function Test-SettingsSchema($settings) {
         }
         if ($missing.Count -gt 0) {
             $issues += ("Missing keys: {0}" -f ((@($missing | Select-Object -First 8)) -join ","))
+        }
+        foreach ($key in $propertyNames) {
+            if ($script:DefaultSettingsKeys -contains $key) { continue }
+            if ($script:SettingsRuntimeKeys -contains $key) { continue }
+            if ($key -like "Exported*") { continue }
+            $unknown += [string]$key
+        }
+        if ($Strict -and $unknown.Count -gt 0) {
+            $issues += ("Unknown keys blocked by strict mode: {0}" -f ((@($unknown | Select-Object -First 8)) -join ","))
+            $isCritical = $true
         }
     }
 
@@ -977,6 +1195,7 @@ function Test-SettingsSchema($settings) {
         Issues        = $issues
         SchemaVersion = $schemaVersion
         FutureVersion = $futureVersion
+        UnknownKeys   = $unknown
     }
 }
 
@@ -1000,6 +1219,104 @@ function Get-SettingsExtraFields($settings) {
         $extras[$prop.Name] = $prop.Value
     }
     return $extras
+}
+
+function Read-JsonFileSecure([string]$path, [int]$maxBytes, [string]$label = "JSON file") {
+    if ([string]::IsNullOrWhiteSpace($path)) { throw "$label path is empty." }
+    if (-not (Test-Path $path)) { throw "$label not found." }
+    $info = Get-Item -LiteralPath $path -ErrorAction Stop
+    if ($maxBytes -gt 0 -and [int64]$info.Length -gt [int64]$maxBytes) {
+        throw ("{0} exceeds max size ({1} bytes)." -f $label, $maxBytes)
+    }
+    $raw = Get-Content -LiteralPath $path -Raw -ErrorAction Stop
+    if ([string]::IsNullOrWhiteSpace($raw)) { throw "$label is empty." }
+    return ($raw | ConvertFrom-Json -ErrorAction Stop)
+}
+
+function Get-RateLimitRule([string]$name) {
+    if ([string]::IsNullOrWhiteSpace($name)) { return $null }
+    if (-not $script:SecurityRateLimitDefaults) { return $null }
+    if (-not $script:SecurityRateLimitDefaults.ContainsKey($name)) { return $null }
+    return $script:SecurityRateLimitDefaults[$name]
+}
+
+function Test-RateLimit([string]$name, [int]$windowSeconds = 60, [int]$maxAttempts = 5) {
+    if ([string]::IsNullOrWhiteSpace($name)) { return $true }
+    $rule = Get-RateLimitRule $name
+    if ($rule) {
+        if ($rule.ContainsKey("WindowSeconds")) { $windowSeconds = [int]$rule["WindowSeconds"] }
+        if ($rule.ContainsKey("MaxAttempts")) { $maxAttempts = [int]$rule["MaxAttempts"] }
+    }
+    if ($windowSeconds -le 0 -or $maxAttempts -le 0) { return $true }
+    if (-not $script:SecurityRateLimits) { $script:SecurityRateLimits = @{} }
+    if (-not $script:SecurityRateLimits.ContainsKey($name)) {
+        $script:SecurityRateLimits[$name] = New-Object System.Collections.ArrayList
+    }
+    $now = Get-Date
+    $cutoff = $now.AddSeconds(-1 * $windowSeconds)
+    $entries = [System.Collections.ArrayList]$script:SecurityRateLimits[$name]
+    for ($i = $entries.Count - 1; $i -ge 0; $i--) {
+        if ([datetime]$entries[$i] -lt $cutoff) {
+            $entries.RemoveAt($i)
+        }
+    }
+    if ($entries.Count -ge $maxAttempts) {
+        return $false
+    }
+    [void]$entries.Add($now)
+    return $true
+}
+
+function Get-AppScriptSignatureInfo([string]$path) {
+    $result = [pscustomobject]@{
+        Status = "Unknown"
+        Thumbprint = ""
+        Subject = ""
+        Message = ""
+    }
+    if ([string]::IsNullOrWhiteSpace($path) -or -not (Test-Path $path)) {
+        $result.Status = "Missing"
+        $result.Message = "Script file not found."
+        return $result
+    }
+    try {
+        $sig = Get-AuthenticodeSignature -FilePath $path -ErrorAction Stop
+        if ($sig) {
+            $result.Status = [string]$sig.Status
+            if ($sig.SignerCertificate) {
+                $result.Thumbprint = [string]$sig.SignerCertificate.Thumbprint
+                $result.Subject = [string]$sig.SignerCertificate.Subject
+            }
+            $result.Message = [string]$sig.StatusMessage
+        }
+    } catch {
+        $result.Status = "Error"
+        $result.Message = [string]$_.Exception.Message
+    }
+    return $result
+}
+
+function Test-ScriptSignaturePolicy([string]$path, [bool]$enforce) {
+    $sig = Get-AppScriptSignatureInfo $path
+    $status = [string]$sig.Status
+    $thumbprint = if ([string]::IsNullOrWhiteSpace([string]$sig.Thumbprint)) { "" } else { ([string]$sig.Thumbprint).ToUpperInvariant() }
+    $trustedThumbprints = @()
+    if ($settings -and ($settings.PSObject.Properties.Name -contains "TrustedSignerThumbprints")) {
+        foreach ($part in ([string]$settings.TrustedSignerThumbprints -split "[,; ]+")) {
+            if (-not [string]::IsNullOrWhiteSpace($part)) { $trustedThumbprints += $part.ToUpperInvariant() }
+        }
+    }
+    $trustedThumbprints = @($trustedThumbprints | Select-Object -Unique)
+    $thumbprintAllowed = ($trustedThumbprints.Count -eq 0 -or ($thumbprint -and ($trustedThumbprints -contains $thumbprint)))
+    $isValid = ($status -eq "Valid" -and $thumbprintAllowed)
+    $reason = if ($isValid) { "" } elseif ($status -ne "Valid") { "Authenticode status: $status" } else { "Signer thumbprint is not trusted." }
+    return [pscustomobject]@{
+        IsValid = $isValid
+        Enforced = $enforce
+        Status = $status
+        Thumbprint = $thumbprint
+        Reason = $reason
+    }
 }
 
 function Extract-RuntimeFromSettings($settings) {
@@ -1091,7 +1408,7 @@ $script:isShuttingDown = $false
 $script:CleanupDone = $false
 $script:SettingsForm = $null
 $script:SettingsFormIcon = $null
-$script:SettingsSchemaVersion = 8
+$script:SettingsSchemaVersion = 9
 $script:StateSchemaVersion = 1
 $script:SettingsRuntimeKeys = @("ToggleCount", "LastToggleTime", "Stats")
 $script:SettingsNonDiffKeys = @("LastSaved", "LastSavedBy", "SettingsOrigin", "AppVersion") + $script:SettingsRuntimeKeys
@@ -1102,6 +1419,20 @@ $script:DefaultSettingsKeys = @()
 $script:PendingRuntimeFromSettings = @{}
 $script:ProfileSchemaVersion = 1
 $script:ProfileMetadataKeys = @("ProfileSchemaVersion", "ReadOnly")
+$script:SettingsMaxBytes = 1048576
+$script:ProfileImportMaxBytes = 262144
+$script:SecurityDefaultUpdateOwner = "alexphillips-dev"
+$script:SecurityDefaultUpdateRepo = "Teams-Always-Green"
+$script:SecurityRateLimitDefaults = @{
+    UpdateCheck   = @{ WindowSeconds = 60; MaxAttempts = 5 }
+    SettingsImport = @{ WindowSeconds = 60; MaxAttempts = 4 }
+    ProfileImport = @{ WindowSeconds = 60; MaxAttempts = 6 }
+}
+$script:SecurityRateLimits = @{}
+$script:AuditChainPath = $null
+$script:AuditChainLastHash = "GENESIS"
+$script:ScriptSignatureStatus = "Unknown"
+$script:ScriptSignatureThumbprint = ""
 $script:ProfilesLastGoodPath = $null
 $script:ProfilesLastGood = @{}
 $script:ProfileSnapshotCacheKey = $null
@@ -1354,247 +1685,8 @@ function Get-StartupSource {
     return "Unknown"
 }
 
-function Get-LatestReleaseInfo([string]$owner, [string]$repo) {
-    $uri = "https://api.github.com/repos/$owner/$repo/releases/latest"
-    $headers = @{ "User-Agent" = "TeamsAlwaysGreen" }
-    try {
-        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-    } catch {
-    }
-    try {
-        return Invoke-RestMethod -Uri $uri -Headers $headers -ErrorAction Stop
-    } catch {
-        Write-Log "Update check failed: $($_.Exception.Message)" "WARN" $_.Exception "Update"
-        return $null
-    }
-}
-
-function Get-LatestReleaseCached([string]$owner, [string]$repo, [switch]$Force) {
-    if (-not $Force) {
-        if ($script:UpdateCache.CheckedAt -and $script:UpdateCache.Release) {
-            $ageMinutes = ([DateTime]::UtcNow - $script:UpdateCache.CheckedAt).TotalMinutes
-            if ($ageMinutes -lt $script:UpdateCacheTtlMinutes) {
-                return $script:UpdateCache.Release
-            }
-        }
-    }
-    $release = Get-LatestReleaseCached $owner $repo -Force:$Force
-    if ($release) {
-        $script:UpdateCache.Release = $release
-        $script:UpdateCache.CheckedAt = [DateTime]::UtcNow
-        $script:UpdateCache.LatestVersion = Get-ReleaseVersionString $release
-    }
-    return $release
-}
-
-function Get-ReleaseVersionString($release) {
-    if (-not $release) { return $null }
-    $tag = $null
-    if ($release.PSObject.Properties.Name -contains "tag_name") { $tag = [string]$release.tag_name }
-    if ([string]::IsNullOrWhiteSpace($tag) -and ($release.PSObject.Properties.Name -contains "name")) {
-        $tag = [string]$release.name
-    }
-    if ([string]::IsNullOrWhiteSpace($tag)) { return $null }
-    $tag = $tag.Trim()
-    if ($tag.StartsWith("v")) { $tag = $tag.Substring(1) }
-    return $tag
-}
-
-function Compare-VersionString([string]$left, [string]$right) {
-    $leftVersion = $null
-    $rightVersion = $null
-    if (-not [version]::TryParse($left, [ref]$leftVersion)) { return 0 }
-    if (-not [version]::TryParse($right, [ref]$rightVersion)) { return 0 }
-    return $leftVersion.CompareTo($rightVersion)
-}
-
-function Get-ReleaseAsset($release, [string]$assetName) {
-    if (-not $release -or -not $release.assets) { return $null }
-    foreach ($asset in $release.assets) {
-        if ([string]$asset.name -eq $assetName) { return $asset }
-    }
-    return $null
-}
-
-function Get-ReleaseAssetHash([object]$release, [string]$assetName) {
-    if (-not $release) { return $null }
-    $hashAsset = Get-ReleaseAsset $release ($assetName + ".sha256")
-    if (-not $hashAsset) { $hashAsset = Get-ReleaseAsset $release ($assetName + ".sha256.txt") }
-    if (-not $hashAsset -or -not $hashAsset.browser_download_url) { return $null }
-    $tempHash = Join-Path $env:TEMP ("TeamsAlwaysGreen.hash." + [Guid]::NewGuid().ToString("N") + ".tmp")
-    try {
-        Invoke-WebRequest -Uri $hashAsset.browser_download_url -OutFile $tempHash -UseBasicParsing -ErrorAction Stop
-        $raw = (Get-Content -Path $tempHash -Raw).Trim()
-        if ([string]::IsNullOrWhiteSpace($raw)) { return $null }
-        $parts = $raw -split "\s+"
-        $hash = $parts[0]
-        if ($hash -match "^[A-Fa-f0-9]{64}$") {
-            return $hash.ToUpperInvariant()
-        }
-    } catch {
-    } finally {
-        try { if (Test-Path $tempHash) { Remove-Item -Path $tempHash -Force } } catch { }
-    }
-    return $null
-}
-
-function Get-UpdatePublicKeyXml {
-    if ($script:UpdatePublicKeyPath -and (Test-Path $script:UpdatePublicKeyPath)) {
-        try { return (Get-Content -Path $script:UpdatePublicKeyPath -Raw).Trim() } catch { }
-    }
-    return $null
-}
-
-function Get-ReleaseAssetSignatureBytes([object]$release, [string]$assetName) {
-    if (-not $release) { return $null }
-    $sigAsset = Get-ReleaseAsset $release ($assetName + ".sig")
-    if (-not $sigAsset -or -not $sigAsset.browser_download_url) { return $null }
-    $tempSig = Join-Path $env:TEMP ("TeamsAlwaysGreen.sig." + [Guid]::NewGuid().ToString("N") + ".tmp")
-    try {
-        Invoke-WebRequest -Uri $sigAsset.browser_download_url -OutFile $tempSig -UseBasicParsing -ErrorAction Stop
-        $raw = (Get-Content -Path $tempSig -Raw).Trim()
-        if ([string]::IsNullOrWhiteSpace($raw)) { return $null }
-        if ($raw -match "^[A-Fa-f0-9]+$") {
-            $bytes = New-Object byte[] ($raw.Length / 2)
-            for ($i = 0; $i -lt $bytes.Length; $i++) {
-                $bytes[$i] = [Convert]::ToByte($raw.Substring($i * 2, 2), 16)
-            }
-            return $bytes
-        }
-        return [Convert]::FromBase64String($raw)
-    } catch {
-        return $null
-    } finally {
-        try { if (Test-Path $tempSig) { Remove-Item -Path $tempSig -Force } } catch { }
-    }
-}
-
-function Verify-UpdateSignature([string]$filePath, [byte[]]$signatureBytes, [string]$publicKeyXml) {
-    if (-not $filePath -or -not $signatureBytes -or -not $publicKeyXml) { return $false }
-    try {
-        $data = [System.IO.File]::ReadAllBytes($filePath)
-        $rsa = New-Object System.Security.Cryptography.RSACryptoServiceProvider
-        $rsa.FromXmlString($publicKeyXml)
-        $sha = [System.Security.Cryptography.SHA256]::Create()
-        try {
-            return $rsa.VerifyData($data, $sha, $signatureBytes)
-        } finally {
-            $sha.Dispose()
-            $rsa.Dispose()
-        }
-    } catch {
-        return $false
-    }
-}
-
-function Invoke-UpdateCheck {
-    param(
-        [switch]$Force
-    )
-    if (-not $Force) {
-        if (-not ($settings.PSObject.Properties.Name -contains "AutoUpdateEnabled") -or -not [bool]$settings.AutoUpdateEnabled) { return }
-    }
-    $owner = "alexphillips-dev"
-    $repo = "Teams-Always-Green"
-    $assetName = "Teams Always Green.ps1"
-    $release = Get-LatestReleaseInfo $owner $repo
-    if (-not $release) { return }
-    $latestVersion = Get-ReleaseVersionString $release
-    if ([string]::IsNullOrWhiteSpace($latestVersion)) { return }
-    if ((Compare-VersionString $latestVersion $appVersion) -le 0) { return }
-
-    $prompt = "A new version is available.`n`nCurrent: $appVersion`nLatest: $latestVersion`n`nDownload and install now?"
-    $result = [System.Windows.Forms.MessageBox]::Show(
-        $prompt,
-        "Update available",
-        [System.Windows.Forms.MessageBoxButtons]::YesNo,
-        [System.Windows.Forms.MessageBoxIcon]::Information
-    )
-    if ($result -ne [System.Windows.Forms.DialogResult]::Yes) {
-        Write-Log "Update available; user chose not to update." "INFO" $null "Update"
-        return
-    }
-
-    $asset = Get-ReleaseAsset $release $assetName
-    if (-not $asset -or -not $asset.browser_download_url) {
-        Write-Log "Update asset not found in latest release." "WARN" $null "Update"
-        [System.Windows.Forms.MessageBox]::Show(
-            "Update asset '$assetName' was not found in the latest release.",
-            "Update failed",
-            [System.Windows.Forms.MessageBoxButtons]::OK,
-            [System.Windows.Forms.MessageBoxIcon]::Warning
-        ) | Out-Null
-        return
-    }
-
-    $tempPath = Join-Path $env:TEMP ("Teams Always Green.ps1." + [Guid]::NewGuid().ToString("N") + ".tmp")
-    $backupPath = $null
-    try {
-        Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $tempPath -UseBasicParsing -ErrorAction Stop
-        $downloadInfo = Get-Item -Path $tempPath -ErrorAction Stop
-        if ($downloadInfo.Length -lt 2048) {
-            throw "Downloaded file looks too small."
-        }
-        $expectedHash = Get-ReleaseAssetHash $release $assetName
-        if ($expectedHash) {
-            $actualHash = (Get-FileHash -Algorithm SHA256 -Path $tempPath -ErrorAction Stop).Hash
-            if ($expectedHash -ne $actualHash) {
-                throw "Downloaded file hash mismatch."
-            }
-        }
-        if ($settings.PSObject.Properties.Name -contains "UpdateRequireSignature" -and [bool]$settings.UpdateRequireSignature) {
-            $publicKey = Get-UpdatePublicKeyXml
-            if (-not $publicKey) {
-                throw "Update signature public key missing."
-            }
-            $sigBytes = Get-ReleaseAssetSignatureBytes $release $assetName
-            if (-not $sigBytes) {
-                throw "Update signature missing."
-            }
-            if (-not (Verify-UpdateSignature $tempPath $sigBytes $publicKey)) {
-                throw "Update signature verification failed."
-            }
-        }
-
-        $backupPath = Join-Path $script:MetaDir ("Teams Always Green.ps1.bak." + (Get-Date -Format "yyyyMMddHHmmss"))
-        Copy-Item -Path $scriptPath -Destination $backupPath -Force
-        Move-Item -Path $tempPath -Destination $scriptPath -Force
-        $versionPathLocal = Join-Path $script:AppRoot "VERSION"
-        try {
-            Set-Content -Path $versionPathLocal -Value $latestVersion -Encoding ASCII
-            if ($release.PSObject.Properties.Name -contains "published_at" -and $release.published_at) {
-                try {
-                    $published = [DateTime]::Parse($release.published_at)
-                    (Get-Item -Path $versionPathLocal).LastWriteTime = $published
-                } catch {
-                }
-            }
-        } catch {
-        }
-        Write-Log "Update applied; restarting." "INFO" $null "Update"
-        Set-ShutdownMarker "clean"
-        if (Get-Command -Name Flush-LogBuffer -ErrorAction SilentlyContinue) { Flush-LogBuffer }
-        Release-MutexOnce
-        $script:CleanupDone = $true
-        Start-Process -FilePath "powershell.exe" -WindowStyle Hidden -WorkingDirectory $script:AppRoot -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$scriptPath`""
-        [System.Windows.Forms.Application]::Exit()
-    } catch {
-        try { if (Test-Path $tempPath) { Remove-Item -Path $tempPath -Force } } catch { }
-        try {
-            if ($backupPath -and (Test-Path $backupPath)) {
-                Copy-Item -Path $backupPath -Destination $scriptPath -Force
-            }
-        } catch {
-        }
-        Write-Log "Update failed: $($_.Exception.Message)" "ERROR" $_.Exception "Update"
-        [System.Windows.Forms.MessageBox]::Show(
-            "Update failed.`n$($_.Exception.Message)",
-            "Update failed",
-            [System.Windows.Forms.MessageBoxButtons]::OK,
-            [System.Windows.Forms.MessageBoxIcon]::Error
-        ) | Out-Null
-    }
-}
+# --- Update engine (release lookup, validation, apply) ---
+. "$PSScriptRoot\Features\UpdateEngine.ps1"
 
 # --- Single-instance mutex acquisition (acquire/retry) ---
 $createdNew = $false
@@ -1626,6 +1718,7 @@ if (-not $script:HasMutex) {
 $iconPath  = Join-Path $script:AppRoot "Meta\\Icons\\Tray_Icon.ico"
 $script:logPath   = Join-Path $script:LogDirectory "Teams-Always-Green.log"
 $script:AuditLogPath = Join-Path $script:LogDirectory "Teams-Always-Green.audit.log"
+$script:AuditChainPath = Join-Path $script:MetaDir "Teams-Always-Green.audit.chain.json"
 $script:settingsPath = Join-Path $script:SettingsDirectory "Teams-Always-Green.settings.json"
 # Ensure default folders exist
 try {
@@ -1704,6 +1797,47 @@ function Should-IncludeInfoTags([string]$context, [string]$message, [string]$cat
     return $false
 }
 
+function Get-LogEventId([string]$context, [string]$level, [string]$message) {
+    $ctx = if ([string]::IsNullOrWhiteSpace($context)) { "General" } else { $context }
+    $prefix = switch -Regex ($ctx) {
+        "Settings|UI" { "SET"; break }
+        "Profile" { "PRF"; break }
+        "Update" { "UPD"; break }
+        "Hotkey" { "HKT"; break }
+        "Tray" { "TRY"; break }
+        "Schedule" { "SCH"; break }
+        "Log|Logging" { "LOG"; break }
+        "Diagnostics|SelfTest|Health|Export" { "DIA"; break }
+        "Startup|Init" { "STR"; break }
+        "Restart" { "RST"; break }
+        "Exit|Shutdown|Cleanup" { "EXT"; break }
+        "State|Status" { "STA"; break }
+        "Security|Integrity" { "SEC"; break }
+        "Command" { "CMD"; break }
+        default { "GEN" }
+    }
+    $normalizedLevel = if ([string]::IsNullOrWhiteSpace($level)) { "INFO" } else { $level.ToUpperInvariant() }
+    $levelBase = switch ($normalizedLevel) {
+        "DEBUG" { 100 }
+        "INFO"  { 200 }
+        "WARN"  { 300 }
+        "ERROR" { 400 }
+        "FATAL" { 900 }
+        default { 200 }
+    }
+    $bucket = 0
+    if (-not [string]::IsNullOrWhiteSpace($message)) {
+        $normalized = (($message.ToLowerInvariant() -replace "\d+", "0") -replace "\s+", " ").Trim()
+        if ($normalized.Length -gt 0) {
+            $sum = 0
+            foreach ($ch in $normalized.ToCharArray()) { $sum += [int][char]$ch }
+            $bucket = ($sum % 50)
+        }
+    }
+    $number = $levelBase + $bucket
+    return ("{0}-{1:000}" -f $prefix, $number)
+}
+
 function Update-LogCategorySettings {
     $script:LogCategories = @{}
     foreach ($name in $script:LogCategoryNames) {
@@ -1761,6 +1895,40 @@ function Log-ShutdownSummary([string]$reason) {
     Update-FunStatsOnShutdown $uptimeMinutes
 }
 
+function Load-AuditChainState {
+    if (-not $script:AuditChainPath -or -not (Test-Path $script:AuditChainPath)) { return }
+    try {
+        $loaded = Read-JsonFileSecure $script:AuditChainPath 32768 "Audit chain state"
+        if ($loaded -and ($loaded.PSObject.Properties.Name -contains "LastHash")) {
+            $last = [string]$loaded.LastHash
+            if (-not [string]::IsNullOrWhiteSpace($last) -and $last -match "^[A-Fa-f0-9]{64}$") {
+                $script:AuditChainLastHash = $last.ToUpperInvariant()
+            }
+        }
+    } catch {
+    }
+}
+
+function Save-AuditChainState {
+    if (-not $script:AuditChainPath) { return }
+    try {
+        $payload = [pscustomobject]@{
+            UpdatedUtc = (Get-Date).ToUniversalTime().ToString("o")
+            LastHash   = [string]$script:AuditChainLastHash
+            SessionId  = [string]$script:SessionId
+        }
+        $tmp = Join-Path $script:MetaDir ("Teams-Always-Green.audit.chain.json.tmp.{0}" -f ([Guid]::NewGuid().ToString("N")))
+        $payload | ConvertTo-Json -Depth 4 | Set-Content -Path $tmp -Encoding UTF8
+        try {
+            Move-Item -Path $tmp -Destination $script:AuditChainPath -Force
+        } catch {
+            Copy-Item -Path $tmp -Destination $script:AuditChainPath -Force
+            try { Remove-Item -Path $tmp -Force -ErrorAction SilentlyContinue } catch { }
+        }
+    } catch {
+    }
+}
+
 function Write-AuditLog([string]$action, [string]$context = $null, [string]$actionId = $null, [string]$detail = $null) {
     if (-not $script:AuditLogEnabled) { return }
     if ([string]::IsNullOrWhiteSpace($action)) { return }
@@ -1774,7 +1942,16 @@ function Write-AuditLog([string]$action, [string]$context = $null, [string]$acti
         if ($context) { $parts += "Context=$context" }
         if ($actionId) { $parts += "Id=$actionId" }
         if ($detail) { $parts += "Detail=$detail" }
+        if (-not $script:AuditChainLastHash) { $script:AuditChainLastHash = "GENESIS" }
+        if ($script:AuditChainLastHash -eq "GENESIS") { Load-AuditChainState }
+        $payloadText = ("{0}|{1}|{2}|{3}|{4}" -f $timestamp, $action, $context, $actionId, $detail)
+        $prevHash = if ($script:AuditChainLastHash) { [string]$script:AuditChainLastHash } else { "GENESIS" }
+        $entryHash = Get-StringSha256Hex ("{0}|{1}" -f $prevHash, $payloadText)
+        $parts += "PrevHash=$prevHash"
+        $parts += "Hash=$entryHash"
         Add-Content -Path $script:AuditLogPath -Value ($parts -join " ")
+        $script:AuditChainLastHash = $entryHash
+        Save-AuditChainState
     } catch {
     }
 }
@@ -2196,6 +2373,80 @@ function Write-DiagnosticsReport([string]$targetPath) {
     return $targetPath
 }
 
+function Export-SupportBundle([string]$outputPath) {
+    if ([string]::IsNullOrWhiteSpace($outputPath)) { return $null }
+    $tempRoot = Join-Path $env:TEMP ("TeamsAlwaysGreen.support." + [Guid]::NewGuid().ToString("N"))
+    $bundleRoot = Join-Path $tempRoot "bundle"
+    try {
+        New-Item -ItemType Directory -Path $bundleRoot -Force | Out-Null
+        $diagnosticsPath = Join-Path $bundleRoot "diagnostics.txt"
+        Write-DiagnosticsReport $diagnosticsPath | Out-Null
+
+        $recentLogPath = Join-Path $bundleRoot "recent-log.txt"
+        $recentLines = @()
+        if (Test-Path $logPath) {
+            $recentLines = @(Get-Content -Path $logPath -Tail 500 -ErrorAction SilentlyContinue)
+        } else {
+            $recentLines = @("Log file not found.")
+        }
+        if ($settings.ScrubDiagnostics) { $recentLines = @(Scrub-LogLines $recentLines) }
+        $recentLines | Set-Content -Path $recentLogPath -Encoding UTF8
+
+        $filesToCopy = @(
+            @{ Source = $logPath; Target = "Teams-Always-Green.log" },
+            @{ Source = $script:AuditLogPath; Target = "Teams-Always-Green.audit.log" },
+            @{ Source = $script:BootstrapLogPath; Target = "Teams-Always-Green.bootstrap.log" },
+            @{ Source = $script:settingsPath; Target = "Teams-Always-Green.settings.json" },
+            @{ Source = $script:StatePath; Target = "Teams-Always-Green.state.json" }
+        )
+        foreach ($entry in $filesToCopy) {
+            $src = [string]$entry.Source
+            if ([string]::IsNullOrWhiteSpace($src) -or -not (Test-Path $src)) { continue }
+            $dst = Join-Path $bundleRoot ([string]$entry.Target)
+            if ($settings.ScrubDiagnostics -and ($dst -like "*.log" -or $dst -like "*.json")) {
+                try {
+                    $raw = Get-Content -Path $src -Raw -ErrorAction Stop
+                    $clean = Scrub-LogText $raw
+                    Set-Content -Path $dst -Value $clean -Encoding UTF8
+                } catch {
+                    Copy-Item -Path $src -Destination $dst -Force
+                }
+            } else {
+                Copy-Item -Path $src -Destination $dst -Force
+            }
+        }
+
+        $metaPath = Join-Path $bundleRoot "bundle-info.txt"
+        $metaLines = @(
+            "Teams-Always-Green Support Bundle",
+            ("Generated: {0}" -f (Format-DateTime (Get-Date))),
+            ("Version: {0}" -f $appVersion),
+            ("Build: {0}" -f $appBuildId),
+            ("Last Updated: {0}" -f $appLastUpdated),
+            ("Script Path: {0}" -f $scriptPath),
+            ("Log Directory: {0}" -f $script:LogDirectory),
+            ("Settings Directory: {0}" -f $script:SettingsDirectory),
+            ("Scrub Diagnostics: {0}" -f [bool]$settings.ScrubDiagnostics)
+        )
+        $metaLines | Set-Content -Path $metaPath -Encoding UTF8
+
+        $destDir = Split-Path -Parent $outputPath
+        if (-not [string]::IsNullOrWhiteSpace($destDir) -and -not (Test-Path $destDir)) {
+            New-Item -ItemType Directory -Path $destDir -Force | Out-Null
+        }
+
+        if (Test-Path $outputPath) { Remove-Item -Path $outputPath -Force -ErrorAction SilentlyContinue }
+        Compress-Archive -Path (Join-Path $bundleRoot "*") -DestinationPath $outputPath -CompressionLevel Optimal -Force
+        Write-Log ("Support bundle exported to {0}" -f $outputPath) "INFO" $null "Diagnostics"
+        return $outputPath
+    } catch {
+        Write-Log ("Support bundle export failed: {0}" -f $_.Exception.Message) "ERROR" $_.Exception "Diagnostics"
+        return $null
+    } finally {
+        try { if (Test-Path $tempRoot) { Remove-Item -Path $tempRoot -Recurse -Force -ErrorAction SilentlyContinue } } catch { }
+    }
+}
+
 function Get-DriveFreeMB([string]$path) {
     try {
         $normalized = Normalize-PathText $path
@@ -2282,6 +2533,7 @@ function Write-Log([string]$message, [string]$level = "INFO", [Exception]$except
         $script:LogLevel = "INFO"
     }
     $category = Get-LogCategory $context
+    $eventId = Get-LogEventId $context $levelKey $message
     $recommended = Get-RecommendedLogLevel $context $message
     if ($recommended -eq "DEBUG" -and $levelKey -eq "INFO") {
         if ($script:LogLevel -ne "DEBUG") {
@@ -2343,6 +2595,7 @@ function Write-Log([string]$message, [string]$level = "INFO", [Exception]$except
         }
     } else {
         $parts = @("[${timestamp}]", "[$displayLevel]")
+        if ($eventId) { $parts += "[E=$eventId]" }
         if ($script:LogLevel -eq "DEBUG") {
             $parts += "[S=$($script:RunId)]"
             $logType = if ($message -like "UI:*" -or $context -match "Settings|Tray|Profiles|Hotkey-Test") { "UI" } else { "SYS" }
@@ -2360,7 +2613,7 @@ function Write-Log([string]$message, [string]$level = "INFO", [Exception]$except
                 }
             }
             if ($script:LastUserActionId) {
-                $parts += "[E=$($script:LastUserActionId)]"
+                $parts += "[A=$($script:LastUserActionId)]"
             }
             if ($script:LogResultOverride) {
                 $parts += "[R=$($script:LogResultOverride)]"
@@ -2569,9 +2822,16 @@ function Load-Settings {
         return $null
     }
     try {
+        $info = Get-Item -LiteralPath $settingsPath -ErrorAction Stop
+        if ([int64]$info.Length -gt [int64]$script:SettingsMaxBytes) {
+            throw ("Settings file exceeds max size ({0} bytes)." -f $script:SettingsMaxBytes)
+        }
         $raw = Get-Content -Path $settingsPath -Raw
         $loaded = $raw | ConvertFrom-Json
-        $validation = Test-SettingsSchema $loaded
+        $strictSchema = $false
+        if ($loaded -and ($loaded.PSObject.Properties.Name -contains "SecurityModeEnabled") -and [bool]$loaded.SecurityModeEnabled) { $strictSchema = $true }
+        if ($loaded -and ($loaded.PSObject.Properties.Name -contains "StrictSettingsImport") -and [bool]$loaded.StrictSettingsImport) { $strictSchema = $true }
+        $validation = Test-SettingsSchema $loaded -Strict:$strictSchema
         $script:SettingsLoadIssues = $validation.Issues
         $script:SettingsFutureVersion = $validation.FutureVersion
         if ($validation.IsCritical) {
@@ -2583,7 +2843,7 @@ function Load-Settings {
         if ($validation.Issues.Count -gt 0) {
             Write-Log ("Settings validation warnings: {0}" -f (($validation.Issues | Select-Object -First 6) -join "; ")) "WARN" $null "Load-Settings"
         }
-        $script:SettingsExtraFields = Get-SettingsExtraFields $loaded
+        $script:SettingsExtraFields = if ($strictSchema) { @{} } else { Get-SettingsExtraFields $loaded }
         Save-LastGoodSettingsRaw $raw
         $script:SettingsLoadFailed = $false
         $script:SettingsRecovered = $false
@@ -2604,10 +2864,13 @@ function Load-Settings {
         }
         $lastGood = Load-LastGoodSettings
         if ($lastGood) {
-            $validation = Test-SettingsSchema $lastGood
+            $strictSchema = $false
+            if ($lastGood -and ($lastGood.PSObject.Properties.Name -contains "SecurityModeEnabled") -and [bool]$lastGood.SecurityModeEnabled) { $strictSchema = $true }
+            if ($lastGood -and ($lastGood.PSObject.Properties.Name -contains "StrictSettingsImport") -and [bool]$lastGood.StrictSettingsImport) { $strictSchema = $true }
+            $validation = Test-SettingsSchema $lastGood -Strict:$strictSchema
             $script:SettingsLoadIssues = $validation.Issues
             $script:SettingsFutureVersion = $validation.FutureVersion
-            $script:SettingsExtraFields = Get-SettingsExtraFields $lastGood
+            $script:SettingsExtraFields = if ($strictSchema) { @{} } else { Get-SettingsExtraFields $lastGood }
             Write-Log "Recovered settings from last known good snapshot." "WARN" $null "Load-Settings"
             $script:SettingsRecovered = $true
             return $lastGood
@@ -3041,6 +3304,28 @@ function Normalize-Settings($settings) {
     if (-not ($settings.PSObject.Properties.Name -contains "DataRoot")) { Set-SettingsPropertyValue $settings "DataRoot" $script:DataRoot }
     if ([string]::IsNullOrWhiteSpace([string]$settings.DataRoot)) { $settings.DataRoot = $script:DataRoot }
     if (-not ($settings.PSObject.Properties.Name -contains "AllowExternalPaths")) { Set-SettingsPropertyValue $settings "AllowExternalPaths" $false }
+    if (-not ($settings.PSObject.Properties.Name -contains "SecurityModeEnabled")) { Set-SettingsPropertyValue $settings "SecurityModeEnabled" $false }
+    if (-not ($settings.PSObject.Properties.Name -contains "StrictSettingsImport")) { Set-SettingsPropertyValue $settings "StrictSettingsImport" $false }
+    if (-not ($settings.PSObject.Properties.Name -contains "StrictProfileImport")) { Set-SettingsPropertyValue $settings "StrictProfileImport" $true }
+    if (-not ($settings.PSObject.Properties.Name -contains "StrictUpdatePolicy")) { Set-SettingsPropertyValue $settings "StrictUpdatePolicy" $true }
+    if (-not ($settings.PSObject.Properties.Name -contains "RequireScriptSignature")) { Set-SettingsPropertyValue $settings "RequireScriptSignature" $false }
+    if (-not ($settings.PSObject.Properties.Name -contains "TrustedSignerThumbprints")) { Set-SettingsPropertyValue $settings "TrustedSignerThumbprints" "" }
+    if (-not ($settings.PSObject.Properties.Name -contains "UpdateOwner")) { Set-SettingsPropertyValue $settings "UpdateOwner" $script:SecurityDefaultUpdateOwner }
+    if (-not ($settings.PSObject.Properties.Name -contains "UpdateRepo")) { Set-SettingsPropertyValue $settings "UpdateRepo" $script:SecurityDefaultUpdateRepo }
+    if (-not ($settings.PSObject.Properties.Name -contains "UpdateRequireHash")) { Set-SettingsPropertyValue $settings "UpdateRequireHash" $true }
+    if (-not ($settings.PSObject.Properties.Name -contains "UpdateAllowDowngrade")) { Set-SettingsPropertyValue $settings "UpdateAllowDowngrade" $false }
+    if (-not ($settings.PSObject.Properties.Name -contains "UpdateAllowPrerelease")) { Set-SettingsPropertyValue $settings "UpdateAllowPrerelease" $false }
+    if (-not ($settings.PSObject.Properties.Name -contains "UpdateRequireSignature")) { Set-SettingsPropertyValue $settings "UpdateRequireSignature" $true }
+    if (-not ($settings.PSObject.Properties.Name -contains "HardenPermissions")) { Set-SettingsPropertyValue $settings "HardenPermissions" $true }
+    if ([bool]$settings.SecurityModeEnabled) {
+        $settings.StrictSettingsImport = $true
+        $settings.StrictProfileImport = $true
+        $settings.StrictUpdatePolicy = $true
+        $settings.UpdateRequireHash = $true
+        $settings.UpdateRequireSignature = $true
+        $settings.AllowExternalPaths = $false
+        $settings.HardenPermissions = $true
+    }
     $allowExternal = [bool]$settings.AllowExternalPaths
     $settings.SettingsDirectory = Sanitize-DirectorySetting ([string]$settings.SettingsDirectory) $script:FolderNames.Settings "Settings" $allowExternal
     $settings.LogDirectory = Sanitize-DirectorySetting ([string]$settings.LogDirectory) $script:FolderNames.Logs "Logs" $allowExternal
@@ -3123,6 +3408,28 @@ function Normalize-Settings($settings) {
 function Validate-SettingsForSave($settings) {
     $issues = @()
     if (-not $settings) { return @{ Settings = $settings; Issues = $issues } }
+    if (-not ($settings.PSObject.Properties.Name -contains "SecurityModeEnabled")) { $settings.SecurityModeEnabled = $false }
+    if (-not ($settings.PSObject.Properties.Name -contains "StrictSettingsImport")) { $settings.StrictSettingsImport = $false }
+    if (-not ($settings.PSObject.Properties.Name -contains "StrictProfileImport")) { $settings.StrictProfileImport = $true }
+    if (-not ($settings.PSObject.Properties.Name -contains "StrictUpdatePolicy")) { $settings.StrictUpdatePolicy = $true }
+    if (-not ($settings.PSObject.Properties.Name -contains "RequireScriptSignature")) { $settings.RequireScriptSignature = $false }
+    if (-not ($settings.PSObject.Properties.Name -contains "TrustedSignerThumbprints")) { $settings.TrustedSignerThumbprints = "" }
+    if (-not ($settings.PSObject.Properties.Name -contains "UpdateOwner")) { $settings.UpdateOwner = $script:SecurityDefaultUpdateOwner }
+    if (-not ($settings.PSObject.Properties.Name -contains "UpdateRepo")) { $settings.UpdateRepo = $script:SecurityDefaultUpdateRepo }
+    if (-not ($settings.PSObject.Properties.Name -contains "UpdateRequireHash")) { $settings.UpdateRequireHash = $true }
+    if (-not ($settings.PSObject.Properties.Name -contains "UpdateAllowDowngrade")) { $settings.UpdateAllowDowngrade = $false }
+    if (-not ($settings.PSObject.Properties.Name -contains "UpdateAllowPrerelease")) { $settings.UpdateAllowPrerelease = $false }
+    if (-not ($settings.PSObject.Properties.Name -contains "UpdateRequireSignature")) { $settings.UpdateRequireSignature = $true }
+    if (-not ($settings.PSObject.Properties.Name -contains "HardenPermissions")) { $settings.HardenPermissions = $true }
+    if ([bool]$settings.SecurityModeEnabled) {
+        $settings.StrictSettingsImport = $true
+        $settings.StrictProfileImport = $true
+        $settings.StrictUpdatePolicy = $true
+        $settings.UpdateRequireHash = $true
+        $settings.UpdateRequireSignature = $true
+        $settings.AllowExternalPaths = $false
+        $settings.HardenPermissions = $true
+    }
     if (-not ($settings.PSObject.Properties.Name -contains "AllowExternalPaths")) { $settings.AllowExternalPaths = $false }
     $allowExternal = [bool]$settings.AllowExternalPaths
     if ($settings.PSObject.Properties.Name -contains "DataRoot") {
@@ -3136,18 +3443,41 @@ function Validate-SettingsForSave($settings) {
     if (-not $allowExternal) {
         if (-not [string]::IsNullOrWhiteSpace([string]$settings.LogDirectory)) {
             $resolvedLog = Convert-FromRelativePath ([string]$settings.LogDirectory)
-            if (-not (Is-PathUnderRoot $resolvedLog $script:DataRoot)) {
+            if (-not (Test-TrustedDirectoryPath $resolvedLog $script:DataRoot $false)) {
                 $issues += "LogDirectory outside data root; reset to default"
                 $settings.LogDirectory = ""
             }
         }
         if (-not [string]::IsNullOrWhiteSpace([string]$settings.SettingsDirectory)) {
             $resolvedSettings = Convert-FromRelativePath ([string]$settings.SettingsDirectory)
-            if (-not (Is-PathUnderRoot $resolvedSettings $script:DataRoot)) {
+            if (-not (Test-TrustedDirectoryPath $resolvedSettings $script:DataRoot $false)) {
                 $issues += "SettingsDirectory outside data root; reset to default"
                 $settings.SettingsDirectory = ""
             }
         }
+    } else {
+        if (-not [string]::IsNullOrWhiteSpace([string]$settings.LogDirectory)) {
+            $resolvedLogExt = Convert-FromRelativePath ([string]$settings.LogDirectory)
+            if (-not (Test-TrustedDirectoryPath $resolvedLogExt $script:DataRoot $true)) {
+                $issues += "LogDirectory rejected due to reparse point; reset to default"
+                $settings.LogDirectory = ""
+            }
+        }
+        if (-not [string]::IsNullOrWhiteSpace([string]$settings.SettingsDirectory)) {
+            $resolvedSettingsExt = Convert-FromRelativePath ([string]$settings.SettingsDirectory)
+            if (-not (Test-TrustedDirectoryPath $resolvedSettingsExt $script:DataRoot $true)) {
+                $issues += "SettingsDirectory rejected due to reparse point; reset to default"
+                $settings.SettingsDirectory = ""
+            }
+        }
+    }
+    if ([string]::IsNullOrWhiteSpace([string]$settings.UpdateOwner) -or [string]$settings.UpdateOwner -notmatch '^[A-Za-z0-9._-]+$') {
+        $issues += "UpdateOwner invalid; reset to default"
+        $settings.UpdateOwner = $script:SecurityDefaultUpdateOwner
+    }
+    if ([string]::IsNullOrWhiteSpace([string]$settings.UpdateRepo) -or [string]$settings.UpdateRepo -notmatch '^[A-Za-z0-9._-]+$') {
+        $issues += "UpdateRepo invalid; reset to default"
+        $settings.UpdateRepo = $script:SecurityDefaultUpdateRepo
     }
     if ($settings.PSObject.Properties.Name -contains "UiLanguage") {
         $allowedLangs = @("auto") + @($script:UiStrings.Keys)
@@ -3293,6 +3623,22 @@ function Migrate-Settings($settings) {
         }
         $current = 8
     }
+    if ($current -lt 9) {
+        if (-not ($settings.PSObject.Properties.Name -contains "SecurityModeEnabled")) { Set-SettingsPropertyValue $settings "SecurityModeEnabled" $false }
+        if (-not ($settings.PSObject.Properties.Name -contains "StrictSettingsImport")) { Set-SettingsPropertyValue $settings "StrictSettingsImport" $false }
+        if (-not ($settings.PSObject.Properties.Name -contains "StrictProfileImport")) { Set-SettingsPropertyValue $settings "StrictProfileImport" $true }
+        if (-not ($settings.PSObject.Properties.Name -contains "StrictUpdatePolicy")) { Set-SettingsPropertyValue $settings "StrictUpdatePolicy" $true }
+        if (-not ($settings.PSObject.Properties.Name -contains "RequireScriptSignature")) { Set-SettingsPropertyValue $settings "RequireScriptSignature" $false }
+        if (-not ($settings.PSObject.Properties.Name -contains "TrustedSignerThumbprints")) { Set-SettingsPropertyValue $settings "TrustedSignerThumbprints" "" }
+        if (-not ($settings.PSObject.Properties.Name -contains "UpdateOwner")) { Set-SettingsPropertyValue $settings "UpdateOwner" $script:SecurityDefaultUpdateOwner }
+        if (-not ($settings.PSObject.Properties.Name -contains "UpdateRepo")) { Set-SettingsPropertyValue $settings "UpdateRepo" $script:SecurityDefaultUpdateRepo }
+        if (-not ($settings.PSObject.Properties.Name -contains "UpdateRequireHash")) { Set-SettingsPropertyValue $settings "UpdateRequireHash" $true }
+        if (-not ($settings.PSObject.Properties.Name -contains "UpdateAllowDowngrade")) { Set-SettingsPropertyValue $settings "UpdateAllowDowngrade" $false }
+        if (-not ($settings.PSObject.Properties.Name -contains "UpdateAllowPrerelease")) { Set-SettingsPropertyValue $settings "UpdateAllowPrerelease" $false }
+        if (-not ($settings.PSObject.Properties.Name -contains "UpdateRequireSignature")) { Set-SettingsPropertyValue $settings "UpdateRequireSignature" $true }
+        if (-not ($settings.PSObject.Properties.Name -contains "HardenPermissions")) { Set-SettingsPropertyValue $settings "HardenPermissions" $true }
+        $current = 9
+    }
     Set-SettingsPropertyValue $settings "SchemaVersion" $current
     return $settings
 }
@@ -3380,6 +3726,7 @@ function Save-SettingsImmediate($settings) {
                 Logging     = @("LogLevel", "LogMaxBytes", "LogMaxTotalBytes", "LogRetentionDays", "LogIncludeStackTrace", "LogToEventLog", "LogEventLevels", "LogCategories", "LogDirectory")
                 Diagnostics = @("ScrubDiagnostics")
                 Profiles    = @("ActiveProfile", "Profiles")
+                Security    = @("SecurityModeEnabled", "StrictSettingsImport", "StrictProfileImport", "StrictUpdatePolicy", "RequireScriptSignature", "TrustedSignerThumbprints", "AllowExternalPaths", "AutoUpdateEnabled", "UpdateOwner", "UpdateRepo", "UpdateRequireHash", "UpdateRequireSignature", "UpdateAllowDowngrade", "UpdateAllowPrerelease", "HardenPermissions")
             }
             $grouped = @()
             foreach ($category in $categoryMap.Keys) {
@@ -3592,7 +3939,7 @@ function Migrate-ProfileSnapshot($profile) {
     return $profile
 }
 
-function Test-ProfileSnapshot($profile) {
+function Test-ProfileSnapshot($profile, [switch]$Strict) {
     $issues = @()
     if (-not $profile) {
         $issues += "Profile is null."
@@ -3606,6 +3953,34 @@ function Test-ProfileSnapshot($profile) {
     foreach ($key in $required) {
         $hasKey = if ($profile -is [hashtable]) { $profile.ContainsKey($key) } else { $profile.PSObject.Properties.Name -contains $key }
         if (-not $hasKey) { $issues += "Missing $key" }
+    }
+    $intervalValue = $null
+    if ($profile -is [hashtable]) {
+        if ($profile.ContainsKey("IntervalSeconds")) { $intervalValue = $profile["IntervalSeconds"] }
+    } elseif ($profile.PSObject.Properties.Name -contains "IntervalSeconds") {
+        $intervalValue = $profile.IntervalSeconds
+    }
+    if ($null -ne $intervalValue) {
+        $interval = 0
+        if (-not [int]::TryParse([string]$intervalValue, [ref]$interval) -or $interval -lt 5 -or $interval -gt 3600) {
+            $issues += "IntervalSeconds out of range (5-3600)."
+        }
+    }
+    if ($Strict) {
+        $allowed = @($script:ProfilePropertyNames + $script:ProfileMetadataKeys)
+        $unknown = @()
+        if ($profile -is [hashtable]) {
+            foreach ($key in $profile.Keys) {
+                if (-not ($allowed -contains [string]$key)) { $unknown += [string]$key }
+            }
+        } else {
+            foreach ($prop in $profile.PSObject.Properties.Name) {
+                if (-not ($allowed -contains [string]$prop)) { $unknown += [string]$prop }
+            }
+        }
+        if ($unknown.Count -gt 0) {
+            $issues += ("Unknown profile keys blocked by strict mode: {0}" -f ((@($unknown | Select-Object -First 6)) -join ","))
+        }
     }
     return [pscustomobject]@{ IsValid = ($issues.Count -eq 0); Issues = $issues }
 }
@@ -3701,7 +4076,13 @@ function Get-ProfileSnapshot($source) {
 
 function Apply-ProfileSnapshot($target, $profile) {
     $profile = Migrate-ProfileSnapshot $profile
-    $validation = Test-ProfileSnapshot $profile
+    $strictProfileValidation = $false
+    try {
+        if ($settings -and ($settings.PSObject.Properties.Name -contains "SecurityModeEnabled") -and [bool]$settings.SecurityModeEnabled) { $strictProfileValidation = $true }
+        if ($settings -and ($settings.PSObject.Properties.Name -contains "StrictProfileImport") -and [bool]$settings.StrictProfileImport) { $strictProfileValidation = $true }
+    } catch {
+    }
+    $validation = Test-ProfileSnapshot $profile -Strict:$strictProfileValidation
     if (-not $validation.IsValid) {
         $msg = "Profile is invalid: " + (($validation.Issues | Select-Object -First 4) -join ", ")
         Write-Log $msg "WARN" $null "Profiles"
@@ -3744,6 +4125,34 @@ function Sync-ActiveProfileSnapshot($settings) {
     $name = [string]$settings.ActiveProfile
     if ([string]::IsNullOrWhiteSpace($name)) { return }
     $settings.Profiles[$name] = Get-ProfileSnapshot $settings
+}
+
+function New-ProfileSnapshotClone($settings) {
+    $snapshot = Get-ProfileSnapshot $settings
+    if (-not $snapshot) { return $null }
+    $json = $snapshot | ConvertTo-Json -Depth 6
+    return (ConvertFrom-Json $json)
+}
+
+function Ensure-StockProfiles($settings) {
+    if (-not $settings) { return $false }
+    $changed = $false
+    if (-not ($settings.PSObject.Properties.Name -contains "Profiles") -or -not ($settings.Profiles -is [hashtable])) {
+        $settings.Profiles = @{}
+        $changed = $true
+    }
+    $stockNames = @("Default", "Home", "Work")
+    foreach ($profileName in $stockNames) {
+        if ((Get-ObjectKeys $settings.Profiles) -contains $profileName) { continue }
+        $settings.Profiles[$profileName] = New-ProfileSnapshotClone $settings
+        $changed = $true
+    }
+    $activeName = if ($settings.PSObject.Properties.Name -contains "ActiveProfile") { [string]$settings.ActiveProfile } else { "" }
+    if ([string]::IsNullOrWhiteSpace($activeName) -or -not ((Get-ObjectKeys $settings.Profiles) -contains $activeName)) {
+        $settings.ActiveProfile = "Default"
+        $changed = $true
+    }
+    return $changed
 }
 
 # --- Default settings and initial load (first-run) ---
@@ -3796,7 +4205,18 @@ $defaultSettings = [pscustomobject]@{
     LogDirectory = $script:FolderNames.Logs
     SettingsDirectory = $script:FolderNames.Settings
     AllowExternalPaths = $false
+    SecurityModeEnabled = $false
+    StrictSettingsImport = $false
+    StrictProfileImport = $true
+    StrictUpdatePolicy = $true
+    RequireScriptSignature = $false
+    TrustedSignerThumbprints = ""
     AutoUpdateEnabled = $true
+    UpdateOwner = $script:SecurityDefaultUpdateOwner
+    UpdateRepo = $script:SecurityDefaultUpdateRepo
+    UpdateRequireHash = $true
+    UpdateAllowDowngrade = $false
+    UpdateAllowPrerelease = $false
     UpdateRequireSignature = $true
     HardenPermissions = $true
     SettingsTamperNoticeSeen = $false
@@ -3893,7 +4313,21 @@ $script:TabDefaultsMap = @{
         "LogEventLevels",
         "VerboseUiLogging",
         "ScrubDiagnostics",
-        "AutoUpdateEnabled"
+        "AutoUpdateEnabled",
+        "SecurityModeEnabled",
+        "StrictSettingsImport",
+        "StrictProfileImport",
+        "StrictUpdatePolicy",
+        "RequireScriptSignature",
+        "TrustedSignerThumbprints",
+        "UpdateOwner",
+        "UpdateRepo",
+        "UpdateRequireHash",
+        "UpdateRequireSignature",
+        "UpdateAllowDowngrade",
+        "UpdateAllowPrerelease",
+        "AllowExternalPaths",
+        "HardenPermissions"
     )
     Profiles = @(
         "ActiveProfile",
@@ -4073,10 +4507,7 @@ if (-not ($settings.PSObject.Properties.Name -contains "ActiveProfile") -or [str
     $profilesChanged = $true
     $settingsRepairPerformed = $true
 }
-if (@(Get-ObjectKeys $settings.Profiles).Count -eq 0) {
-    $settings.Profiles["Default"] = Get-ProfileSnapshot $settings
-    $settings.Profiles["Work"] = Get-ProfileSnapshot $settings
-    $settings.Profiles["Home"] = Get-ProfileSnapshot $settings
+if (Ensure-StockProfiles $settings) {
     $profilesChanged = $true
     $settingsRepairPerformed = $true
 }
@@ -4084,7 +4515,8 @@ if (@(Get-ObjectKeys $settings.Profiles).Count -eq 0) {
 foreach ($name in @(Get-ObjectKeys $settings.Profiles)) {
     $profile = $settings.Profiles[$name]
     $profile = Migrate-ProfileSnapshot $profile
-    $validation = Test-ProfileSnapshot $profile
+    $strictProfileValidation = ([bool]$settings.SecurityModeEnabled -or [bool]$settings.StrictProfileImport)
+    $validation = Test-ProfileSnapshot $profile -Strict:$strictProfileValidation
     if (-not $validation.IsValid) {
         $lastGood = Get-ProfileLastGood $name
         if ($lastGood) {
@@ -4122,6 +4554,27 @@ if ($settings.PSObject.Properties.Name -contains "HardenPermissions") {
     if ([bool]$settings.HardenPermissions) {
         try { Harden-AppPermissions } catch { }
     }
+}
+
+try {
+    $signatureEnforced = ($settings.PSObject.Properties.Name -contains "RequireScriptSignature" -and [bool]$settings.RequireScriptSignature)
+    $signaturePolicy = Test-ScriptSignaturePolicy $scriptPath $signatureEnforced
+    $script:ScriptSignatureStatus = [string]$signaturePolicy.Status
+    $script:ScriptSignatureThumbprint = [string]$signaturePolicy.Thumbprint
+    if ($signaturePolicy.IsValid) {
+        Write-Log ("Script signature verified. Status={0}" -f $signaturePolicy.Status) "INFO" $null "Security"
+    } else {
+        $reason = if ([string]::IsNullOrWhiteSpace([string]$signaturePolicy.Reason)) { "signature check failed" } else { [string]$signaturePolicy.Reason }
+        $level = if ($signaturePolicy.Enforced) { "ERROR" } else { "WARN" }
+        Write-Log ("Script signature not trusted: {0}" -f $reason) $level $null "Security"
+        if ($signaturePolicy.Enforced) {
+            $script:IntegrityFailed = $true
+            $script:IntegrityStatus = "SignatureFailed"
+            $script:IntegrityIssues += "Authenticode verification failed"
+        }
+    }
+} catch {
+    Write-Log "Script signature policy check failed unexpectedly." "WARN" $_.Exception "Security"
 }
 
 $settings.DateTimeFormat = Normalize-DateTimeFormat ([string]$settings.DateTimeFormat)
@@ -4328,7 +4781,7 @@ Write-Log "=====================================================================
 Write-Log "=                              APP START                              =" "INFO" $null "Init"
 Write-Log "=======================================================================" "INFO" $null "Init"
 if ($script:LogLevel -eq "DEBUG") {
-    Write-Log "Tag Key: S=SessionID T=Type P=Profile C=Context Tab=Tab E=EventId R=Result" "INFO" $null "Logging"
+    Write-Log "Tag Key: E=EventId S=SessionID T=Type P=Profile C=Context Tab=Tab A=ActionId R=Result" "INFO" $null "Logging"
     Write-Log "=======================================================================" "INFO" $null "Init"
 }
 Write-Log (Get-PathHealthSummary) "DEBUG" $null "Init"
@@ -6163,6 +6616,16 @@ function Import-ScriptFunctionsToScriptScope([string]$path, [string]$tag) {
         Write-Log ("{0}: UI path not found: {1}" -f $tag, $path) "ERROR" $_.Exception $tag
         return $false
     }
+    if (-not (Is-PathUnderRoot $resolved $script:AppRoot)) {
+        Write-Log ("{0}: UI path outside app root blocked: {1}" -f $tag, $resolved) "ERROR" $null $tag
+        return $false
+    }
+    # Stop reparse scanning at AppRoot to avoid false positives from trusted parent folders
+    # (for example, OneDrive-backed user roots).
+    if (Test-PathHasReparsePoint -Path $resolved -StopAtPath $script:AppRoot) {
+        Write-Log ("{0}: UI path contains reparse point and was blocked: {1}" -f $tag, $resolved) "ERROR" $null $tag
+        return $false
+    }
     $funcs = @()
     try {
         $funcs = & {
@@ -6185,11 +6648,6 @@ function Import-ScriptFunctionsToScriptScope([string]$path, [string]$tag) {
         } catch {
             Write-Log ("{0}: Failed to register function {1} in script scope." -f $tag, $func.Name) "ERROR" $_.Exception $tag
             return $false
-        }
-        try {
-            Set-Item -Path ("Function:\global:{0}" -f $func.Name) -Value $func.ScriptBlock -Force
-        } catch {
-            Write-Log ("{0}: Failed to register function {1} in global scope." -f $tag, $func.Name) "WARN" $_.Exception $tag
         }
         $script:ImportedUiFunctions[$func.Name] = $func.ScriptBlock
     }
@@ -6232,14 +6690,6 @@ function Show-SettingsDialog {
         & $script:ImportedUiFunctions["Show-SettingsDialog"]
         return
     }
-    $cmd = Get-Command global:Show-SettingsDialog -CommandType Function -ErrorAction SilentlyContinue
-    if (-not $cmd) {
-        $cmd = Get-Command Show-SettingsDialog -CommandType Function -ErrorAction SilentlyContinue
-    }
-    if ($cmd -and $cmd.ScriptBlock -ne $MyInvocation.MyCommand.ScriptBlock) {
-        & $cmd.ScriptBlock
-        return
-    }
     Write-Log "Show-SettingsDialog missing after load." "ERROR" $null "Settings-UI"
 }
 
@@ -6249,14 +6699,6 @@ function Show-LogTailDialog {
         & $script:ImportedUiFunctions["Show-LogTailDialog"]
         return
     }
-    $cmd = Get-Command global:Show-LogTailDialog -CommandType Function -ErrorAction SilentlyContinue
-    if (-not $cmd) {
-        $cmd = Get-Command Show-LogTailDialog -CommandType Function -ErrorAction SilentlyContinue
-    }
-    if ($cmd -and $cmd.ScriptBlock -ne $MyInvocation.MyCommand.ScriptBlock) {
-        & $cmd.ScriptBlock
-        return
-    }
     Write-Log "Show-LogTailDialog missing after load." "ERROR" $null "Settings-UI"
 }
 
@@ -6264,14 +6706,6 @@ function Show-HistoryDialog {
     if (-not (Ensure-HistoryUiLoaded)) { return }
     if ($script:ImportedUiFunctions.ContainsKey("Show-HistoryDialog")) {
         & $script:ImportedUiFunctions["Show-HistoryDialog"]
-        return
-    }
-    $cmd = Get-Command global:Show-HistoryDialog -CommandType Function -ErrorAction SilentlyContinue
-    if (-not $cmd) {
-        $cmd = Get-Command Show-HistoryDialog -CommandType Function -ErrorAction SilentlyContinue
-    }
-    if ($cmd -and $cmd.ScriptBlock -ne $MyInvocation.MyCommand.ScriptBlock) {
-        & $cmd.ScriptBlock
         return
     }
     Write-Log "Show-HistoryDialog missing after load." "ERROR" $null "History-UI"

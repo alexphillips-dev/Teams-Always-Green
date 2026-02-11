@@ -10,6 +10,8 @@ $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $analyzerSettings = Join-Path $repoRoot "PSScriptAnalyzerSettings.psd1"
 $manifestScript = Join-Path $repoRoot "Tools/Generate-QuickSetupManifest.ps1"
 $pesterTests = Join-Path $repoRoot "Tools/Quality.Tests.ps1"
+$versionPath = Join-Path $repoRoot "VERSION"
+$changelogPath = Join-Path $repoRoot "CHANGELOG.md"
 
 Write-Host "== Quality checks starting =="
 Write-Host "RepoRoot: $repoRoot"
@@ -19,6 +21,26 @@ if (-not (Get-Module -ListAvailable -Name PSScriptAnalyzer)) {
 }
 if (-not (Get-Module -ListAvailable -Name Pester)) {
     throw "Pester module is not installed."
+}
+
+Write-Host "Checking VERSION and changelog..."
+if (-not (Test-Path $versionPath)) {
+    throw "VERSION file is missing."
+}
+$version = (Get-Content -Path $versionPath -Raw).Trim()
+if ($version -notmatch '^\d+\.\d+\.\d+$') {
+    throw "VERSION is not semantic versioning (major.minor.patch): '$version'"
+}
+if (-not (Test-Path $changelogPath)) {
+    throw "CHANGELOG.md is missing."
+}
+$changelog = Get-Content -Path $changelogPath -Raw
+if ($changelog -notmatch '(?im)^##\s*\[Unreleased\]') {
+    throw "CHANGELOG.md is missing an [Unreleased] section."
+}
+$versionPattern = ("(?im)^##\s*\[?{0}\]?" -f [regex]::Escape($version))
+if ($changelog -notmatch $versionPattern) {
+    throw "CHANGELOG.md is missing an entry for VERSION '$version'."
 }
 
 $analyzePaths = @(
