@@ -154,10 +154,11 @@ Versioning discipline:
 - `CHANGELOG.md` must include both `## [Unreleased]` and a section for the current `VERSION`.
 
 1. Run local quality checks: `powershell -NoProfile -ExecutionPolicy Bypass -File .\Tools\Invoke-QualityChecks.ps1`
-2. Refresh installer manifest: `powershell -NoProfile -ExecutionPolicy Bypass -File .\Tools\Generate-QuickSetupManifest.ps1`
-3. Sign release scripts (certificate in cert store required): `powershell -NoProfile -ExecutionPolicy Bypass -File .\Tools\Sign-Release.ps1 -CertificateThumbprint <THUMBPRINT>`
-4. `.github/workflows/quality.yml` runs analyzer + Pester + manifest freshness checks.
-5. `.github/workflows/release-prep.yml` regenerates and commits `Script/QuickSetup/QuickSetup.manifest.json` on demand before release.
+2. Enable local pre-commit guardrails once per clone: `powershell -NoProfile -ExecutionPolicy Bypass -File .\Tools\Enable-GitHooks.ps1`
+3. Refresh installer manifest: `powershell -NoProfile -ExecutionPolicy Bypass -File .\Tools\Generate-QuickSetupManifest.ps1`
+4. Sign release scripts (certificate in cert store required): `powershell -NoProfile -ExecutionPolicy Bypass -File .\Tools\Sign-Release.ps1 -CertificateThumbprint <THUMBPRINT>`
+5. `.github/workflows/quality.yml` runs privacy/security scanning + analyzer + Pester + manifest freshness checks.
+6. `.github/workflows/release-prep.yml` regenerates and commits `Script/QuickSetup/QuickSetup.manifest.json` on demand before release.
 
 ---
 

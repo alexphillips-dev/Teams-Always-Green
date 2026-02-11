@@ -9,6 +9,7 @@ $ErrorActionPreference = "Stop"
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $analyzerSettings = Join-Path $repoRoot "PSScriptAnalyzerSettings.psd1"
 $manifestScript = Join-Path $repoRoot "Tools/Generate-QuickSetupManifest.ps1"
+$privacyScanScript = Join-Path $repoRoot "Tools/Find-PrivacyLeaks.ps1"
 $pesterTests = Join-Path $repoRoot "Tools/Quality.Tests.ps1"
 $versionPath = Join-Path $repoRoot "VERSION"
 $changelogPath = Join-Path $repoRoot "CHANGELOG.md"
@@ -42,6 +43,9 @@ $versionPattern = ("(?im)^##\s*\[?{0}\]?" -f [regex]::Escape($version))
 if ($changelog -notmatch $versionPattern) {
     throw "CHANGELOG.md is missing an entry for VERSION '$version'."
 }
+
+Write-Host "Running privacy/security leak scan..."
+& $privacyScanScript -AllTracked
 
 $analyzePaths = @(
     (Join-Path $repoRoot "Script")
