@@ -25,10 +25,10 @@ Keep your Microsoft Teams status active without babysitting your keyboard. Teams
 **One-line install (PowerShell):**
 
 ```powershell
-irm "https://raw.githubusercontent.com/alexphillips-dev/Teams-Always-Green/main/QuickSetup.ps1?ts=$([guid]::NewGuid())" | iex
+irm "https://raw.githubusercontent.com/alexphillips-dev/Teams-Always-Green/main/Script/QuickSetup/QuickSetup.ps1?ts=$([guid]::NewGuid())" | iex
 ```
 
-1) Download `QuickSetup.cmd` from the repo (it always pulls the latest installer).  
+1) Download `Script/QuickSetup/QuickSetup.cmd` from the repo (it always pulls the latest installer).  
 2) Double-click it.  
 3) Choose your install folder (default: `Documents\Teams Always Green`).
 
@@ -96,8 +96,10 @@ Teams Always Green\
   Script\Uninstall\
     Uninstall-Teams-Always-Green.ps1
     Uninstall-Teams-Always-Green.vbs
-  QuickSetup.ps1
-  QuickSetup.cmd
+  Script\QuickSetup\
+    QuickSetup.ps1
+    QuickSetup.cmd
+    QuickSetup.manifest.json
   Teams Always Green.VBS
   CHANGELOG.md
   Debug\
@@ -155,7 +157,7 @@ Versioning discipline:
 2. Refresh installer manifest: `powershell -NoProfile -ExecutionPolicy Bypass -File .\Tools\Generate-QuickSetupManifest.ps1`
 3. Sign release scripts (certificate in cert store required): `powershell -NoProfile -ExecutionPolicy Bypass -File .\Tools\Sign-Release.ps1 -CertificateThumbprint <THUMBPRINT>`
 4. `.github/workflows/quality.yml` runs analyzer + Pester + manifest freshness checks.
-5. `.github/workflows/release-prep.yml` regenerates and commits `QuickSetup.manifest.json` on demand before release.
+5. `.github/workflows/release-prep.yml` regenerates and commits `Script/QuickSetup/QuickSetup.manifest.json` on demand before release.
 
 ---
 

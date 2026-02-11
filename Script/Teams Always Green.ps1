@@ -7,7 +7,7 @@
 # Files and folders (relative to app root):
 # - Script\Teams Always Green.ps1      Main script (this file)
 # - Teams Always Green.VBS             Launches the script hidden (no console)
-# - QuickSetup.cmd / QuickSetup.ps1    Installer/bootstrapper
+# - Script\QuickSetup\QuickSetup.cmd / Script\QuickSetup\QuickSetup.ps1    Installer/bootstrapper
 # - Runtime data default: %LocalAppData%\TeamsAlwaysGreen
 #   - Logs\                            Runtime logs (main + bootstrap)
 #   - Settings\                        Settings JSON and backups

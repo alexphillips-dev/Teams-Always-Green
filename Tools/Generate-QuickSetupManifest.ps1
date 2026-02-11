@@ -1,6 +1,6 @@
 param(
     [string]$RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path,
-    [string]$ManifestPath = "QuickSetup.manifest.json",
+    [string]$ManifestPath = "Script/QuickSetup/QuickSetup.manifest.json",
     [ValidateSet("LF", "CRLF")][string]$NormalizedLineEndings = "LF",
     [switch]$Check
 )
@@ -84,7 +84,7 @@ function Get-QuickSetupManifestFiles([string]$quickSetupPath) {
 
 $repoRoot = (Resolve-Path $RepoRoot).Path
 $manifestAbsPath = if ([System.IO.Path]::IsPathRooted($ManifestPath)) { $ManifestPath } else { Join-Path $repoRoot $ManifestPath }
-$quickSetupPath = Join-Path $repoRoot "QuickSetup.ps1"
+$quickSetupPath = Join-Path $repoRoot "Script/QuickSetup/QuickSetup.ps1"
 if (-not (Test-Path $quickSetupPath)) {
     throw "QuickSetup.ps1 was not found at: $quickSetupPath"
 }
