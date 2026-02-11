@@ -62,7 +62,7 @@ Optional: choose **portable mode** to skip shortcuts. Setup logs are saved to `%
 
 1) Create a folder (example: `Documents\Teams Always Green`).  
 2) Copy the entire `Script\` folder from the repo into it.  
-3) Create subfolders: `Debug`, `Logs`, `Meta`, `Settings`.  
+3) Copy `Meta\Icons\` and `VERSION` from the repo into the install folder.  
 4) Run:
 
 ```powershell
@@ -89,29 +89,31 @@ Teams Always Green\
     I18n\
     Tray\
     UI\
-  Uninstall-Teams-Always-Green.ps1
+  Script\Uninstall\
+    Uninstall-Teams-Always-Green.ps1
+    Uninstall-Teams-Always-Green.vbs
   QuickSetup.ps1
   QuickSetup.cmd
   Teams Always Green.VBS
   Debug\
-  Logs\
   Meta\
     Icons\
-  Settings\
 ```
 
-Key files:
-- Logs: `Logs\Teams-Always-Green.log`
-- Bootstrap: `Logs\Teams-Always-Green.bootstrap.log`
-- Settings: `Settings\Teams-Always-Green.settings.json`
-- State: `Settings\Teams-Always-Green.state.json`
+Runtime data (standard install):
+- Logs: `%LOCALAPPDATA%\TeamsAlwaysGreen\Logs\Teams-Always-Green.log`
+- Bootstrap: `%LOCALAPPDATA%\TeamsAlwaysGreen\Logs\Teams-Always-Green.bootstrap.log`
+- Settings: `%LOCALAPPDATA%\TeamsAlwaysGreen\Settings\Teams-Always-Green.settings.json`
+- State: `%LOCALAPPDATA%\TeamsAlwaysGreen\Settings\Teams-Always-Green.state.json`
+
+Portable mode stores runtime data in the install folder (`Logs\`, `Settings\`, `Meta\`).
 
 ---
 
 ## Troubleshooting
 
-- **App won't appear:** Check `Debug\*.vbs.log` and `Logs\*.log`.  
-- **Settings not saving:** Ensure the `Settings` folder is writable.  
+- **App won't appear:** Check `Debug\*.vbs.log` and `%LOCALAPPDATA%\TeamsAlwaysGreen\Logs\*.log`.  
+- **Settings not saving:** Ensure `%LOCALAPPDATA%\TeamsAlwaysGreen\Settings` is writable.  
 - **Weird behavior after updates:** Use **Restart** from the tray.
 
 ---
@@ -120,7 +122,7 @@ Key files:
 
 - **Local-only behavior:** No data collection.
 - **Network access:** Used only for update checks (if enabled).
-- **Files created:** Logs and settings remain inside your install folder.
+- **Files created:** Logs/settings/state are stored in your user profile (`%LOCALAPPDATA%\TeamsAlwaysGreen`) for standard installs, or in the install folder for portable mode.
 
 ---
 
