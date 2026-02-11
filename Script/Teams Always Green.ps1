@@ -82,6 +82,21 @@ Add-Type -AssemblyName Microsoft.VisualBasic
 # --- Localization (dot-sourced) ---
 . "$PSScriptRoot\I18n\UiStrings.ps1"
 
+# --- Core helpers (contracts, runtime budgets, atomic writes) ---
+$script:CoreModuleLoadOrder = @(
+    "Core\Paths.ps1",
+    "Core\Runtime.ps1",
+    "Core\Settings.ps1",
+    "Core\Logging.ps1"
+)
+foreach ($coreModuleRelativePath in $script:CoreModuleLoadOrder) {
+    $coreModulePath = Join-Path $PSScriptRoot $coreModuleRelativePath
+    if (-not (Test-Path -LiteralPath $coreModulePath -PathType Leaf)) {
+        throw "Required core module is missing: $coreModulePath"
+    }
+    . $coreModulePath
+}
+
 # --- Single-instance protection (per-script mutex, abandon-safe) ---
 function Get-PathHash([string]$text) {
     $sha = [System.Security.Cryptography.SHA256]::Create()
@@ -767,7 +782,7 @@ function Save-LastGoodSettingsRaw([string]$rawJson) {
     if ([string]::IsNullOrWhiteSpace($rawJson)) { return }
     try {
         Ensure-Directory $script:MetaDir "Meta" | Out-Null
-        Set-Content -Path $script:SettingsLastGoodPath -Value $rawJson -Encoding UTF8
+        Write-AtomicTextFile -Path $script:SettingsLastGoodPath -Content $rawJson -Encoding UTF8
     } catch {
     }
 }
@@ -778,7 +793,7 @@ function Save-CorruptSettingsCopy([string]$rawJson) {
         $stamp = (Get-Date).ToString("yyyyMMddHHmmss")
         $target = Join-Path $script:SettingsCorruptDir ("Teams-Always-Green.settings.corrupt.{0}.json" -f $stamp)
         if (-not [string]::IsNullOrWhiteSpace($rawJson)) {
-            Set-Content -Path $target -Value $rawJson -Encoding UTF8
+            Write-AtomicTextFile -Path $target -Content $rawJson -Encoding UTF8
         } elseif (Test-Path $script:settingsPath) {
             Copy-Item -Path $script:settingsPath -Destination $target -Force
         }
@@ -815,7 +830,7 @@ Write-BootstrapLog "Startup: ScriptPath=$scriptPath LogDir=$script:LogDirectory 
 # --- Shutdown marker for crash detection (clean-exit flag) ---
 function Set-ShutdownMarker([string]$state) {
     try {
-        Set-Content -Path $script:ShutdownMarkerPath -Value $state -Encoding ASCII
+        Write-AtomicTextFile -Path $script:ShutdownMarkerPath -Content $state -Encoding ASCII
     } catch {
         Write-BootstrapLog "Failed to write shutdown marker: $($_.Exception.Message)" "WARN"
     }
@@ -845,6 +860,13 @@ if (-not (Get-Command -Name Write-LogEx -ErrorAction SilentlyContinue)) {
 
 $script:LogThrottle = @{}
 $script:BootTimer = $null
+$script:BootStageDurations = @{}
+$script:BootBudgetWarned = @{}
+$script:StartupBudgetsMs = if (Get-Command Get-DefaultStartupBudgetsMs -ErrorAction SilentlyContinue) {
+    Get-DefaultStartupBudgetsMs
+} else {
+    @{}
+}
 $script:HotkeysReady = $false
 $script:HotkeysPending = $false
 $script:FolderCheckTimer = $null
@@ -875,6 +897,24 @@ function Write-BootStage([string]$label) {
         }
         $elapsed = $script:BootTimer.ElapsedMilliseconds
         Write-Log ("Boot: {0} +{1}ms" -f $label, $elapsed) "INFO" $null "Startup"
+        if (-not [string]::IsNullOrWhiteSpace($label)) {
+            $script:BootStageDurations[$label] = $elapsed
+            if (Get-Command Test-StartupStageBudget -ErrorAction SilentlyContinue) {
+                $budgetResult = Test-StartupStageBudget -Stage $label -ElapsedMs $elapsed -Budgets $script:StartupBudgetsMs
+                if ($budgetResult.HasBudget -and -not $budgetResult.WithinBudget) {
+                    if (-not $script:BootBudgetWarned.ContainsKey($budgetResult.StageKey)) {
+                        Write-Log ("Boot budget exceeded: {0} {1}ms > {2}ms (+{3}ms)." -f $label, $elapsed, $budgetResult.BudgetMs, $budgetResult.DeltaMs) "WARN" $null "Startup"
+                        $script:BootBudgetWarned[$budgetResult.StageKey] = $true
+                    }
+                }
+            }
+            if (($label -eq "Startup complete" -or $label -eq "Deferred startup done") -and (Get-Command Get-StartupBudgetSummaryText -ErrorAction SilentlyContinue)) {
+                $summary = Get-StartupBudgetSummaryText -Durations $script:BootStageDurations -Budgets $script:StartupBudgetsMs
+                if (-not [string]::IsNullOrWhiteSpace($summary)) {
+                    Write-Log ("Boot budget summary: {0}" -f $summary) "INFO" $null "Startup"
+                }
+            }
+        }
     } catch {
     }
 }
@@ -2924,7 +2964,7 @@ function Purge-SettingsBackups {
 function Save-LastGoodStateRaw([string]$rawJson) {
     if ([string]::IsNullOrWhiteSpace($rawJson)) { return }
     try {
-        Set-Content -Path $script:StateLastGoodPath -Value $rawJson -Encoding UTF8
+        Write-AtomicTextFile -Path $script:StateLastGoodPath -Content $rawJson -Encoding UTF8
     } catch {
     }
 }
@@ -2935,7 +2975,7 @@ function Save-CorruptStateCopy([string]$rawJson) {
         Ensure-Directory $script:StateCorruptDir "Corrupt" | Out-Null
         $stamp = (Get-Date).ToString("yyyyMMdd-HHmmss")
         $target = Join-Path $script:StateCorruptDir ("Teams-Always-Green.state.corrupt.{0}.json" -f $stamp)
-        Set-Content -Path $target -Value $rawJson -Encoding UTF8
+        Write-AtomicTextFile -Path $target -Content $rawJson -Encoding UTF8
     } catch {
     }
 }
@@ -3104,14 +3144,7 @@ function Save-StateImmediate($state) {
             return
         }
         $stateJson = $normalized | ConvertTo-Json -Depth 6
-        $tempStatePath = Join-Path $script:SettingsDirectory ("Teams-Always-Green.state.json.tmp.{0}" -f ([Guid]::NewGuid().ToString("N")))
-        $stateJson | Set-Content -Path $tempStatePath -Encoding UTF8
-        try {
-            Move-Item -Path $tempStatePath -Destination $script:StatePath -Force
-        } catch {
-            Copy-Item -Path $tempStatePath -Destination $script:StatePath -Force
-            try { Remove-Item -Path $tempStatePath -Force -ErrorAction SilentlyContinue } catch { }
-        }
+        Write-AtomicTextFile -Path $script:StatePath -Content $stateJson -Encoding UTF8 -VerifyJson
         Save-LastGoodStateRaw $stateJson
         $script:LastStateSnapshot = $snapshot
         $script:LastStateSnapshotHash = $hash
@@ -3695,20 +3728,8 @@ function Save-SettingsImmediate($settings) {
         Rotate-SettingsBackups
         $settingsToSave = Get-SettingsForSave $settings
         $settingsJson = $settingsToSave | ConvertTo-Json -Depth 6
-        $tempSettingsPath = Join-Path $script:SettingsDirectory ("Teams-Always-Green.settings.json.tmp.{0}" -f ([Guid]::NewGuid().ToString("N")))
         try {
-            $settingsJson | Set-Content -Path $tempSettingsPath -Encoding UTF8
-            try {
-                $null = Get-Content -Path $tempSettingsPath -Raw | ConvertFrom-Json -ErrorAction Stop
-            } catch {
-                throw "Saved settings JSON is not valid."
-            }
-            try {
-                Move-Item -Path $tempSettingsPath -Destination $settingsPath -Force
-            } catch {
-                Copy-Item -Path $tempSettingsPath -Destination $settingsPath -Force
-                try { Remove-Item -Path $tempSettingsPath -Force -ErrorAction SilentlyContinue } catch { }
-            }
+            Write-AtomicTextFile -Path $settingsPath -Content $settingsJson -Encoding UTF8 -VerifyJson
             Save-LastGoodSettingsRaw $settingsJson
         } catch {
             $fallbackBackup = Join-Path $script:SettingsDirectory "Teams-Always-Green.settings.json.bak1"
@@ -6602,10 +6623,30 @@ Sync-SettingsReference $settings
 # Load tray menu after core functions are defined
 . "$PSScriptRoot\Tray\Menu.ps1"
 Write-BootStage "Tray menu loaded"
+if (Get-Command Test-ModuleFunctionContract -ErrorAction SilentlyContinue) {
+    $trayRequiredFunctions = @("Update-TrayLabels", "Invoke-TrayAction", "Set-StatusUpdateTimerEnabled")
+    $trayFunctionMap = @{}
+    foreach ($trayFunctionName in $trayRequiredFunctions) {
+        $trayCommand = Get-Command -Name $trayFunctionName -CommandType Function -ErrorAction SilentlyContinue
+        if ($trayCommand -and $trayCommand.ScriptBlock) {
+            $trayFunctionMap[$trayFunctionName] = $trayCommand.ScriptBlock
+        }
+    }
+    $trayContractResult = Test-ModuleFunctionContract -ModuleTag "Tray-Module" -FunctionMap $trayFunctionMap -RequiredFunctions $trayRequiredFunctions
+    if (-not $trayContractResult.IsValid) {
+        $missing = $trayContractResult.MissingFunctions -join ", "
+        Write-Log ("Tray-Module: Required functions missing: {0}" -f $missing) "ERROR" $null "Tray-Module"
+        throw "Tray module contract check failed."
+    }
+}
 
 $script:SettingsUiLoaded = $false
 $script:HistoryUiLoaded = $false
 $script:ImportedUiFunctions = @{}
+$script:UiModuleContracts = @{
+    "Settings-UI" = @("Show-SettingsDialog", "Show-LogTailDialog", "Ensure-SettingsDialogVisible")
+    "History-UI" = @("Show-HistoryDialog")
+}
 
 function Import-ScriptFunctionsToScriptScope([string]$path, [string]$tag) {
     if ([string]::IsNullOrWhiteSpace($path)) { return $false }
@@ -6659,6 +6700,13 @@ function Ensure-SettingsUiLoaded {
     try {
         $ok = Import-ScriptFunctionsToScriptScope (Join-Path $PSScriptRoot "UI\SettingsDialog.ps1") "Settings-UI"
         if ($ok) {
+            if (Get-Command Test-ModuleFunctionContract -ErrorAction SilentlyContinue) {
+                $contract = Test-ModuleFunctionContract -ModuleTag "Settings-UI" -FunctionMap $script:ImportedUiFunctions -RequiredFunctions $script:UiModuleContracts["Settings-UI"]
+                if (-not $contract.IsValid) {
+                    Write-Log ("Settings-UI: Required functions missing: {0}" -f ($contract.MissingFunctions -join ", ")) "ERROR" $null "Settings-UI"
+                    return $false
+                }
+            }
             $script:SettingsUiLoaded = $true
             return $true
         }
@@ -6674,6 +6722,13 @@ function Ensure-HistoryUiLoaded {
     try {
         $ok = Import-ScriptFunctionsToScriptScope (Join-Path $PSScriptRoot "UI\HistoryDialog.ps1") "History-UI"
         if ($ok) {
+            if (Get-Command Test-ModuleFunctionContract -ErrorAction SilentlyContinue) {
+                $contract = Test-ModuleFunctionContract -ModuleTag "History-UI" -FunctionMap $script:ImportedUiFunctions -RequiredFunctions $script:UiModuleContracts["History-UI"]
+                if (-not $contract.IsValid) {
+                    Write-Log ("History-UI: Required functions missing: {0}" -f ($contract.MissingFunctions -join ", ")) "ERROR" $null "History-UI"
+                    return $false
+                }
+            }
             $script:HistoryUiLoaded = $true
             return $true
         }

@@ -6,11 +6,14 @@ BeforeAll {
     $script:settingsDialogScript = Join-Path $script:repoRoot "Script/UI/SettingsDialog.ps1"
     $script:historyDialogScript = Join-Path $script:repoRoot "Script/UI/HistoryDialog.ps1"
     $script:updateEngineScript = Join-Path $script:repoRoot "Script/Features/UpdateEngine.ps1"
+    $script:coreRuntimeScript = Join-Path $script:repoRoot "Script/Core/Runtime.ps1"
     $script:versionPath = Join-Path $script:repoRoot "VERSION"
     $script:changelogPath = Join-Path $script:repoRoot "CHANGELOG.md"
     $script:mainText = Get-Content -Raw -Path $script:mainScript
     $script:settingsDialogText = Get-Content -Raw -Path $script:settingsDialogScript
+    $script:historyDialogText = Get-Content -Raw -Path $script:historyDialogScript
     $script:updateEngineText = Get-Content -Raw -Path $script:updateEngineScript
+    $script:coreRuntimeText = Get-Content -Raw -Path $script:coreRuntimeScript
 
     $tokens = $null
     $errors = $null
@@ -99,6 +102,76 @@ Describe "Quality: Profile and Update Coverage" {
         $script:settingsDialogText | Should -Match 'SetNewProfileButtonHover'
         $script:settingsDialogText | Should -Match 'DeleteProfileButtonThemeForeColor'
         $script:settingsDialogText | Should -Match 'NewProfileButtonThemeForeColor'
+    }
+}
+
+Describe "Quality: UI Integration Contracts" {
+    BeforeAll {
+        Invoke-Expression $script:coreRuntimeText
+        Invoke-Expression $script:functionTextByName["Import-ScriptFunctionsToScriptScope"]
+
+        function Write-Log {
+            param([string]$Message, [string]$Level, [object]$Exception, [string]$Context)
+        }
+        function Is-PathUnderRoot {
+            param([string]$Path, [string]$Root)
+            return $true
+        }
+        function Test-PathHasReparsePoint {
+            param([string]$Path, [string]$StopAtPath, [switch]$IncludeStopPath)
+            return $false
+        }
+
+        $script:AppRoot = $script:repoRoot
+        $script:ImportedUiFunctions = @{}
+    }
+
+    It "validates settings UI exported-function contract" {
+        $tokens = $null
+        $errors = $null
+        $ast = [System.Management.Automation.Language.Parser]::ParseFile($script:settingsDialogScript, [ref]$tokens, [ref]$errors)
+        $errors | Should -BeNullOrEmpty
+
+        $functionMap = @{}
+        $ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $true) | ForEach-Object {
+            $functionMap[$_.Name] = [scriptblock]::Create("param()")
+        }
+
+        $contract = Test-ModuleFunctionContract -ModuleTag "Settings-UI" -FunctionMap $functionMap -RequiredFunctions @("Show-SettingsDialog", "Show-LogTailDialog", "Ensure-SettingsDialogVisible")
+        $contract.IsValid | Should -BeTrue
+    }
+
+    It "imports history UI functions and satisfies required contract" {
+        $script:ImportedUiFunctions = @{}
+        $ok = Import-ScriptFunctionsToScriptScope $script:historyDialogScript "History-UI"
+        $ok | Should -BeTrue
+        $contract = Test-ModuleFunctionContract -ModuleTag "History-UI" -FunctionMap $script:ImportedUiFunctions -RequiredFunctions @("Show-HistoryDialog")
+        $contract.IsValid | Should -BeTrue
+    }
+}
+
+Describe "Quality: Startup Budgets" {
+    BeforeAll {
+        Invoke-Expression $script:coreRuntimeText
+    }
+
+    It "defines startup budgets for critical boot stages" {
+        $budgets = Get-DefaultStartupBudgetsMs
+        $budgets.Keys -contains "Startup complete" | Should -BeTrue
+        [int64]$budgets["Startup complete"] | Should -BeGreaterThan 0
+    }
+
+    It "detects when startup stage exceeds budget" {
+        $budgets = Get-DefaultStartupBudgetsMs
+        $over = Test-StartupStageBudget -Stage "Startup complete" -ElapsedMs ([int64]$budgets["Startup complete"] + 1) -Budgets $budgets
+        $over.HasBudget | Should -BeTrue
+        $over.WithinBudget | Should -BeFalse
+    }
+
+    It "parses boot stage timings from log lines" {
+        $parsed = Convert-BootLogLineToStageTiming "[2/11/2026 2:18 PM] [INFO] Boot: Startup complete +4050ms"
+        $parsed.Stage | Should -Be "Startup complete"
+        [int64]$parsed.ElapsedMs | Should -Be 4050
     }
 }
 
