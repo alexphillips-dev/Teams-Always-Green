@@ -6,11 +6,11 @@ function Show-SettingsDialog {
         $script:settings = Ensure-SettingsCollections $script:settings
         $script:settings = Normalize-Settings (Migrate-Settings $script:settings)
         $settings = $script:settings
-        $settingsIconRoot = if ($script:AppRoot) { $script:AppRoot } else { (Split-Path -Path $scriptPath -Parent) }
+        $script:SettingsIconRoot = if ($script:AppRoot) { $script:AppRoot } else { (Split-Path -Path $scriptPath -Parent) }
         if ($script:SettingsForm -and -not $script:SettingsForm.IsDisposed) {
             $reuseOk = $true
             try {
-                $settingsIconPath = Join-Path $settingsIconRoot "Meta\\Icons\\Settings_Icon.ico"
+                $settingsIconPath = Join-Path $script:SettingsIconRoot "Meta\\Icons\\Settings_Icon.ico"
                 if (Test-Path $settingsIconPath) {
                     try { $script:SettingsForm.Icon = New-Object System.Drawing.Icon($settingsIconPath) } catch { }
                 } elseif ($notifyIcon -and $notifyIcon.Icon) {
@@ -48,7 +48,7 @@ function Show-SettingsDialog {
     $form.ShowIcon = $true
     $form.ClientSize = New-Object System.Drawing.Size(620, 540)
     $form.MinimumSize = New-Object System.Drawing.Size(520, 480)
-    $settingsIconPath = Join-Path $settingsIconRoot "Meta\\Icons\\Settings_Icon.ico"
+    $settingsIconPath = Join-Path $script:SettingsIconRoot "Meta\\Icons\\Settings_Icon.ico"
     if (Test-Path $settingsIconPath) {
         $form.Icon = New-Object System.Drawing.Icon($settingsIconPath)
     } elseif ($notifyIcon -and $notifyIcon.Icon) {
@@ -61,7 +61,7 @@ function Show-SettingsDialog {
     Set-FormTaskbarIcon $form $settingsIconPath
     $form.Add_Shown({
         param($sender, $e)
-        $shownIconPath = Join-Path $settingsIconRoot "Meta\\Icons\\Settings_Icon.ico"
+        $shownIconPath = Join-Path $script:SettingsIconRoot "Meta\\Icons\\Settings_Icon.ico"
         Set-FormTaskbarIcon $sender $shownIconPath
     })
 
@@ -841,7 +841,7 @@ function Show-SettingsDialog {
         $headerPanel.Tag = "Header:$title"
 
         $columnIndex = 0
-        $iconPath = Join-Path $settingsIconRoot ("Meta\\Icons\\{0}_icon.ico" -f $title)
+        $iconPath = Join-Path $script:SettingsIconRoot ("Meta\\Icons\\{0}_icon.ico" -f $title)
         if (Test-Path $iconPath) {
             try {
                 $icon = New-Object System.Drawing.Icon($iconPath)
@@ -1766,6 +1766,94 @@ function Show-SettingsDialog {
     $script:safeModeThresholdBox.Value = [int]$settings.SafeModeFailureThreshold
     $script:safeModeThresholdBox.Width = 120
 
+    $script:securityModeBox = New-Object System.Windows.Forms.CheckBox
+    $script:securityModeBox.Checked = [bool]$settings.SecurityModeEnabled
+    $script:securityModeBox.AutoSize = $true
+
+    $script:strictSettingsImportBox = New-Object System.Windows.Forms.CheckBox
+    $script:strictSettingsImportBox.Checked = [bool]$settings.StrictSettingsImport
+    $script:strictSettingsImportBox.AutoSize = $true
+
+    $script:strictProfileImportBox = New-Object System.Windows.Forms.CheckBox
+    $script:strictProfileImportBox.Checked = [bool]$settings.StrictProfileImport
+    $script:strictProfileImportBox.AutoSize = $true
+
+    $script:strictUpdatePolicyBox = New-Object System.Windows.Forms.CheckBox
+    $script:strictUpdatePolicyBox.Checked = [bool]$settings.StrictUpdatePolicy
+    $script:strictUpdatePolicyBox.AutoSize = $true
+
+    $script:requireScriptSignatureBox = New-Object System.Windows.Forms.CheckBox
+    $script:requireScriptSignatureBox.Checked = [bool]$settings.RequireScriptSignature
+    $script:requireScriptSignatureBox.AutoSize = $true
+
+    $script:updateRequireHashBox = New-Object System.Windows.Forms.CheckBox
+    $script:updateRequireHashBox.Checked = [bool]$settings.UpdateRequireHash
+    $script:updateRequireHashBox.AutoSize = $true
+
+    $script:updateRequireSignatureBox = New-Object System.Windows.Forms.CheckBox
+    $script:updateRequireSignatureBox.Checked = [bool]$settings.UpdateRequireSignature
+    $script:updateRequireSignatureBox.AutoSize = $true
+
+    $script:allowExternalPathsBox = New-Object System.Windows.Forms.CheckBox
+    $script:allowExternalPathsBox.Checked = [bool]$settings.AllowExternalPaths
+    $script:allowExternalPathsBox.AutoSize = $true
+
+    $script:hardenPermissionsBox = New-Object System.Windows.Forms.CheckBox
+    $script:hardenPermissionsBox.Checked = [bool]$settings.HardenPermissions
+    $script:hardenPermissionsBox.AutoSize = $true
+
+    $script:trustedSignerThumbprintsBox = New-Object System.Windows.Forms.TextBox
+    $script:trustedSignerThumbprintsBox.Text = [string]$settings.TrustedSignerThumbprints
+    $script:trustedSignerThumbprintsBox.Width = 320
+
+    $script:updateOwnerBox = New-Object System.Windows.Forms.TextBox
+    $script:updateOwnerBox.Text = [string]$settings.UpdateOwner
+    if ([string]::IsNullOrWhiteSpace($script:updateOwnerBox.Text)) { $script:updateOwnerBox.Text = "alexphillips-dev" }
+    $script:updateOwnerBox.Width = 240
+
+    $script:updateRepoBox = New-Object System.Windows.Forms.TextBox
+    $script:updateRepoBox.Text = [string]$settings.UpdateRepo
+    if ([string]::IsNullOrWhiteSpace($script:updateRepoBox.Text)) { $script:updateRepoBox.Text = "Teams-Always-Green" }
+    $script:updateRepoBox.Width = 240
+
+    $script:updateAllowPrereleaseBox = New-Object System.Windows.Forms.CheckBox
+    $script:updateAllowPrereleaseBox.Checked = [bool]$settings.UpdateAllowPrerelease
+    $script:updateAllowPrereleaseBox.AutoSize = $true
+
+    $script:updateAllowDowngradeBox = New-Object System.Windows.Forms.CheckBox
+    $script:updateAllowDowngradeBox.Checked = [bool]$settings.UpdateAllowDowngrade
+    $script:updateAllowDowngradeBox.AutoSize = $true
+
+    $script:applySecurityModeState = {
+        $enabled = [bool]$script:securityModeBox.Checked
+        foreach ($ctrl in @(
+            $script:strictSettingsImportBox,
+            $script:strictProfileImportBox,
+            $script:strictUpdatePolicyBox,
+            $script:updateRequireHashBox,
+            $script:updateRequireSignatureBox,
+            $script:allowExternalPathsBox,
+            $script:hardenPermissionsBox
+        )) {
+            if ($ctrl) { $ctrl.Enabled = -not $enabled }
+        }
+        if ($enabled) {
+            if ($script:strictSettingsImportBox) { $script:strictSettingsImportBox.Checked = $true }
+            if ($script:strictProfileImportBox) { $script:strictProfileImportBox.Checked = $true }
+            if ($script:strictUpdatePolicyBox) { $script:strictUpdatePolicyBox.Checked = $true }
+            if ($script:updateRequireHashBox) { $script:updateRequireHashBox.Checked = $true }
+            if ($script:updateRequireSignatureBox) { $script:updateRequireSignatureBox.Checked = $true }
+            if ($script:allowExternalPathsBox) { $script:allowExternalPathsBox.Checked = $false }
+            if ($script:hardenPermissionsBox) { $script:hardenPermissionsBox.Checked = $true }
+        }
+    }
+    $script:securityModeBox.Add_CheckedChanged({
+        if ($script:SettingsIsApplying) { return }
+        if ($script:applySecurityModeState) { & $script:applySecurityModeState }
+        Set-SettingsDirty $true
+    })
+    if ($script:applySecurityModeState) { & $script:applySecurityModeState }
+
     $script:hotkeyToggleBox = New-Object System.Windows.Forms.TextBox
     $script:hotkeyToggleBox.Text = [string]$settings.HotkeyToggle
     $script:hotkeyToggleBox.Width = 240
@@ -2421,6 +2509,7 @@ $clearLogButton = New-Object System.Windows.Forms.Button
     $logCategoryPanel.WrapContents = $true
     $logCategoryPanel.AutoSize = $true
     $logCategoryPanel.AutoSizeMode = [System.Windows.Forms.AutoSizeMode]::GrowAndShrink
+    $script:LogCategoryPanel = $logCategoryPanel
 
     $script:logCategoryBoxes = @{}
     foreach ($name in $script:LogCategoryNames) {
@@ -2658,6 +2747,15 @@ $clearLogButton = New-Object System.Windows.Forms.Button
             $labelWidth = [Math]::Max(200, $script:SettingsLoggingPanel.Parent.ClientSize.Width - 180)
             $script:logFilesLabel.MaximumSize = New-Object System.Drawing.Size($labelWidth, 0)
         }
+        if ($script:LogCategoryGroup -and $script:LogCategoryPanel) {
+            $groupWidth = if ($script:LogCategoryGroup.Parent) { [Math]::Max(240, $script:LogCategoryGroup.Parent.ClientSize.Width - 20) } else { 320 }
+            $script:LogCategoryGroup.MinimumSize = New-Object System.Drawing.Size($groupWidth, 0)
+            $script:LogCategoryGroup.Width = $groupWidth
+            $panelWidth = [Math]::Max(200, $script:LogCategoryGroup.ClientSize.Width - 20)
+            $script:LogCategoryPanel.MaximumSize = New-Object System.Drawing.Size($panelWidth, 0)
+            $script:LogCategoryPanel.Width = $panelWidth
+            $script:LogCategoryPanel.PerformLayout()
+        }
     }
     $script:UpdateTabLayouts = $updateTabLayouts
 
@@ -2734,7 +2832,7 @@ $clearLogButton = New-Object System.Windows.Forms.Button
     $aboutTitlePanel.FlowDirection = [System.Windows.Forms.FlowDirection]::LeftToRight
     $aboutTitlePanel.Dock = "Top"
 
-    $aboutTitleIconPath = Join-Path $settingsIconRoot "Meta\\Icons\\Tray_Icon.ico"
+    $aboutTitleIconPath = Join-Path $script:SettingsIconRoot "Meta\\Icons\\Tray_Icon.ico"
     if (Test-Path $aboutTitleIconPath) {
         try {
             $aboutTitleIcon = New-Object System.Drawing.Icon($aboutTitleIconPath)
@@ -2826,7 +2924,7 @@ $clearLogButton = New-Object System.Windows.Forms.Button
     $aboutCheckedValue.AutoSize = $true
     $script:AboutCheckedValue = $aboutCheckedValue
 
-    $updateAboutChecked = {
+    $script:UpdateAboutChecked = {
         param([datetime]$checkedUtc)
         if (-not $script:AboutCheckedValue) { return }
         if (-not $checkedUtc) {
@@ -2845,7 +2943,7 @@ $clearLogButton = New-Object System.Windows.Forms.Button
     if ($script:UpdateCache.LatestVersion -and $script:AboutLatestReleaseValue) {
         $script:AboutLatestReleaseValue.Text = $script:UpdateCache.LatestVersion
     }
-    if ($script:UpdateCache.CheckedAt) { & $updateAboutChecked $script:UpdateCache.CheckedAt }
+    if ($script:UpdateCache.CheckedAt -and $script:UpdateAboutChecked) { & $script:UpdateAboutChecked $script:UpdateCache.CheckedAt }
 
     $aboutCheckPanel = New-Object System.Windows.Forms.FlowLayoutPanel
     $aboutCheckLabel = New-Object System.Windows.Forms.Label
@@ -2863,16 +2961,112 @@ $clearLogButton = New-Object System.Windows.Forms.Button
     $aboutCheckButton.Text = "Check Now"
     $aboutCheckButton.AutoSize = $true
     $aboutCheckButton.Margin = New-Object System.Windows.Forms.Padding(0, 0, 6, 0)
-    $aboutCheckButton.Add_Click({
-        $release = Get-LatestReleaseCached "alexphillips-dev" "Teams-Always-Green" -Force
-        if ($release) {
-            $latestVersion = Get-ReleaseVersionString $release
-            if (-not [string]::IsNullOrWhiteSpace($latestVersion) -and $script:AboutLatestReleaseValue) {
-                $script:AboutLatestReleaseValue.Text = $latestVersion
-            }
+    $script:AboutCheckButton = $aboutCheckButton
+    $script:ResetAboutCheckUi = {
+        $script:AboutCheckInProgress = $false
+        if ($script:AboutCheckButton) {
+            $script:AboutCheckButton.Text = "Check Now"
+            $script:AboutCheckButton.Enabled = $true
         }
-        if ($script:UpdateCache.CheckedAt) { & $updateAboutChecked $script:UpdateCache.CheckedAt }
-        Invoke-UpdateCheck -Force
+    }
+    $aboutCheckButton.Add_Click({
+        if ($script:AboutCheckInProgress) { return }
+        $script:AboutCheckInProgress = $true
+        if ($script:AboutCheckButton) {
+            $script:AboutCheckButton.Enabled = $false
+            $script:AboutCheckButton.Text = "Checking..."
+        }
+        try {
+            if ($script:AboutUpdatePollTimer) {
+                try { $script:AboutUpdatePollTimer.Stop() } catch { }
+                try { $script:AboutUpdatePollTimer.Dispose() } catch { }
+                $script:AboutUpdatePollTimer = $null
+            }
+            if ($script:AboutUpdateJob) {
+                try { Remove-Job -Job $script:AboutUpdateJob -Force -ErrorAction SilentlyContinue } catch { }
+                $script:AboutUpdateJob = $null
+            }
+
+            $script:AboutUpdateJob = Start-Job -ScriptBlock {
+                param([string]$owner, [string]$repo)
+                try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 } catch { }
+                try {
+                    $uri = "https://api.github.com/repos/$owner/$repo/releases/latest"
+                    $headers = @{ "User-Agent" = "TeamsAlwaysGreen" }
+                    $release = Invoke-RestMethod -Uri $uri -Headers $headers -ErrorAction Stop
+                    [PSCustomObject]@{
+                        Ok      = $true
+                        Release = $release
+                        Error   = ""
+                    }
+                } catch {
+                    [PSCustomObject]@{
+                        Ok      = $false
+                        Release = $null
+                        Error   = $_.Exception.Message
+                    }
+                }
+            } -ArgumentList "alexphillips-dev", "Teams-Always-Green"
+
+            $script:AboutUpdatePollTimer = New-Object System.Windows.Forms.Timer
+            $script:AboutUpdatePollTimer.Interval = 250
+            $script:AboutUpdatePollTimer.Add_Tick({
+                Invoke-SafeTimerAction "AboutUpdatePollTimer" {
+                    if (-not $script:AboutUpdateJob) {
+                        if ($script:AboutUpdatePollTimer) {
+                            $script:AboutUpdatePollTimer.Stop()
+                            $script:AboutUpdatePollTimer.Dispose()
+                            $script:AboutUpdatePollTimer = $null
+                        }
+                        if ($script:ResetAboutCheckUi) { & $script:ResetAboutCheckUi }
+                        return
+                    }
+                    if ($script:AboutUpdateJob.State -in @("Completed", "Failed", "Stopped")) {
+                        if ($script:AboutUpdatePollTimer) {
+                            $script:AboutUpdatePollTimer.Stop()
+                            $script:AboutUpdatePollTimer.Dispose()
+                            $script:AboutUpdatePollTimer = $null
+                        }
+                        $result = $null
+                        try { $result = Receive-Job -Job $script:AboutUpdateJob -ErrorAction SilentlyContinue | Select-Object -First 1 } catch { }
+                        try { Remove-Job -Job $script:AboutUpdateJob -Force -ErrorAction SilentlyContinue } catch { }
+                        $script:AboutUpdateJob = $null
+
+                        if (-not $result -or -not [bool]$result.Ok -or -not $result.Release) {
+                            $message = "Unable to check for updates right now."
+                            if ($result -and $result.Error) { $message += "`n`n" + [string]$result.Error }
+                            [System.Windows.Forms.MessageBox]::Show(
+                                $message,
+                                "Update check",
+                                [System.Windows.Forms.MessageBoxButtons]::OK,
+                                [System.Windows.Forms.MessageBoxIcon]::Warning
+                            ) | Out-Null
+                            if ($script:ResetAboutCheckUi) { & $script:ResetAboutCheckUi }
+                            return
+                        }
+
+                        Invoke-UpdateCheck -Force -Release $result.Release
+                        if ($script:UpdateCache.LatestVersion -and $script:AboutLatestReleaseValue) {
+                            $script:AboutLatestReleaseValue.Text = $script:UpdateCache.LatestVersion
+                        }
+                        if ($script:UpdateCache.CheckedAt -and $script:UpdateAboutChecked) {
+                            & $script:UpdateAboutChecked $script:UpdateCache.CheckedAt
+                        }
+                        if ($script:ResetAboutCheckUi) { & $script:ResetAboutCheckUi }
+                    }
+                }
+            })
+            $script:AboutUpdatePollTimer.Start()
+        } catch {
+            Write-Log "Manual update check failed to start." "ERROR" $_.Exception "Update"
+            [System.Windows.Forms.MessageBox]::Show(
+                "Unable to start update check.",
+                "Update check",
+                [System.Windows.Forms.MessageBoxButtons]::OK,
+                [System.Windows.Forms.MessageBoxIcon]::Warning
+            ) | Out-Null
+            if ($script:ResetAboutCheckUi) { & $script:ResetAboutCheckUi }
+        }
     })
 
     $aboutReleaseLink = New-Object System.Windows.Forms.LinkLabel
@@ -2931,6 +3125,46 @@ $clearLogButton = New-Object System.Windows.Forms.Button
     $script:AboutSupportLink = $aboutSupportLink
     $script:AboutSupportLinkText = $aboutSupportLink.Text
 
+    $aboutSupportBundleButton = New-Object System.Windows.Forms.Button
+    $aboutSupportBundleButton.Text = "Export Support Bundle..."
+    $aboutSupportBundleButton.AutoSize = $true
+    $aboutSupportBundleButton.Margin = New-Object System.Windows.Forms.Padding(8, 0, 0, 0)
+    $aboutSupportBundleButton.Add_Click({
+        & $script:RunSettingsAction "Export Support Bundle" {
+            $dialog = New-Object System.Windows.Forms.SaveFileDialog
+            $dialog.Title = "Export Support Bundle"
+            $dialog.Filter = "ZIP Files (*.zip)|*.zip|All Files (*.*)|*.*"
+            $dialog.FileName = ("Teams-Always-Green.support.{0}.zip" -f (Get-Date -Format "yyyyMMdd-HHmmss"))
+            if ($dialog.ShowDialog() -ne [System.Windows.Forms.DialogResult]::OK) { return }
+            $bundlePath = Export-SupportBundle -outputPath $dialog.FileName
+            if (-not [string]::IsNullOrWhiteSpace($bundlePath)) {
+                [System.Windows.Forms.MessageBox]::Show(
+                    "Support bundle exported successfully.",
+                    "Support bundle",
+                    [System.Windows.Forms.MessageBoxButtons]::OK,
+                    [System.Windows.Forms.MessageBoxIcon]::Information
+                ) | Out-Null
+            } else {
+                [System.Windows.Forms.MessageBox]::Show(
+                    "Support bundle export failed. See log for details.",
+                    "Support bundle",
+                    [System.Windows.Forms.MessageBoxButtons]::OK,
+                    [System.Windows.Forms.MessageBoxIcon]::Warning
+                ) | Out-Null
+            }
+        }
+    })
+    $script:AboutSupportBundleButton = $aboutSupportBundleButton
+
+    $aboutSupportPanel = New-Object System.Windows.Forms.FlowLayoutPanel
+    $aboutSupportPanel.AutoSize = $true
+    $aboutSupportPanel.AutoSizeMode = [System.Windows.Forms.AutoSizeMode]::GrowAndShrink
+    $aboutSupportPanel.WrapContents = $false
+    $aboutSupportPanel.FlowDirection = [System.Windows.Forms.FlowDirection]::LeftToRight
+    $aboutSupportPanel.Anchor = [System.Windows.Forms.AnchorStyles]::Left
+    $aboutSupportPanel.Controls.Add($aboutSupportLink)
+    $aboutSupportPanel.Controls.Add($aboutSupportBundleButton)
+
 
     $aboutDevLabel = New-Object System.Windows.Forms.Label
     $aboutDevLabel.Text = "Developed by"
@@ -2947,7 +3181,7 @@ $clearLogButton = New-Object System.Windows.Forms.Button
     $aboutPartLabel.AutoSize = $true
 
     $aboutPartValue = New-Object System.Windows.Forms.Label
-    $aboutPartValue.Text = "GPT-5.2-Codex"
+    $aboutPartValue.Text = "GPT-5.3-Codex"
     $aboutPartValue.AutoSize = $true
     $script:AboutPartValue = $aboutPartValue
     $script:AboutPartText = $aboutPartValue.Text
@@ -2983,7 +3217,7 @@ $clearLogButton = New-Object System.Windows.Forms.Button
     $aboutLayout.Controls.Add($aboutSpacer5, 0, 14)
     $aboutLayout.SetColumnSpan($aboutSpacer5, 2)
     $aboutLayout.Controls.Add($aboutSupportLabel, 0, 15)
-    $aboutLayout.Controls.Add($aboutSupportLink, 1, 15)
+    $aboutLayout.Controls.Add($aboutSupportPanel, 1, 15)
     $aboutLayout.Controls.Add($aboutSpacer6, 0, 16)
     $aboutLayout.SetColumnSpan($aboutSpacer6, 2)
     $aboutLayout.Controls.Add($aboutDevLabel, 0, 17)
@@ -3072,6 +3306,42 @@ $clearLogButton = New-Object System.Windows.Forms.Button
     $newProfileButton = New-Object System.Windows.Forms.Button
     $newProfileButton.Text = "New..."
     $newProfileButton.Width = 80
+    $script:GetProfileActionButtonForeColor = {
+        if (Get-Variable -Name ThemePalette -Scope Script -ErrorAction SilentlyContinue) {
+            if ($script:ThemePalette -and $script:ThemePalette.ContainsKey("ButtonFore")) {
+                return [System.Drawing.Color]$script:ThemePalette["ButtonFore"]
+            }
+        }
+        if (Get-Variable -Name UseDarkTheme -Scope Script -ErrorAction SilentlyContinue) {
+            if ([bool]$script:UseDarkTheme) { return [System.Drawing.Color]::Gainsboro }
+        }
+        return [System.Drawing.SystemColors]::ControlText
+    }
+    $script:NewProfileButton = $newProfileButton
+    $script:NewProfileButtonDefaultForeColor = $newProfileButton.ForeColor
+    $script:NewProfileButtonThemeForeColor = $newProfileButton.ForeColor
+    $script:SetNewProfileButtonNormal = {
+        if (-not $script:NewProfileButton -or $script:NewProfileButton.IsDisposed) { return }
+        if ($script:GetProfileActionButtonForeColor) {
+            $script:NewProfileButtonThemeForeColor = & $script:GetProfileActionButtonForeColor
+        }
+        if ($script:NewProfileButtonThemeForeColor) {
+            $script:NewProfileButton.ForeColor = $script:NewProfileButtonThemeForeColor
+        } else {
+            $script:NewProfileButton.ForeColor = $script:NewProfileButtonDefaultForeColor
+        }
+    }
+    $script:SetNewProfileButtonHover = {
+        if (-not $script:NewProfileButton -or $script:NewProfileButton.IsDisposed -or -not $script:NewProfileButton.Enabled) { return }
+        if ($script:NewProfileButton.ForeColor -ne [System.Drawing.Color]::DodgerBlue) {
+            $script:NewProfileButtonThemeForeColor = $script:NewProfileButton.ForeColor
+        }
+        $script:NewProfileButton.ForeColor = [System.Drawing.Color]::DodgerBlue
+    }
+    & $script:SetNewProfileButtonNormal
+    $newProfileButton.Add_MouseEnter({ if ($script:SetNewProfileButtonHover) { & $script:SetNewProfileButtonHover } })
+    $newProfileButton.Add_MouseLeave({ if ($script:SetNewProfileButtonNormal) { & $script:SetNewProfileButtonNormal } })
+    $newProfileButton.Add_EnabledChanged({ if ($script:SetNewProfileButtonNormal) { & $script:SetNewProfileButtonNormal } })
 
     $renameProfileButton = New-Object System.Windows.Forms.Button
     $renameProfileButton.Text = "Rename..."
@@ -3080,7 +3350,31 @@ $clearLogButton = New-Object System.Windows.Forms.Button
     $deleteProfileButton = New-Object System.Windows.Forms.Button
     $deleteProfileButton.Text = "Delete"
     $deleteProfileButton.Width = 80
-    $deleteProfileButton.ForeColor = [System.Drawing.Color]::Tomato
+    $script:DeleteProfileButton = $deleteProfileButton
+    $script:DeleteProfileButtonDefaultForeColor = $deleteProfileButton.ForeColor
+    $script:DeleteProfileButtonThemeForeColor = $deleteProfileButton.ForeColor
+    $script:SetDeleteProfileButtonNormal = {
+        if (-not $script:DeleteProfileButton -or $script:DeleteProfileButton.IsDisposed) { return }
+        if ($script:GetProfileActionButtonForeColor) {
+            $script:DeleteProfileButtonThemeForeColor = & $script:GetProfileActionButtonForeColor
+        }
+        if ($script:DeleteProfileButtonThemeForeColor) {
+            $script:DeleteProfileButton.ForeColor = $script:DeleteProfileButtonThemeForeColor
+        } else {
+            $script:DeleteProfileButton.ForeColor = $script:DeleteProfileButtonDefaultForeColor
+        }
+    }
+    $script:SetDeleteProfileButtonHover = {
+        if (-not $script:DeleteProfileButton -or $script:DeleteProfileButton.IsDisposed -or -not $script:DeleteProfileButton.Enabled) { return }
+        if ($script:DeleteProfileButton.ForeColor -ne [System.Drawing.Color]::IndianRed) {
+            $script:DeleteProfileButtonThemeForeColor = $script:DeleteProfileButton.ForeColor
+        }
+        $script:DeleteProfileButton.ForeColor = [System.Drawing.Color]::IndianRed
+    }
+    & $script:SetDeleteProfileButtonNormal
+    $deleteProfileButton.Add_MouseEnter({ if ($script:SetDeleteProfileButtonHover) { & $script:SetDeleteProfileButtonHover } })
+    $deleteProfileButton.Add_MouseLeave({ if ($script:SetDeleteProfileButtonNormal) { & $script:SetDeleteProfileButtonNormal } })
+    $deleteProfileButton.Add_EnabledChanged({ if ($script:SetDeleteProfileButtonNormal) { & $script:SetDeleteProfileButtonNormal } })
 
     $exportProfileButton = New-Object System.Windows.Forms.Button
     $exportProfileButton.Text = "Export..."
@@ -3132,6 +3426,12 @@ $clearLogButton = New-Object System.Windows.Forms.Button
     $profileGroup.Controls.Add($profileLayout)
 
     $script:refreshProfileList = {
+        if (Get-Command -Name Ensure-StockProfiles -ErrorAction SilentlyContinue) {
+            if (Ensure-StockProfiles $settings) {
+                Save-Settings $settings
+                if ($updateProfilesMenu) { & $updateProfilesMenu }
+            }
+        }
         $script:SettingsIsApplying = $true
         $script:profileBox.Items.Clear()
         $names = @(Get-ObjectKeys $settings.Profiles) | Sort-Object
@@ -3545,10 +3845,15 @@ $clearLogButton = New-Object System.Windows.Forms.Button
         $dialog.FileName = "Teams-Always-Green.profile.$name.json"
         if ($dialog.ShowDialog() -ne [System.Windows.Forms.DialogResult]::OK) { return }
         try {
-            $payload = [pscustomobject]@{
+            $profileToExport = Migrate-ProfileSnapshot $settings.Profiles[$name]
+            $payload = [ordered]@{
+                FormatVersion = 1
+                ExportedAt = (Get-Date).ToString("o")
                 Name = $name
-                Profile = $settings.Profiles[$name]
+                SignatureAlgorithm = "SHA256"
+                Profile = $profileToExport
             }
+            $payload["Signature"] = Get-ProfileExportSignature $name $profileToExport
             $payload | ConvertTo-Json -Depth 6 | Set-Content -Path $dialog.FileName -Encoding UTF8
             Write-Log "Profile exported: $name -> $($dialog.FileName)" "INFO" $null "Profiles"
         } catch {
@@ -3564,24 +3869,67 @@ $clearLogButton = New-Object System.Windows.Forms.Button
 
     $importProfileButton.Add_Click({
         if ($script:EnsureProfilesHashtable) { & $script:EnsureProfilesHashtable }
+        if (-not (Test-RateLimit "ProfileImport")) {
+            [System.Windows.Forms.MessageBox]::Show(
+                "Profile import is temporarily rate-limited. Please wait and try again.",
+                "Import blocked",
+                [System.Windows.Forms.MessageBoxButtons]::OK,
+                [System.Windows.Forms.MessageBoxIcon]::Warning
+            ) | Out-Null
+            Write-Log "Profile import blocked by rate limit." "WARN" $null "Profiles"
+            return
+        }
         $dialog = New-Object System.Windows.Forms.OpenFileDialog
         $dialog.Title = "Import Profile"
         $dialog.Filter = "Profile Files (*.json)|*.json|All Files (*.*)|*.*"
         if ($dialog.ShowDialog() -ne [System.Windows.Forms.DialogResult]::OK) { return }
         try {
-            $raw = Get-Content -Path $dialog.FileName -Raw | ConvertFrom-Json
+            $raw = Read-JsonFileSecure $dialog.FileName ([int]$script:ProfileImportMaxBytes) "Profile import"
+            $strictProfileImport = ([bool]$settings.SecurityModeEnabled -or [bool]$settings.StrictProfileImport)
+            $hasPayloadProfile = ($raw -and ($raw.PSObject.Properties.Name -contains "Profile"))
+            $hasPayloadSignatureFields = ($raw -and (($raw.PSObject.Properties.Name -contains "Signature") -or ($raw.PSObject.Properties.Name -contains "SignatureAlgorithm")))
+            if ($hasPayloadProfile -and $hasPayloadSignatureFields) {
+                $sigResult = Test-ProfileExportSignature $raw
+                if (-not $sigResult.IsValid) {
+                    throw ("Profile signature validation failed: {0}" -f $sigResult.Reason)
+                }
+            } elseif ($hasPayloadProfile) {
+                if ($strictProfileImport) {
+                    throw "Unsigned profile files are blocked by strict import policy."
+                }
+                $unsignedPrompt = [System.Windows.Forms.MessageBox]::Show(
+                    "This profile file is unsigned or from an older app version.`n`nContinue importing anyway?",
+                    "Unsigned Profile",
+                    [System.Windows.Forms.MessageBoxButtons]::YesNo,
+                    [System.Windows.Forms.MessageBoxIcon]::Warning
+                )
+                if ($unsignedPrompt -ne [System.Windows.Forms.DialogResult]::Yes) { return }
+            }
             $importProfile = $null
             $defaultName = "Imported"
-            if ($raw.PSObject.Properties.Name -contains "Profile") {
+            if ($hasPayloadProfile) {
                 $importProfile = $raw.Profile
                 if ($raw.PSObject.Properties.Name -contains "Name") { $defaultName = [string]$raw.Name }
             } else {
+                if ($strictProfileImport) {
+                    throw "Legacy profile format is blocked by strict import policy."
+                }
+                $legacyPrompt = [System.Windows.Forms.MessageBox]::Show(
+                    "Legacy profile format detected (no signature).`n`nContinue importing anyway?",
+                    "Legacy Profile",
+                    [System.Windows.Forms.MessageBoxButtons]::YesNo,
+                    [System.Windows.Forms.MessageBoxIcon]::Warning
+                )
+                if ($legacyPrompt -ne [System.Windows.Forms.DialogResult]::Yes) { return }
                 $importProfile = $raw
             }
             if ($null -eq $importProfile) { throw "Invalid profile file." }
             $importProfile = Migrate-ProfileSnapshot $importProfile
-            $validation = Test-ProfileSnapshot $importProfile
-            if (-not $validation.Ok) { throw ("Profile validation failed: {0}" -f $validation.Message) }
+            $validation = Test-ProfileSnapshot $importProfile -Strict:$strictProfileImport
+            if (-not $validation.IsValid) {
+                $issueText = if ($validation.Issues -and $validation.Issues.Count -gt 0) { ($validation.Issues -join ", ") } else { "Unknown validation error." }
+                throw ("Profile validation failed: {0}" -f $issueText)
+            }
             $name = [Microsoft.VisualBasic.Interaction]::InputBox("Profile name:", "Import Profile", $defaultName)
             if ([string]::IsNullOrWhiteSpace($name)) { return }
             $name = $name.Trim()
@@ -3874,6 +4222,21 @@ $clearLogButton = New-Object System.Windows.Forms.Button
     & $addSettingRow $advancedPanel "Safe Mode Failure Threshold" $script:safeModeThresholdBox | Out-Null
     $script:ErrorLabels["Safe Mode Failure Threshold"] = & $addErrorRow $advancedPanel
     if ($script:AddSpacerRow) { & $script:AddSpacerRow $advancedPanel }
+    & $addSettingRow $advancedPanel "Security Mode" $script:securityModeBox | Out-Null
+    & $addSettingRow $advancedPanel "Strict Settings Import" $script:strictSettingsImportBox | Out-Null
+    & $addSettingRow $advancedPanel "Strict Profile Import" $script:strictProfileImportBox | Out-Null
+    & $addSettingRow $advancedPanel "Strict Update Policy" $script:strictUpdatePolicyBox | Out-Null
+    & $addSettingRow $advancedPanel "Require Script Signature" $script:requireScriptSignatureBox | Out-Null
+    & $addSettingRow $advancedPanel "Trusted Signer Thumbprints" $script:trustedSignerThumbprintsBox | Out-Null
+    & $addSettingRow $advancedPanel "Allow External Paths" $script:allowExternalPathsBox | Out-Null
+    & $addSettingRow $advancedPanel "Harden Permissions" $script:hardenPermissionsBox | Out-Null
+    & $addSettingRow $advancedPanel "Update Owner" $script:updateOwnerBox | Out-Null
+    & $addSettingRow $advancedPanel "Update Repo" $script:updateRepoBox | Out-Null
+    & $addSettingRow $advancedPanel "Require Update Hash" $script:updateRequireHashBox | Out-Null
+    & $addSettingRow $advancedPanel "Require Update Signature" $script:updateRequireSignatureBox | Out-Null
+    & $addSettingRow $advancedPanel "Allow Pre-release Updates" $script:updateAllowPrereleaseBox | Out-Null
+    & $addSettingRow $advancedPanel "Allow Downgrade Updates" $script:updateAllowDowngradeBox | Out-Null
+    if ($script:AddSpacerRow) { & $script:AddSpacerRow $advancedPanel }
     & $addSettingRow $advancedPanel "Log Level" $script:logLevelBox | Out-Null
     & $addSettingRow $advancedPanel "Include Stack Trace" $script:logIncludeStackTraceBox | Out-Null
     & $addSettingRow $advancedPanel "Verbose UI Logging" $script:verboseUiLogBox | Out-Null
@@ -4068,6 +4431,10 @@ $clearLogButton = New-Object System.Windows.Forms.Button
 
     $runSettingsAction = {
         param([string]$name, [scriptblock]$action)
+        if (Get-Command -Name Invoke-UiSafeAction -ErrorAction SilentlyContinue) {
+            Invoke-UiSafeAction -Name $name -Action $action -Context "Settings-UI" -ShowDialog -DialogTitle "Error" -DialogMessagePrefix "Settings action failed" | Out-Null
+            return
+        }
         Set-LastUserAction $name "Settings"
         try {
             $actionStart = Get-Date
@@ -4208,6 +4575,9 @@ $clearLogButton = New-Object System.Windows.Forms.Button
         $script:tooltipStyleBox, $script:disableBalloonBox, $script:themeModeBox, $script:fontSizeBox, $script:settingsFontSizeBox, $script:compactModeBox, $script:toggleCountBox, $script:LastTogglePicker, $script:runOnceOnLaunchBox, $script:pauseUntilBox,
         $script:pauseDurationsBox, $script:scheduleOverrideBox, $script:scheduleEnabledBox, $script:scheduleStartBox, $script:scheduleEndBox, $script:scheduleWeekdaysBox,
         $script:scheduleSuspendUntilBox, $script:scheduleSuspendQuickBox, $script:SafeModeEnabledBox, $script:safeModeThresholdBox,
+        $script:securityModeBox, $script:strictSettingsImportBox, $script:strictProfileImportBox, $script:strictUpdatePolicyBox, $script:requireScriptSignatureBox,
+        $script:trustedSignerThumbprintsBox, $script:allowExternalPathsBox, $script:hardenPermissionsBox, $script:updateOwnerBox, $script:updateRepoBox,
+        $script:updateRequireHashBox, $script:updateRequireSignatureBox, $script:updateAllowPrereleaseBox, $script:updateAllowDowngradeBox,
         $script:hotkeyToggleBox, $script:hotkeyStartStopBox, $script:hotkeyPauseResumeBox, $script:logLevelBox, $script:logMaxBox, $script:logRetentionBox, $script:logDirectoryBox,
         $script:settingsDirectoryBox,
         $script:logIncludeStackTraceBox, $script:logToEventLogBox, $script:verboseUiLogBox, $script:ScrubDiagnosticsBox
@@ -4277,6 +4647,20 @@ $clearLogButton = New-Object System.Windows.Forms.Button
         "Test Hotkeys" = "Simulate hotkey actions using the buttons below."
         "Safe Mode Enabled" = "Disable toggling after repeated failures to prevent constant errors."
         "Safe Mode Failure Threshold" = "Number of consecutive failures before Safe Mode activates."
+        "Security Mode" = "Enable a hardened policy bundle: strict import validation, strict update policy, hash/signature requirements, and no external runtime paths."
+        "Strict Settings Import" = "Block settings imports that include unknown keys or malformed schema data."
+        "Strict Profile Import" = "Block profile imports containing unknown keys or schema violations."
+        "Strict Update Policy" = "Only trust update metadata/assets from the configured GitHub owner/repo and block draft/untrusted releases."
+        "Require Script Signature" = "Require this app script to have a valid Authenticode signature from a trusted signer."
+        "Trusted Signer Thumbprints" = "Optional comma-separated signer certificate thumbprints allowed when script signature is required."
+        "Allow External Paths" = "Allow settings/log folders outside the app data root. Disable to reduce path tampering risk."
+        "Harden Permissions" = "Restrict runtime folder ACLs to reduce accidental/malicious write access."
+        "Update Owner" = "Trusted GitHub owner used for update checks."
+        "Update Repo" = "Trusted GitHub repository used for update checks."
+        "Require Update Hash" = "Require a matching SHA-256 hash file for update assets."
+        "Require Update Signature" = "Require a valid detached signature for update assets."
+        "Allow Pre-release Updates" = "Permit GitHub pre-release versions when checking for updates."
+        "Allow Downgrade Updates" = "Permit installing an older version than the one currently running."
         "Log Level" = "Minimum severity written to the log."
         "Include Stack Trace" = "Include exception stack traces for ERROR and FATAL entries."
         "Verbose UI Logging" = "Log UI actions at INFO instead of DEBUG."
@@ -4535,6 +4919,27 @@ $clearLogButton = New-Object System.Windows.Forms.Button
         if ($script:updateScheduleOverrideUI) { & $script:updateScheduleOverrideUI }
         $script:SafeModeEnabledBox.Checked = [bool]$src.SafeModeEnabled
         $script:safeModeThresholdBox.Value = [int]$src.SafeModeFailureThreshold
+        if ($script:securityModeBox) { $script:securityModeBox.Checked = [bool]$src.SecurityModeEnabled }
+        if ($script:strictSettingsImportBox) { $script:strictSettingsImportBox.Checked = [bool]$src.StrictSettingsImport }
+        if ($script:strictProfileImportBox) { $script:strictProfileImportBox.Checked = [bool]$src.StrictProfileImport }
+        if ($script:strictUpdatePolicyBox) { $script:strictUpdatePolicyBox.Checked = [bool]$src.StrictUpdatePolicy }
+        if ($script:requireScriptSignatureBox) { $script:requireScriptSignatureBox.Checked = [bool]$src.RequireScriptSignature }
+        if ($script:trustedSignerThumbprintsBox) { $script:trustedSignerThumbprintsBox.Text = [string]$src.TrustedSignerThumbprints }
+        if ($script:allowExternalPathsBox) { $script:allowExternalPathsBox.Checked = [bool]$src.AllowExternalPaths }
+        if ($script:hardenPermissionsBox) { $script:hardenPermissionsBox.Checked = [bool]$src.HardenPermissions }
+        if ($script:updateOwnerBox) {
+            $script:updateOwnerBox.Text = [string]$src.UpdateOwner
+            if ([string]::IsNullOrWhiteSpace($script:updateOwnerBox.Text)) { $script:updateOwnerBox.Text = "alexphillips-dev" }
+        }
+        if ($script:updateRepoBox) {
+            $script:updateRepoBox.Text = [string]$src.UpdateRepo
+            if ([string]::IsNullOrWhiteSpace($script:updateRepoBox.Text)) { $script:updateRepoBox.Text = "Teams-Always-Green" }
+        }
+        if ($script:updateRequireHashBox) { $script:updateRequireHashBox.Checked = [bool]$src.UpdateRequireHash }
+        if ($script:updateRequireSignatureBox) { $script:updateRequireSignatureBox.Checked = [bool]$src.UpdateRequireSignature }
+        if ($script:updateAllowPrereleaseBox) { $script:updateAllowPrereleaseBox.Checked = [bool]$src.UpdateAllowPrerelease }
+        if ($script:updateAllowDowngradeBox) { $script:updateAllowDowngradeBox.Checked = [bool]$src.UpdateAllowDowngrade }
+        if ($script:applySecurityModeState) { & $script:applySecurityModeState }
         $script:hotkeyToggleBox.Text = [string]$src.HotkeyToggle
         $script:hotkeyStartStopBox.Text = [string]$src.HotkeyStartStop
         $script:hotkeyPauseResumeBox.Text = [string]$src.HotkeyPauseResume
@@ -4688,12 +5093,23 @@ $clearLogButton = New-Object System.Windows.Forms.Button
 
     $importButton.Add_Click({
         & $script:RunSettingsAction "Import Settings" {
+            if (-not (Test-RateLimit "SettingsImport")) {
+                [System.Windows.Forms.MessageBox]::Show(
+                    "Settings import is temporarily rate-limited. Please wait and try again.",
+                    "Import blocked",
+                    [System.Windows.Forms.MessageBoxButtons]::OK,
+                    [System.Windows.Forms.MessageBoxIcon]::Warning
+                ) | Out-Null
+                Write-Log "Settings import blocked by rate limit." "WARN" $null "Settings-Import"
+                return
+            }
             $dialog = New-Object System.Windows.Forms.OpenFileDialog
             $dialog.Filter = "JSON Files (*.json)|*.json|All Files (*.*)|*.*"
             if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
                 try {
-                    $loaded = Get-Content -Path $dialog.FileName -Raw | ConvertFrom-Json
-                    $validation = Test-SettingsSchema $loaded
+                    $loaded = Read-JsonFileSecure $dialog.FileName ([int]$script:SettingsMaxBytes) "Settings import"
+                    $strictImport = ([bool]$settings.SecurityModeEnabled -or [bool]$settings.StrictSettingsImport)
+                    $validation = Test-SettingsSchema $loaded -Strict:$strictImport
                     $script:SettingsFutureVersion = $validation.FutureVersion
                     if ($validation.IsCritical) {
                         throw "Settings file is invalid or incomplete."
@@ -4889,6 +5305,15 @@ $clearLogButton = New-Object System.Windows.Forms.Button
             $errors += (Set-SettingsFieldError "Log Max Size (KB)" "Log Max Size must be a number between 64 and 102400 (KB).")
         }
 
+        $updateOwner = if ($script:updateOwnerBox) { [string]$script:updateOwnerBox.Text } else { "" }
+        $updateRepo = if ($script:updateRepoBox) { [string]$script:updateRepoBox.Text } else { "" }
+        if ([string]::IsNullOrWhiteSpace($updateOwner) -or $updateOwner -notmatch '^[A-Za-z0-9._-]+$') {
+            $errors += (Set-SettingsFieldError "Update Owner" "Update Owner is invalid.")
+        }
+        if ([string]::IsNullOrWhiteSpace($updateRepo) -or $updateRepo -notmatch '^[A-Za-z0-9._-]+$') {
+            $errors += (Set-SettingsFieldError "Update Repo" "Update Repo is invalid.")
+        }
+
         $formatText = [string]$script:dateTimeFormatBox.Text
         $formatText = if ($null -eq $formatText) { "" } else { $formatText.Trim() }
         if (-not [string]::IsNullOrWhiteSpace($formatText) -and -not $script:useSystemDateTimeFormatBox.Checked) {
@@ -4976,6 +5401,29 @@ $clearLogButton = New-Object System.Windows.Forms.Button
         $pending.ScheduleSuspendUntil = if ($scheduleSuspendUntil) { $scheduleSuspendUntil.ToString("o") } else { $null }
         $pending.SafeModeEnabled = $script:SafeModeEnabledBox.Checked
         $pending.SafeModeFailureThreshold = $safeModeThreshold
+        $pending.SecurityModeEnabled = [bool]$script:securityModeBox.Checked
+        $pending.StrictSettingsImport = [bool]$script:strictSettingsImportBox.Checked
+        $pending.StrictProfileImport = [bool]$script:strictProfileImportBox.Checked
+        $pending.StrictUpdatePolicy = [bool]$script:strictUpdatePolicyBox.Checked
+        $pending.RequireScriptSignature = [bool]$script:requireScriptSignatureBox.Checked
+        $pending.TrustedSignerThumbprints = if ($script:trustedSignerThumbprintsBox) { [string]$script:trustedSignerThumbprintsBox.Text } else { "" }
+        $pending.AllowExternalPaths = [bool]$script:allowExternalPathsBox.Checked
+        $pending.HardenPermissions = [bool]$script:hardenPermissionsBox.Checked
+        $pending.UpdateOwner = $updateOwner.Trim()
+        $pending.UpdateRepo = $updateRepo.Trim()
+        $pending.UpdateRequireHash = [bool]$script:updateRequireHashBox.Checked
+        $pending.UpdateRequireSignature = [bool]$script:updateRequireSignatureBox.Checked
+        $pending.UpdateAllowPrerelease = [bool]$script:updateAllowPrereleaseBox.Checked
+        $pending.UpdateAllowDowngrade = [bool]$script:updateAllowDowngradeBox.Checked
+        if ($pending.SecurityModeEnabled) {
+            $pending.StrictSettingsImport = $true
+            $pending.StrictProfileImport = $true
+            $pending.StrictUpdatePolicy = $true
+            $pending.UpdateRequireHash = $true
+            $pending.UpdateRequireSignature = $true
+            $pending.AllowExternalPaths = $false
+            $pending.HardenPermissions = $true
+        }
         $pending.HotkeyToggle = $hotkeyToggle
         $pending.HotkeyStartStop = $hotkeyStartStop
         $pending.HotkeyPauseResume = $hotkeyPauseResume
@@ -5672,6 +6120,10 @@ $clearLogButton = New-Object System.Windows.Forms.Button
     $form.Add_Shown({
         if (-not $script:SettingsForm -or $script:SettingsForm.IsDisposed) { return }
         Invoke-SettingsShownStep "Apply-Theme" { Apply-ThemeToControl $script:SettingsForm $script:ThemePalette $script:UseDarkTheme }
+        Invoke-SettingsShownStep "Refresh-ProfileButtonColors" {
+            if ($script:SetNewProfileButtonNormal) { & $script:SetNewProfileButtonNormal }
+            if ($script:SetDeleteProfileButtonNormal) { & $script:SetDeleteProfileButtonNormal }
+        }
         Invoke-SettingsShownStep "Apply-MenuFontSize" { Apply-MenuFontSize ([int]$settings.FontSize) }
         Invoke-SettingsShownStep "Apply-SettingsFontSize" { Apply-SettingsFontSize ([int]$settings.SettingsFontSize) }
         if ($script:UpdateAppearancePreview) { Invoke-SettingsShownStep "UpdateAppearancePreview" { & $script:UpdateAppearancePreview } }
@@ -5717,6 +6169,42 @@ $clearLogButton = New-Object System.Windows.Forms.Button
             $script:SettingsSearchTimer.Dispose()
             $script:SettingsSearchTimer = $null
         }
+        if ($script:AboutUpdatePollTimer) {
+            try { $script:AboutUpdatePollTimer.Stop() } catch { }
+            try { $script:AboutUpdatePollTimer.Dispose() } catch { }
+            $script:AboutUpdatePollTimer = $null
+        }
+        if ($script:AboutUpdateJob) {
+            try { Remove-Job -Job $script:AboutUpdateJob -Force -ErrorAction SilentlyContinue } catch { }
+            $script:AboutUpdateJob = $null
+        }
+        $script:AboutCheckInProgress = $false
+        $script:DeleteProfileButton = $null
+        $script:DeleteProfileButtonDefaultForeColor = $null
+        $script:DeleteProfileButtonThemeForeColor = $null
+        $script:SetDeleteProfileButtonNormal = $null
+        $script:SetDeleteProfileButtonHover = $null
+        $script:NewProfileButton = $null
+        $script:NewProfileButtonDefaultForeColor = $null
+        $script:NewProfileButtonThemeForeColor = $null
+        $script:SetNewProfileButtonNormal = $null
+        $script:SetNewProfileButtonHover = $null
+        $script:GetProfileActionButtonForeColor = $null
+        $script:applySecurityModeState = $null
+        $script:securityModeBox = $null
+        $script:strictSettingsImportBox = $null
+        $script:strictProfileImportBox = $null
+        $script:strictUpdatePolicyBox = $null
+        $script:requireScriptSignatureBox = $null
+        $script:trustedSignerThumbprintsBox = $null
+        $script:allowExternalPathsBox = $null
+        $script:hardenPermissionsBox = $null
+        $script:updateOwnerBox = $null
+        $script:updateRepoBox = $null
+        $script:updateRequireHashBox = $null
+        $script:updateRequireSignatureBox = $null
+        $script:updateAllowPrereleaseBox = $null
+        $script:updateAllowDowngradeBox = $null
         $script:SettingsForm = $null
     })
 
@@ -5744,14 +6232,129 @@ $clearLogButton = New-Object System.Windows.Forms.Button
         $form.TopMost = $false
     } catch {
         Write-Log "UI: Settings open failed." "ERROR" $_.Exception "Settings-Dialog"
-        [System.Windows.Forms.MessageBox]::Show(
-            "Failed to open Settings.`n$($_.Exception.Message)",
-            "Error",
-            [System.Windows.Forms.MessageBoxButtons]::OK,
-            [System.Windows.Forms.MessageBoxIcon]::Error
-        ) | Out-Null
+        $fallbackShown = $false
+        try {
+            $fallbackDetails = if ($_.Exception) { $_.Exception.Message } else { "Unknown settings startup error." }
+            Show-SettingsFallbackDialog -ErrorMessage $fallbackDetails
+            $fallbackShown = $true
+        } catch {
+            Write-Log "UI: Fallback settings dialog failed." "ERROR" $_.Exception "Settings-Dialog"
+        }
+        if (-not $fallbackShown) {
+            [System.Windows.Forms.MessageBox]::Show(
+                "Failed to open Settings.`n$($_.Exception.Message)",
+                "Error",
+                [System.Windows.Forms.MessageBoxButtons]::OK,
+                [System.Windows.Forms.MessageBoxIcon]::Error
+            ) | Out-Null
+        }
         if ($script:SettingsForm -and $script:SettingsForm.IsDisposed) { $script:SettingsForm = $null }
     }
+}
+
+function Show-SettingsFallbackDialog {
+    param(
+        [string]$ErrorMessage
+    )
+    $safeError = if ([string]::IsNullOrWhiteSpace($ErrorMessage)) { "Unknown settings startup error." } else { $ErrorMessage }
+    $details = @(
+        "Settings failed to load. You can still gather diagnostics from here.",
+        "",
+        ("Error: {0}" -f $safeError),
+        ("Log: {0}" -f $logPath),
+        ("Settings: {0}" -f $settingsPath),
+        ("State: {0}" -f $script:StatePath)
+    ) -join "`r`n"
+
+    $form = New-Object System.Windows.Forms.Form
+    $form.Text = "Settings Recovery"
+    $form.StartPosition = "CenterScreen"
+    $form.Size = New-Object System.Drawing.Size(720, 420)
+    $form.MinimumSize = New-Object System.Drawing.Size(620, 360)
+    $form.ShowInTaskbar = $true
+    $form.TopMost = $true
+
+    $layout = New-Object System.Windows.Forms.TableLayoutPanel
+    $layout.Dock = "Fill"
+    $layout.ColumnCount = 1
+    $layout.RowCount = 3
+    $layout.Padding = New-Object System.Windows.Forms.Padding(12)
+    $layout.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::AutoSize)))
+    $layout.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Percent, 100)))
+    $layout.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::AutoSize)))
+
+    $header = New-Object System.Windows.Forms.Label
+    $header.Text = "Settings Recovery Mode"
+    $header.AutoSize = $true
+    $header.Font = New-Object System.Drawing.Font($form.Font.FontFamily, 11, [System.Drawing.FontStyle]::Bold)
+
+    $detailsBox = New-Object System.Windows.Forms.TextBox
+    $detailsBox.Multiline = $true
+    $detailsBox.ReadOnly = $true
+    $detailsBox.ScrollBars = [System.Windows.Forms.ScrollBars]::Vertical
+    $detailsBox.Dock = "Fill"
+    $detailsBox.Text = $details
+
+    $buttonRow = New-Object System.Windows.Forms.FlowLayoutPanel
+    $buttonRow.FlowDirection = [System.Windows.Forms.FlowDirection]::RightToLeft
+    $buttonRow.WrapContents = $false
+    $buttonRow.AutoSize = $true
+    $buttonRow.Dock = "Fill"
+
+    $closeButton = New-Object System.Windows.Forms.Button
+    $closeButton.Text = "Close"
+    $closeButton.Width = 100
+    $closeButton.Add_Click({
+        param($sender, $e)
+        try {
+            $parentForm = $sender.FindForm()
+            if ($parentForm) { $parentForm.Close() }
+        } catch { }
+    })
+
+    $openSettingsFolderButton = New-Object System.Windows.Forms.Button
+    $openSettingsFolderButton.Text = "Open Settings Folder"
+    $openSettingsFolderButton.Width = 150
+    $openSettingsFolderButton.Add_Click({
+        try {
+            if ($script:SettingsDirectory -and (Test-Path $script:SettingsDirectory)) {
+                Start-Process explorer.exe $script:SettingsDirectory
+            }
+        } catch {
+            Write-Log "Recovery UI failed to open settings folder." "WARN" $_.Exception "Settings-Recovery"
+        }
+    })
+
+    $openLogButton = New-Object System.Windows.Forms.Button
+    $openLogButton.Text = "Open Log"
+    $openLogButton.Width = 110
+    $openLogButton.Add_Click({
+        try {
+            if ($logPath -and (Test-Path $logPath)) {
+                Start-Process notepad.exe $logPath
+            } elseif ($script:LogDirectory -and (Test-Path $script:LogDirectory)) {
+                Start-Process explorer.exe $script:LogDirectory
+            }
+        } catch {
+            Write-Log "Recovery UI failed to open log." "WARN" $_.Exception "Settings-Recovery"
+        }
+    })
+
+    $buttonRow.Controls.Add($closeButton) | Out-Null
+    $buttonRow.Controls.Add($openSettingsFolderButton) | Out-Null
+    $buttonRow.Controls.Add($openLogButton) | Out-Null
+
+    $layout.Controls.Add($header, 0, 0)
+    $layout.Controls.Add($detailsBox, 0, 1)
+    $layout.Controls.Add($buttonRow, 0, 2)
+    $form.Controls.Add($layout)
+
+    if ($iconPath -and (Test-Path $iconPath)) {
+        try { $form.Icon = New-Object System.Drawing.Icon($iconPath) } catch { }
+    }
+
+    Write-Log "UI: Settings fallback dialog shown." "WARN" $null "Settings-Recovery"
+    $form.ShowDialog() | Out-Null
 }
 
 function Ensure-SettingsDialogVisible {

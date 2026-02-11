@@ -1,4 +1,8 @@
-﻿# <img src="https://raw.githubusercontent.com/alexphillips-dev/Teams-Always-Green/refs/heads/main/Meta/Icons/Tray_Icon.ico" alt="Teams Always Green" width="28" height="28"> Teams Always Green
+<p align="center">
+  <img src="Meta/Readme/Banner.png" alt="Teams Always Green Banner" width="100%" />
+</p>
+
+# <img src="https://raw.githubusercontent.com/alexphillips-dev/Teams-Always-Green/refs/heads/main/Meta/Icons/Tray_Icon.ico" alt="Teams Always Green" width="28" height="28"> Teams Always Green
 
 [![Release](https://img.shields.io/github/v/release/alexphillips-dev/Teams-Always-Green?label=release&sort=semver)](https://github.com/alexphillips-dev/Teams-Always-Green/releases/latest)
 [![License](https://img.shields.io/github/license/alexphillips-dev/Teams-Always-Green)](LICENSE)
@@ -123,10 +127,15 @@ Portable mode stores runtime data in the install folder (`Logs\`, `Settings\`, `
 - **Local-only behavior:** No data collection.
 - **Network access:** Used only for update checks (if enabled).
 - **Files created:** Logs/settings/state are stored in your user profile (`%LOCALAPPDATA%\TeamsAlwaysGreen`) for standard installs, or in the install folder for portable mode.
+- **Profile integrity:** Exported profile files include a SHA-256 signature; imports validate signatures and warn before importing legacy unsigned files.
 
 ---
 
 ## Developer Quality & Release
+
+Versioning discipline:
+- `VERSION` must be `major.minor.patch` (SemVer).
+- `CHANGELOG.md` must include both `## [Unreleased]` and a section for the current `VERSION`.
 
 1. Run local quality checks: `powershell -NoProfile -ExecutionPolicy Bypass -File .\Tools\Invoke-QualityChecks.ps1`
 2. Refresh installer manifest: `powershell -NoProfile -ExecutionPolicy Bypass -File .\Tools\Generate-QuickSetupManifest.ps1`
