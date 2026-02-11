@@ -1,0 +1,36 @@
+name: Release Prep
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  prepare:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Regenerate QuickSetup manifest
+        shell: pwsh
+        run: |
+          ./Tools/Generate-QuickSetupManifest.ps1
+
+      - name: Commit manifest if changed
+        shell: pwsh
+        run: |
+          if ((git status --porcelain QuickSetup.manifest.json).Length -gt 0) {
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add QuickSetup.manifest.json
+            git commit -m "Refresh QuickSetup manifest for release"
+            git push
+            Write-Host "Manifest updated and pushed."
+          } else {
+            Write-Host "Manifest already up to date."
+          }

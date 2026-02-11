@@ -126,6 +126,16 @@ Portable mode stores runtime data in the install folder (`Logs\`, `Settings\`, `
 
 ---
 
+## Developer Quality & Release
+
+1. Run local quality checks: `powershell -NoProfile -ExecutionPolicy Bypass -File .\Tools\Invoke-QualityChecks.ps1`
+2. Refresh installer manifest: `powershell -NoProfile -ExecutionPolicy Bypass -File .\Tools\Generate-QuickSetupManifest.ps1`
+3. Sign release scripts (certificate in cert store required): `powershell -NoProfile -ExecutionPolicy Bypass -File .\Tools\Sign-Release.ps1 -CertificateThumbprint <THUMBPRINT>`
+4. `.github/workflows/quality.yml` runs analyzer + Pester + manifest freshness checks.
+5. `.github/workflows/release-prep.yml` regenerates and commits `QuickSetup.manifest.json` on demand before release.
+
+---
+
 ## Uninstall
 
 **Standard install (recommended):** Use the Start Menu shortcut  
