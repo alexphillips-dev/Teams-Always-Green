@@ -10,6 +10,7 @@ trap {
 
 $script:QuickSetupStateDir = Join-Path $env:LOCALAPPDATA "TeamsAlwaysGreen"
 $script:QuickSetupLastPathFile = Join-Path $script:QuickSetupStateDir "QuickSetup.lastpath.txt"
+$script:QuickSetupManifestRelativePath = "Script\QuickSetup\QuickSetup.manifest.json"
 
 function Get-LastInstallBase {
     try {
@@ -29,6 +30,45 @@ function Set-LastInstallBase([string]$path) {
         }
         Set-Content -Path $script:QuickSetupLastPathFile -Value $path -Encoding ASCII
     } catch { }
+}
+
+function Get-QuickSetupSourceRoot {
+    $seedDirs = @()
+    if ($PSScriptRoot) { $seedDirs += $PSScriptRoot }
+    if ($PSCommandPath) { $seedDirs += (Split-Path -Parent $PSCommandPath) }
+    if ($MyInvocation.MyCommand.Path) { $seedDirs += (Split-Path -Parent $MyInvocation.MyCommand.Path) }
+
+    $seen = @{}
+    foreach ($seed in $seedDirs) {
+        if ([string]::IsNullOrWhiteSpace($seed)) { continue }
+        $probe0 = $seed
+        $probe1 = $null
+        $probe2 = $null
+        try { $probe1 = Split-Path -Path $probe0 -Parent } catch { }
+        if (-not [string]::IsNullOrWhiteSpace($probe1)) {
+            try { $probe2 = Split-Path -Path $probe1 -Parent } catch { }
+        }
+
+        foreach ($probe in @($probe0, $probe1, $probe2)) {
+            if ([string]::IsNullOrWhiteSpace($probe)) { continue }
+            $probeFull = $probe
+            try { $probeFull = [System.IO.Path]::GetFullPath($probe) } catch { }
+            if ($seen.ContainsKey($probeFull)) { continue }
+            $seen[$probeFull] = $true
+            if (Test-Path (Join-Path $probeFull "Script\Teams Always Green.ps1")) {
+                return $probeFull
+            }
+        }
+    }
+    return $null
+}
+
+function Get-QuickSetupLocalIconPath {
+    $sourceRoot = Get-QuickSetupSourceRoot
+    if (-not $sourceRoot) { return $null }
+    $iconPath = Join-Path $sourceRoot "Meta\Icons\Tray_Icon.ico"
+    if (Test-Path $iconPath) { return $iconPath }
+    return $null
 }
 
 $tempRoot = $env:TEMP
@@ -395,10 +435,7 @@ function Show-Welcome {
     $iconBox.Location = New-Object System.Drawing.Point(0, 6)
     $iconBox.SizeMode = [System.Windows.Forms.PictureBoxSizeMode]::StretchImage
     $iconPath = $null
-    $localRoot = $PSScriptRoot
-    if (-not $localRoot -and $PSCommandPath) {
-        $localRoot = Split-Path -Parent $PSCommandPath
-    }
+    $localRoot = Get-QuickSetupSourceRoot
     if ($localRoot) {
         $iconPath = Join-Path $localRoot "Meta\Icons\Tray_Icon.ico"
     }
@@ -872,17 +909,15 @@ $ui = New-ProgressForm
 Update-Progress $ui 0 1 "Step 2 of 4: Preparing download..."
 
 $localRoot = $null
-if ($PSScriptRoot) { $localRoot = $PSScriptRoot }
-elseif ($PSCommandPath) { $localRoot = Split-Path -Parent $PSCommandPath }
-elseif ($MyInvocation.MyCommand.Path) { $localRoot = Split-Path -Parent $MyInvocation.MyCommand.Path }
+$localRoot = Get-QuickSetupSourceRoot
 
 $localManifestPath = $null
 $useLocal = $false
 if ($localRoot) {
-    $localManifestPath = Join-Path $localRoot "QuickSetup.manifest.json"
+    $localManifestPath = Join-Path $localRoot $script:QuickSetupManifestRelativePath
     if (Test-Path (Join-Path $localRoot "Script\Teams Always Green.ps1")) {
         $useLocal = (Show-SetupPrompt -message (
-            "Local app files were found next to QuickSetup.ps1.`nUse local files instead of downloading?",
+            "Local app files were found in this local repository checkout.`nUse local files instead of downloading?",
             "Use Local Files"
         ) -title "Use Local Files" -buttons ([System.Windows.Forms.MessageBoxButtons]::YesNo) -icon ([System.Windows.Forms.MessageBoxIcon]::Question)) -eq [System.Windows.Forms.DialogResult]::Yes
     }
@@ -892,7 +927,7 @@ $manifest = $null
 if ($useLocal) {
     $manifest = Load-Manifest $localManifestPath
 } else {
-    $manifestUrl = "$rawBase/QuickSetup.manifest.json?v=$cacheBuster"
+    $manifestUrl = "$rawBase/Script/QuickSetup/QuickSetup.manifest.json?v=$cacheBuster"
     $manifestTarget = Join-Path $installPath "Meta\QuickSetup.manifest.json"
     try {
         Invoke-WebRequest -Uri $manifestUrl -OutFile $manifestTarget -UseBasicParsing
@@ -1196,8 +1231,7 @@ function Show-SetupWizard {
 
     $welcomeIcon = $null
     $iconPath = $null
-    $localRoot = $PSScriptRoot
-    if (-not $localRoot -and $PSCommandPath) { $localRoot = Split-Path -Parent $PSCommandPath }
+    $localRoot = Get-QuickSetupSourceRoot
     if ($localRoot) { $iconPath = Join-Path $localRoot "Meta\Icons\Tray_Icon.ico" }
     if ($iconPath -and (Test-Path $iconPath)) {
         try { $welcomeIcon = New-Object System.Drawing.Icon($iconPath) } catch { }
@@ -1740,10 +1774,7 @@ function Show-SetupWizard {
                 try { if (Test-Path $legacyLocator) { Remove-Item -Path $legacyLocator -Force -ErrorAction SilentlyContinue } } catch { }
             }
 
-            $localRoot = $null
-            if ($PSScriptRoot) { $localRoot = $PSScriptRoot }
-            elseif ($PSCommandPath) { $localRoot = Split-Path -Parent $PSCommandPath }
-            elseif ($MyInvocation.MyCommand.Path) { $localRoot = Split-Path -Parent $MyInvocation.MyCommand.Path }
+            $localRoot = Get-QuickSetupSourceRoot
             $useLocal = $false
             if ($localRoot -and (Test-Path (Join-Path $localRoot "Script\Teams Always Green.ps1"))) {
                 $useLocal = $true
@@ -1752,9 +1783,9 @@ function Show-SetupWizard {
 
             $manifest = $null
             if ($useLocal) {
-                $manifest = Load-Manifest (Join-Path $localRoot "QuickSetup.manifest.json")
+                $manifest = Load-Manifest (Join-Path $localRoot $script:QuickSetupManifestRelativePath)
             } else {
-                $manifestUrl = "$script:QuickSetupRawBase/QuickSetup.manifest.json?v=$script:QuickSetupCacheBuster"
+                $manifestUrl = "$script:QuickSetupRawBase/Script/QuickSetup/QuickSetup.manifest.json?v=$script:QuickSetupCacheBuster"
                 $manifestTarget = Join-Path $state.InstallPath "Meta\QuickSetup.manifest.json"
                 try {
                     Invoke-WebRequest -Uri $manifestUrl -OutFile $manifestTarget -UseBasicParsing

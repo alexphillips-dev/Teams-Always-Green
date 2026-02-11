@@ -44,7 +44,6 @@ if ($changelog -notmatch $versionPattern) {
 }
 
 $analyzePaths = @(
-    (Join-Path $repoRoot "QuickSetup.ps1"),
     (Join-Path $repoRoot "Script")
 )
 

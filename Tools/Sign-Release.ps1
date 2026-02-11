@@ -3,7 +3,7 @@ param(
     [ValidateSet("CurrentUser", "LocalMachine")][string]$StoreLocation = "CurrentUser",
     [string]$StoreName = "My",
     [string]$RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path,
-    [string]$ManifestPath = "QuickSetup.manifest.json",
+    [string]$ManifestPath = "Script/QuickSetup/QuickSetup.manifest.json",
     [string]$TimestampServer = "http://timestamp.digicert.com"
 )
 
