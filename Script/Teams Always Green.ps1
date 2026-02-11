@@ -1,5 +1,6 @@
 ﻿
 # Teams Always Green
+# PSScriptAnalyzerSettings -DisableRuleName PSUseApprovedVerbs
 # Main entry script for the app. This file owns startup, tray menu, timers,
 # settings UI, profiles, logging, scheduling, and shutdown/cleanup.
 #
@@ -7,9 +8,11 @@
 # - Script\Teams Always Green.ps1      Main script (this file)
 # - Teams Always Green.VBS             Launches the script hidden (no console)
 # - QuickSetup.cmd / QuickSetup.ps1    Installer/bootstrapper
-# - Logs\                              Runtime logs (main + bootstrap)
-# - Settings\                          Settings JSON and backups
-# - Meta\                              App metadata and icons
+# - Runtime data default: %LocalAppData%\TeamsAlwaysGreen
+#   - Logs\                            Runtime logs (main + bootstrap)
+#   - Settings\                        Settings JSON and backups
+#   - Meta\                            Runtime metadata (state, crash, status)
+# - Install folder keeps static app assets (Script, Meta\Icons, VERSION)
 # - Meta\Icons\                        App/UI icon assets (.ico)
 # - Debug\                             Debug launcher logs
 # - VERSION                            Current app version (used by updates)
@@ -38,7 +41,8 @@
 # - -SettingsOnly opens the settings window without starting the tray loop
 #
 # Folder integrity:
-# - Keep the folder structure intact (Script/Logs/Settings/Meta/Debug)
+# - Keep the install structure intact (Script/Meta/Debug and launcher files)
+# - Runtime files live under DataRoot (default: %LocalAppData%\TeamsAlwaysGreen)
 
 # --- Runtime setup and WinForms initialization (load assemblies, set UI defaults) ---
 param(
@@ -88,6 +92,7 @@ function Get-PathHash([string]$text) {
 $scriptPath = $MyInvocation.MyCommand.Path
 $scriptDir = Split-Path -Parent $scriptPath
 $appRoot = if ((Split-Path -Leaf $scriptDir) -ieq "Script") { Split-Path -Parent $scriptDir } else { $scriptDir }
+$script:AppRoot = $appRoot
 $script:FolderNames = @{
     Logs = "Logs"
     Settings = "Settings"
@@ -95,7 +100,10 @@ $script:FolderNames = @{
     Debug = "Debug"
     Script = "Script"
 }
-$script:DataRoot = $appRoot
+$portableMarkerPath = Join-Path $script:AppRoot "Meta\PortableMode.txt"
+$script:PortableMode = Test-Path $portableMarkerPath
+$defaultUserDataRoot = Join-Path ([Environment]::GetFolderPath("LocalApplicationData")) "TeamsAlwaysGreen"
+$script:DataRoot = if ($script:PortableMode) { $script:AppRoot } else { $defaultUserDataRoot }
 $script:PathWarnings = @()
 
 function Add-PathWarning([string]$message) {
@@ -215,7 +223,7 @@ function Resolve-DirectoryOrDefault([string]$inputPath, [string]$defaultPath, [s
 }
 
 function Ensure-AppFolders {
-    $folders = @($script:FolderNames.Logs, $script:FolderNames.Settings, $script:FolderNames.Meta, $script:FolderNames.Debug, $script:FolderNames.Script)
+    $folders = @($script:FolderNames.Logs, $script:FolderNames.Settings, $script:FolderNames.Meta, $script:FolderNames.Debug)
     foreach ($folder in $folders) {
         $path = Join-Path $script:DataRoot $folder
         Ensure-Directory $path $folder | Out-Null
@@ -260,8 +268,11 @@ function Redact-Paths([string]$message) {
     if ([string]::IsNullOrWhiteSpace($message)) { return $message }
     $result = $message
     try {
+        if ($script:AppRoot) {
+            $result = $result -replace [regex]::Escape($script:AppRoot), "%APPROOT%"
+        }
         if ($script:DataRoot) {
-            $result = $result -replace [regex]::Escape($script:DataRoot), "%APPROOT%"
+            $result = $result -replace [regex]::Escape($script:DataRoot), "%DATAROOT%"
         }
         $userProfile = $env:USERPROFILE
         if (-not [string]::IsNullOrWhiteSpace($userProfile)) {
@@ -273,7 +284,7 @@ function Redact-Paths([string]$message) {
 }
 
 function Get-IntegrityTargets {
-    $scriptDir = Join-Path $script:DataRoot $script:FolderNames.Script
+    $scriptDir = Join-Path $script:AppRoot $script:FolderNames.Script
     if (Test-Path $scriptDir) {
         return (Get-ChildItem -Path $scriptDir -Recurse -File -Filter *.ps1 | Select-Object -ExpandProperty FullName)
     }
@@ -367,8 +378,8 @@ $script:IntegrityStatus = "Unknown"
 $script:IntegrityIssues = @()
 $script:IntegrityFailed = $false
 $script:UpdatePublicKeyPath = Join-Path $script:MetaDir "Teams-Always-Green.updatekey.xml"
-$oldSettingsLocator = Join-Path $script:DataRoot "Teams-Always-Green.settings.path.txt"
-$oldLogLocator = Join-Path $script:DataRoot "Teams-Always-Green.log.path.txt"
+$oldSettingsLocator = Join-Path $script:AppRoot "Teams-Always-Green.settings.path.txt"
+$oldLogLocator = Join-Path $script:AppRoot "Teams-Always-Green.log.path.txt"
 if ((Test-Path $oldSettingsLocator) -and -not (Test-Path $script:SettingsLocatorPath)) {
     try { Move-Item -Path $oldSettingsLocator -Destination $script:SettingsLocatorPath -Force } catch { }
 }
@@ -790,8 +801,8 @@ function Validate-RequiredFiles {
         Write-LogThrottled "Missing-Version" "VERSION file missing; version display may be inaccurate." "WARN" 300
     }
     $iconFiles = @(
-        (Join-Path $script:DataRoot "Meta\\Icons\\Tray_Icon.ico"),
-        (Join-Path $script:DataRoot "Meta\\Icons\\Settings_Icon.ico")
+        (Join-Path $script:AppRoot "Meta\\Icons\\Tray_Icon.ico"),
+        (Join-Path $script:AppRoot "Meta\\Icons\\Settings_Icon.ico")
     )
     foreach ($icon in $iconFiles) {
         if (-not (Test-Path $icon)) {
@@ -821,7 +832,7 @@ function Validate-FolderPaths {
         @{ Name = "Logs"; Path = $script:LogDirectory },
         @{ Name = "Settings"; Path = $script:SettingsDirectory },
         @{ Name = "Meta"; Path = $script:MetaDir },
-        @{ Name = "Debug"; Path = (Join-Path $script:DataRoot $script:FolderNames.Debug) }
+        @{ Name = "Debug"; Path = (Join-Path $script:AppRoot $script:FolderNames.Debug) }
     )
     foreach ($item in $paths) {
         $exists = Test-Path $item.Path
@@ -1281,7 +1292,7 @@ $script:DebugModeTimer.Add_Tick({
     }
 })
 # --- App metadata (version/build/release) ---
-$versionPath = Join-Path $script:DataRoot "VERSION"
+$versionPath = Join-Path $script:AppRoot "VERSION"
 $appVersion = "1.0.0"
 $appLastUpdated = "Unknown"
 if (Test-Path $versionPath) {
@@ -1548,7 +1559,7 @@ function Invoke-UpdateCheck {
         $backupPath = Join-Path $script:MetaDir ("Teams Always Green.ps1.bak." + (Get-Date -Format "yyyyMMddHHmmss"))
         Copy-Item -Path $scriptPath -Destination $backupPath -Force
         Move-Item -Path $tempPath -Destination $scriptPath -Force
-        $versionPathLocal = Join-Path $script:DataRoot "VERSION"
+        $versionPathLocal = Join-Path $script:AppRoot "VERSION"
         try {
             Set-Content -Path $versionPathLocal -Value $latestVersion -Encoding ASCII
             if ($release.PSObject.Properties.Name -contains "published_at" -and $release.published_at) {
@@ -1565,7 +1576,7 @@ function Invoke-UpdateCheck {
         if (Get-Command -Name Flush-LogBuffer -ErrorAction SilentlyContinue) { Flush-LogBuffer }
         Release-MutexOnce
         $script:CleanupDone = $true
-        Start-Process -FilePath "powershell.exe" -WindowStyle Hidden -WorkingDirectory $script:DataRoot -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$scriptPath`""
+        Start-Process -FilePath "powershell.exe" -WindowStyle Hidden -WorkingDirectory $script:AppRoot -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$scriptPath`""
         [System.Windows.Forms.Application]::Exit()
     } catch {
         try { if (Test-Path $tempPath) { Remove-Item -Path $tempPath -Force } } catch { }
@@ -1612,7 +1623,7 @@ if (-not $script:HasMutex) {
 
 # --- Log/settings paths and logging defaults (resolve + create) ---
 # Resolve paths (same folder as script)
-$iconPath  = Join-Path $script:DataRoot "Meta\\Icons\\Tray_Icon.ico"
+$iconPath  = Join-Path $script:AppRoot "Meta\\Icons\\Tray_Icon.ico"
 $script:logPath   = Join-Path $script:LogDirectory "Teams-Always-Green.log"
 $script:AuditLogPath = Join-Path $script:LogDirectory "Teams-Always-Green.audit.log"
 $script:settingsPath = Join-Path $script:SettingsDirectory "Teams-Always-Green.settings.json"
@@ -1627,18 +1638,18 @@ try {
 } catch {
 }
 # Move root log/settings files into their folders if they were created in the script directory
-$rootLogPath = Join-Path $script:DataRoot "Teams-Always-Green.log"
-if ((Test-Path $rootLogPath) -and ($script:LogDirectory -ne $script:DataRoot)) {
+$rootLogPath = Join-Path $script:AppRoot "Teams-Always-Green.log"
+if ((Test-Path $rootLogPath) -and ($script:LogDirectory -ne $script:AppRoot)) {
     try { Move-Item -Path $rootLogPath -Destination $script:logPath -Force } catch { }
 }
-$rootSettingsPath = Join-Path $script:DataRoot "Teams-Always-Green.settings.json"
-if ((Test-Path $rootSettingsPath) -and ($script:SettingsDirectory -ne $script:DataRoot)) {
+$rootSettingsPath = Join-Path $script:AppRoot "Teams-Always-Green.settings.json"
+if ((Test-Path $rootSettingsPath) -and ($script:SettingsDirectory -ne $script:AppRoot)) {
     try { Move-Item -Path $rootSettingsPath -Destination $script:settingsPath -Force } catch { }
 }
 foreach ($i in 1..3) {
-    $rootBak = Join-Path $script:DataRoot ("Teams-Always-Green.settings.json.bak{0}" -f $i)
+    $rootBak = Join-Path $script:AppRoot ("Teams-Always-Green.settings.json.bak{0}" -f $i)
     $destBak = Join-Path $script:SettingsDirectory ("Teams-Always-Green.settings.json.bak{0}" -f $i)
-    if ((Test-Path $rootBak) -and ($script:SettingsDirectory -ne $script:DataRoot)) {
+    if ((Test-Path $rootBak) -and ($script:SettingsDirectory -ne $script:AppRoot)) {
         try { Move-Item -Path $rootBak -Destination $destBak -Force } catch { }
     }
 }
@@ -3116,7 +3127,7 @@ function Validate-SettingsForSave($settings) {
     $allowExternal = [bool]$settings.AllowExternalPaths
     if ($settings.PSObject.Properties.Name -contains "DataRoot") {
         if ([string]::IsNullOrWhiteSpace([string]$settings.DataRoot) -or ([string]$settings.DataRoot -ne $script:DataRoot)) {
-            $issues += "DataRoot invalid; reset to app folder"
+            $issues += "DataRoot invalid; reset to data root"
             $settings.DataRoot = $script:DataRoot
         }
     } else {
@@ -3126,14 +3137,14 @@ function Validate-SettingsForSave($settings) {
         if (-not [string]::IsNullOrWhiteSpace([string]$settings.LogDirectory)) {
             $resolvedLog = Convert-FromRelativePath ([string]$settings.LogDirectory)
             if (-not (Is-PathUnderRoot $resolvedLog $script:DataRoot)) {
-                $issues += "LogDirectory outside app folder; reset to default"
+                $issues += "LogDirectory outside data root; reset to default"
                 $settings.LogDirectory = ""
             }
         }
         if (-not [string]::IsNullOrWhiteSpace([string]$settings.SettingsDirectory)) {
             $resolvedSettings = Convert-FromRelativePath ([string]$settings.SettingsDirectory)
             if (-not (Is-PathUnderRoot $resolvedSettings $script:DataRoot)) {
-                $issues += "SettingsDirectory outside app folder; reset to default"
+                $issues += "SettingsDirectory outside data root; reset to default"
                 $settings.SettingsDirectory = ""
             }
         }
@@ -4349,7 +4360,7 @@ function Set-StartupShortcut([bool]$enabled) {
         $shortcut = $shell.CreateShortcut($shortcutPath)
         $shortcut.TargetPath = "$env:WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe"
         $shortcut.Arguments = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$scriptPath`""
-    $shortcut.WorkingDirectory = $script:DataRoot
+    $shortcut.WorkingDirectory = $script:AppRoot
         $shortcut.WindowStyle = 7
         $shortcut.IconLocation = if (Test-Path $iconPath) { $iconPath } else { "$env:WINDIR\System32\shell32.dll,1" }
         $shortcut.Save()
@@ -6341,7 +6352,7 @@ $restartItem.Add_Click({
     Release-MutexOnce
     try {
         Write-Log "Restart spawn: launching new instance." "INFO" $null "Restart"
-        $proc = Start-Process -FilePath "powershell.exe" -WindowStyle Hidden -WorkingDirectory $script:DataRoot -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$scriptPath`"" -PassThru
+        $proc = Start-Process -FilePath "powershell.exe" -WindowStyle Hidden -WorkingDirectory $script:AppRoot -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$scriptPath`"" -PassThru
         if ($proc -and $proc.Id) { Write-Log ("Restart new PID={0}" -f $proc.Id) "INFO" $null "Restart" }
     } catch {
         Write-LogEx "Failed to restart app." "ERROR" $_.Exception "Restart" -Force
@@ -6709,54 +6720,3 @@ try {
 } catch {
     Write-Log "Cleanup failed." "ERROR" $_.Exception "Cleanup"
 }
-
-function Test-DirectoryWritable([string]$path) {
-    if ([string]::IsNullOrWhiteSpace($path)) { return $false }
-    try {
-        if (-not (Test-Path $path)) {
-            New-Item -ItemType Directory -Path $path -Force | Out-Null
-        }
-        $testFile = Join-Path $path ("~write_test_{0}.tmp" -f ([Guid]::NewGuid().ToString("N")))
-        Set-Content -Path $testFile -Value "test" -Encoding ASCII
-        Remove-Item -Path $testFile -Force
-        return $true
-    } catch {
-        return $false
-    }
-}
-
-function Ensure-Directory([string]$path, [string]$label = "Directory") {
-    if ([string]::IsNullOrWhiteSpace($path)) { return $false }
-    try {
-        if (-not (Test-Path $path)) {
-            New-Item -ItemType Directory -Path $path -Force | Out-Null
-        }
-        return $true
-    } catch {
-        Write-PathWarningNow "$label missing and could not be created: $path"
-        return $false
-    }
-}
-
-function Resolve-DirectoryOrDefault([string]$inputPath, [string]$defaultPath, [string]$label) {
-    $resolved = Convert-FromRelativePath $inputPath
-    if ([string]::IsNullOrWhiteSpace($resolved)) { $resolved = $defaultPath }
-    $resolved = Normalize-PathText $resolved
-    Ensure-Directory $resolved $label | Out-Null
-    if (-not (Test-DirectoryWritable $resolved)) {
-        Write-PathWarningNow "$label directory not writable: $resolved. Falling back to $defaultPath."
-        $resolved = $defaultPath
-        Ensure-Directory $resolved $label | Out-Null
-    }
-    return $resolved
-}
-
-function Ensure-AppFolders {
-    $folders = @($script:FolderNames.Logs, $script:FolderNames.Settings, $script:FolderNames.Meta, $script:FolderNames.Debug, $script:FolderNames.Script)
-    foreach ($folder in $folders) {
-        $path = Join-Path $script:DataRoot $folder
-        Ensure-Directory $path $folder | Out-Null
-    }
-}
-
-$script:MetaDir = Join-Path $script:DataRoot $script:FolderNames.Meta

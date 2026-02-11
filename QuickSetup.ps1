@@ -801,9 +801,7 @@ if (Test-Path $portableMarker) {
 }
 $folders = @(
     "Debug",
-    "Logs",
     "Meta",
-    "Settings",
     "Meta\Icons",
     "Script",
     "Script\Core",
@@ -812,6 +810,9 @@ $folders = @(
     "Script\Tray",
     "Script\UI"
 )
+if ($portableMode) {
+    $folders += @("Logs", "Settings")
+}
 foreach ($name in $folders) {
     $path = Join-Path $installPath $name
     if (-not (Test-Path $path)) {
@@ -824,18 +825,18 @@ if ($portableMode) {
         Write-SetupLog "Portable mode enabled."
     } catch {
     }
+} else {
+    try { if (Test-Path $portableMarker) { Remove-Item -Path $portableMarker -Force -ErrorAction SilentlyContinue } } catch { }
 }
 
 $metaDir = Join-Path $installPath "Meta"
-$settingsDir = Join-Path $installPath "Settings"
-$logsDir = Join-Path $installPath "Logs"
-$settingsLocator = Join-Path $metaDir "Teams-Always-Green.settings.path.txt"
-$logLocator = Join-Path $metaDir "Teams-Always-Green.log.path.txt"
-try {
-    Set-Content -Path $settingsLocator -Value $settingsDir -Encoding ASCII
-    Set-Content -Path $logLocator -Value $logsDir -Encoding ASCII
-} catch {
-    Write-Host "Failed to write locator files: $($_.Exception.Message)"
+foreach ($legacyLocator in @(
+    (Join-Path $metaDir "Teams-Always-Green.settings.path.txt"),
+    (Join-Path $metaDir "Teams-Always-Green.log.path.txt"),
+    (Join-Path $installPath "Teams-Always-Green.settings.path.txt"),
+    (Join-Path $installPath "Teams-Always-Green.log.path.txt")
+)) {
+    try { if (Test-Path $legacyLocator) { Remove-Item -Path $legacyLocator -Force -ErrorAction SilentlyContinue } } catch { }
 }
 
 $rawBase = "https://raw.githubusercontent.com/alexphillips-dev/Teams-Always-Green/main"
@@ -1015,6 +1016,24 @@ function New-Shortcut([string]$shortcutPath, [string]$targetScriptPath, [string]
     $shortcut.Save()
 }
 
+function New-VbsShortcut([string]$shortcutPath, [string]$vbsPath, [string]$workingDir) {
+    $shell = New-Object -ComObject WScript.Shell
+    $shortcut = $shell.CreateShortcut($shortcutPath)
+    $shortcut.TargetPath = "$env:WINDIR\System32\wscript.exe"
+    $shortcut.Arguments = "`"$vbsPath`""
+    $shortcut.WorkingDirectory = $workingDir
+    $shortcut.WindowStyle = 1
+    $iconPath = Join-Path $workingDir "Meta\Icons\Tray_Icon.ico"
+    if (Test-Path $iconPath) {
+        $shortcut.IconLocation = "$iconPath,0"
+        Write-SetupLog "Shortcut icon set: $iconPath"
+    } else {
+        $shortcut.IconLocation = "$env:WINDIR\System32\shell32.dll,1"
+        Write-SetupLog "Shortcut icon missing, using shell32 fallback."
+    }
+    $shortcut.Save()
+}
+
 function Finalize-Install {
     param(
         [string]$installPath,
@@ -1038,13 +1057,15 @@ function Finalize-Install {
         $startupShortcut = Join-Path $startupDir "Teams Always Green.lnk"
     }
 
-    $uninstallScriptPath = Join-Path $installPath "Uninstall-Teams-Always-Green.ps1"
+    $uninstallDir = Join-Path $installPath "Script\Uninstall"
+    $uninstallScriptPath = Join-Path $uninstallDir "Uninstall-Teams-Always-Green.ps1"
+    $uninstallVbsPath = Join-Path $uninstallDir "Uninstall-Teams-Always-Green.vbs"
     $uninstallScript = @'
 param([switch]$Silent)
 Add-Type -AssemblyName System.Windows.Forms
 
 $scriptPath = $MyInvocation.MyCommand.Path
-$installRoot = Split-Path -Parent $scriptPath
+$installRoot = Split-Path -Parent (Split-Path -Parent $scriptPath)
 $programsDir = [Environment]::GetFolderPath("Programs")
 $menuFolder = Join-Path $programsDir "Teams Always Green"
 $shortcuts = @(
@@ -1078,8 +1099,21 @@ $cmd = "@echo off`r`n" + "timeout /t 2 >nul`r`n" + "rmdir /s /q `"$installRoot`"
 Set-Content -Path $cmdPath -Value $cmd -Encoding ASCII
 Start-Process -FilePath "cmd.exe" -ArgumentList "/c `"$cmdPath`"" -WindowStyle Hidden
 '@
+    $uninstallVbs = @'
+Dim shell, fso, vbsPath, uninstallPs1, cmd
+Set shell = CreateObject("WScript.Shell")
+Set fso = CreateObject("Scripting.FileSystemObject")
+vbsPath = WScript.ScriptFullName
+uninstallPs1 = fso.BuildPath(fso.GetParentFolderName(vbsPath), "Uninstall-Teams-Always-Green.ps1")
+cmd = "powershell.exe -NoProfile -ExecutionPolicy Bypass -File """ & uninstallPs1 & """"
+shell.Run cmd, 1, False
+'@
     try {
+        if (-not (Test-Path $uninstallDir)) {
+            New-Item -ItemType Directory -Path $uninstallDir -Force | Out-Null
+        }
         Set-Content -Path $uninstallScriptPath -Value $uninstallScript -Encoding UTF8
+        Set-Content -Path $uninstallVbsPath -Value $uninstallVbs -Encoding ASCII
     } catch {
         Write-SetupLog "Failed to write uninstall script."
     }
@@ -1095,8 +1129,8 @@ Start-Process -FilePath "cmd.exe" -ArgumentList "/c `"$cmdPath`"" -WindowStyle H
             }
             New-Shortcut -shortcutPath $desktopShortcut -targetScriptPath $targetScript -workingDir $installPath
             $shortcutsCreated += "Desktop"
-            if (Test-Path $uninstallScriptPath) {
-                New-Shortcut -shortcutPath $uninstallShortcut -targetScriptPath $uninstallScriptPath -workingDir $installPath
+            if (Test-Path $uninstallVbsPath) {
+                New-VbsShortcut -shortcutPath $uninstallShortcut -vbsPath $uninstallVbsPath -workingDir $installPath
                 $shortcutsCreated += "Uninstall"
             }
         } catch {
@@ -1675,16 +1709,17 @@ function Show-SetupWizard {
             $targetScript = Join-Path $state.InstallPath "Script\Teams Always Green.ps1"
 
             $folders = @(
-                "Debug","Logs","Meta","Settings","Meta\Icons","Script","Script\Core","Script\Features","Script\I18n","Script\Tray","Script\UI"
+                "Debug","Meta","Meta\Icons","Script","Script\Core","Script\Features","Script\I18n","Script\Tray","Script\UI"
             )
+            if ($state.PortableMode) {
+                $folders += @("Logs", "Settings")
+            }
             foreach ($name in $folders) {
                 $path = Join-Path $state.InstallPath $name
                 if (-not (Test-Path $path)) { New-Item -ItemType Directory -Path $path -Force | Out-Null }
             }
 
             $metaDir = Join-Path $state.InstallPath "Meta"
-            $settingsDir = Join-Path $state.InstallPath "Settings"
-            $logsDir = Join-Path $state.InstallPath "Logs"
             $portableMarker = Join-Path $metaDir "PortableMode.txt"
             if ($state.PortableMode) {
                 try {
@@ -1695,10 +1730,14 @@ function Show-SetupWizard {
             } else {
                 try { if (Test-Path $portableMarker) { Remove-Item -Path $portableMarker -Force -ErrorAction SilentlyContinue } } catch { }
             }
-            try {
-                Set-Content -Path (Join-Path $metaDir "Teams-Always-Green.settings.path.txt") -Value $settingsDir -Encoding ASCII
-                Set-Content -Path (Join-Path $metaDir "Teams-Always-Green.log.path.txt") -Value $logsDir -Encoding ASCII
-            } catch { }
+            foreach ($legacyLocator in @(
+                (Join-Path $metaDir "Teams-Always-Green.settings.path.txt"),
+                (Join-Path $metaDir "Teams-Always-Green.log.path.txt"),
+                (Join-Path $state.InstallPath "Teams-Always-Green.settings.path.txt"),
+                (Join-Path $state.InstallPath "Teams-Always-Green.log.path.txt")
+            )) {
+                try { if (Test-Path $legacyLocator) { Remove-Item -Path $legacyLocator -Force -ErrorAction SilentlyContinue } } catch { }
+            }
 
             $localRoot = $null
             if ($PSScriptRoot) { $localRoot = $PSScriptRoot }
@@ -1964,13 +2003,15 @@ if (-not $portableMode) {
     }
 }
 
-$uninstallScriptPath = Join-Path $installPath "Uninstall-Teams-Always-Green.ps1"
+$uninstallDir = Join-Path $installPath "Script\Uninstall"
+$uninstallScriptPath = Join-Path $uninstallDir "Uninstall-Teams-Always-Green.ps1"
+$uninstallVbsPath = Join-Path $uninstallDir "Uninstall-Teams-Always-Green.vbs"
 $uninstallScript = @'
 param([switch]$Silent)
 Add-Type -AssemblyName System.Windows.Forms
 
 $scriptPath = $MyInvocation.MyCommand.Path
-$installRoot = Split-Path -Parent $scriptPath
+$installRoot = Split-Path -Parent (Split-Path -Parent $scriptPath)
 $programsDir = [Environment]::GetFolderPath("Programs")
 $menuFolder = Join-Path $programsDir "Teams Always Green"
 $shortcuts = @(
@@ -2004,8 +2045,21 @@ $cmd = "@echo off`r`n" + "timeout /t 2 >nul`r`n" + "rmdir /s /q `"$installRoot`"
 Set-Content -Path $cmdPath -Value $cmd -Encoding ASCII
 Start-Process -FilePath "cmd.exe" -ArgumentList "/c `"$cmdPath`"" -WindowStyle Hidden
 '@
+$uninstallVbs = @'
+Dim shell, fso, vbsPath, uninstallPs1, cmd
+Set shell = CreateObject("WScript.Shell")
+Set fso = CreateObject("Scripting.FileSystemObject")
+vbsPath = WScript.ScriptFullName
+uninstallPs1 = fso.BuildPath(fso.GetParentFolderName(vbsPath), "Uninstall-Teams-Always-Green.ps1")
+cmd = "powershell.exe -NoProfile -ExecutionPolicy Bypass -File """ & uninstallPs1 & """"
+shell.Run cmd, 1, False
+'@
 try {
+    if (-not (Test-Path $uninstallDir)) {
+        New-Item -ItemType Directory -Path $uninstallDir -Force | Out-Null
+    }
     Set-Content -Path $uninstallScriptPath -Value $uninstallScript -Encoding UTF8
+    Set-Content -Path $uninstallVbsPath -Value $uninstallVbs -Encoding ASCII
 } catch {
     Write-SetupLog "Failed to write uninstall script."
 }
@@ -2021,8 +2075,8 @@ if (-not $portableMode) {
         }
         New-Shortcut -shortcutPath $desktopShortcut -targetScriptPath $targetScript -workingDir $installPath
         $shortcutsCreated += "Desktop"
-        if (Test-Path $uninstallScriptPath) {
-            New-Shortcut -shortcutPath $uninstallShortcut -targetScriptPath $uninstallScriptPath -workingDir $installPath
+        if (Test-Path $uninstallVbsPath) {
+            New-VbsShortcut -shortcutPath $uninstallShortcut -vbsPath $uninstallVbsPath -workingDir $installPath
             $shortcutsCreated += "Uninstall"
         }
     } catch {

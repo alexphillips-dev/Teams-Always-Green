@@ -14,7 +14,8 @@ Meta/QuickSetup.manifest.json
 .vscode/
 PSScriptAnalyzerSettings.psd1
 Settings/
-Uninstall-Teams-Always-Green.ps1
+Script/Uninstall/Uninstall-Teams-Always-Green.ps1
+Script/Uninstall/Uninstall-Teams-Always-Green.vbs
 Tests/
 
 # Deprecated settings host (no longer used)

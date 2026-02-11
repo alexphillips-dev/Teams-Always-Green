@@ -6,10 +6,11 @@ function Show-SettingsDialog {
         $script:settings = Ensure-SettingsCollections $script:settings
         $script:settings = Normalize-Settings (Migrate-Settings $script:settings)
         $settings = $script:settings
+        $settingsIconRoot = if ($script:AppRoot) { $script:AppRoot } else { (Split-Path -Path $scriptPath -Parent) }
         if ($script:SettingsForm -and -not $script:SettingsForm.IsDisposed) {
             $reuseOk = $true
             try {
-                $settingsIconPath = Join-Path (Split-Path -Path $scriptPath -Parent) "Meta\\Icons\\Settings_Icon.ico"
+                $settingsIconPath = Join-Path $settingsIconRoot "Meta\\Icons\\Settings_Icon.ico"
                 if (Test-Path $settingsIconPath) {
                     try { $script:SettingsForm.Icon = New-Object System.Drawing.Icon($settingsIconPath) } catch { }
                 } elseif ($notifyIcon -and $notifyIcon.Icon) {
@@ -47,7 +48,7 @@ function Show-SettingsDialog {
     $form.ShowIcon = $true
     $form.ClientSize = New-Object System.Drawing.Size(620, 540)
     $form.MinimumSize = New-Object System.Drawing.Size(520, 480)
-    $settingsIconPath = Join-Path (Split-Path -Path $scriptPath -Parent) "Meta\\Icons\\Settings_Icon.ico"
+    $settingsIconPath = Join-Path $settingsIconRoot "Meta\\Icons\\Settings_Icon.ico"
     if (Test-Path $settingsIconPath) {
         $form.Icon = New-Object System.Drawing.Icon($settingsIconPath)
     } elseif ($notifyIcon -and $notifyIcon.Icon) {
@@ -60,7 +61,7 @@ function Show-SettingsDialog {
     Set-FormTaskbarIcon $form $settingsIconPath
     $form.Add_Shown({
         param($sender, $e)
-        $shownIconPath = Join-Path (Split-Path -Path $scriptPath -Parent) "Meta\\Icons\\Settings_Icon.ico"
+        $shownIconPath = Join-Path $settingsIconRoot "Meta\\Icons\\Settings_Icon.ico"
         Set-FormTaskbarIcon $sender $shownIconPath
     })
 
@@ -840,7 +841,7 @@ function Show-SettingsDialog {
         $headerPanel.Tag = "Header:$title"
 
         $columnIndex = 0
-        $iconPath = Join-Path $script:DataRoot ("Meta\\Icons\\{0}_icon.ico" -f $title)
+        $iconPath = Join-Path $settingsIconRoot ("Meta\\Icons\\{0}_icon.ico" -f $title)
         if (Test-Path $iconPath) {
             try {
                 $icon = New-Object System.Drawing.Icon($iconPath)
@@ -2733,7 +2734,7 @@ $clearLogButton = New-Object System.Windows.Forms.Button
     $aboutTitlePanel.FlowDirection = [System.Windows.Forms.FlowDirection]::LeftToRight
     $aboutTitlePanel.Dock = "Top"
 
-    $aboutTitleIconPath = Join-Path $script:DataRoot "Meta\\Icons\\Tray_Icon.ico"
+    $aboutTitleIconPath = Join-Path $settingsIconRoot "Meta\\Icons\\Tray_Icon.ico"
     if (Test-Path $aboutTitleIconPath) {
         try {
             $aboutTitleIcon = New-Object System.Drawing.Icon($aboutTitleIconPath)
