@@ -16,7 +16,7 @@ Keep your Microsoft Teams status active without babysitting your keyboard. Teams
 - **Smart scheduling:** Work hours, pauses, and quick overrides.
 - **Profiles:** Switch configurations in seconds.
 - **Helpful logging:** Debug detail when you need it.
-- **Language support:** English, Español, Français, Deutsch (auto-detect + manual).
+- **Language support:** English, Spanish, French, German (auto-detect + manual).
 
 ---
 
@@ -32,7 +32,7 @@ irm "https://raw.githubusercontent.com/alexphillips-dev/Teams-Always-Green/main/
 2) Double-click it.  
 3) Choose your install folder (default: `Documents\Teams Always Green`).
 
-The installer downloads the app scripts/modules, validates integrity (when the manifest is available),
+The installer downloads the app scripts/modules, validates integrity with `QuickSetup.manifest.json`,
 creates required folders, and can set up shortcuts. A setup summary appears at the end.
 Optional: choose **portable mode** to skip shortcuts. Setup logs are saved to `%TEMP%\TeamsAlwaysGreen-QuickSetup.log`.
 
@@ -99,9 +99,12 @@ Teams Always Green\
   QuickSetup.ps1
   QuickSetup.cmd
   Teams Always Green.VBS
+  CHANGELOG.md
   Debug\
   Meta\
     Icons\
+    Readme\
+      Banner.png
 ```
 
 Runtime data (standard install):
@@ -127,7 +130,18 @@ Portable mode stores runtime data in the install folder (`Logs\`, `Settings\`, `
 - **Local-only behavior:** No data collection.
 - **Network access:** Used only for update checks (if enabled).
 - **Files created:** Logs/settings/state are stored in your user profile (`%LOCALAPPDATA%\TeamsAlwaysGreen`) for standard installs, or in the install folder for portable mode.
-- **Profile integrity:** Exported profile files include a SHA-256 signature; imports validate signatures and warn before importing legacy unsigned files.
+- **Profile integrity:** Exported profile files include a SHA-256 signature; imports validate signatures and can block unsigned/invalid profiles in strict mode.
+
+### Security Hardening
+
+- **Security Mode bundle:** A single toggle in **Settings -> Advanced** to enforce strict import/update policy, update hash/signature requirements, permission hardening, and safer path behavior.
+- **Strict imports:** `StrictSettingsImport` and `StrictProfileImport` can block unknown or malformed keys during imports.
+- **Trusted update source:** Updates are validated against configured `UpdateOwner`/`UpdateRepo` and trusted GitHub URLs.
+- **Update integrity gates:** `UpdateRequireHash` and `UpdateRequireSignature` can require SHA-256 and detached signature validation before applying updates.
+- **Script signature policy:** `RequireScriptSignature` with optional `TrustedSignerThumbprints` enforces Authenticode trust at startup.
+- **Path protections:** External path usage can be disabled; unsafe link-style reparse paths are blocked for sensitive loads.
+- **Rate limiting:** Update checks and import actions are throttled to reduce abuse loops.
+- **Audit chain:** Security/audit log entries include a hash chain to help detect tampering.
 
 ---
 
@@ -148,7 +162,7 @@ Versioning discipline:
 ## Uninstall
 
 **Standard install (recommended):** Use the Start Menu shortcut  
-`Teams Always Green` → **Uninstall Teams Always Green**
+`Teams Always Green` -> **Uninstall Teams Always Green**
 
 **Manual/portable uninstall:**
 1) Exit the app from the tray.  
