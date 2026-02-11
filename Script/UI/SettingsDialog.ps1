@@ -3845,6 +3845,10 @@ $clearLogButton = New-Object System.Windows.Forms.Button
         $dialog.FileName = "Teams-Always-Green.profile.$name.json"
         if ($dialog.ShowDialog() -ne [System.Windows.Forms.DialogResult]::OK) { return }
         try {
+            $allowedExt = if ($script:ImportAllowedExtensions -and $script:ImportAllowedExtensions.ContainsKey("Profile")) { @($script:ImportAllowedExtensions["Profile"]) } else { @(".json") }
+            if (-not (Test-ImportExportFilePath -path $dialog.FileName -label "Profile export" -allowedExtensions $allowedExt -Context "Profile-Export")) {
+                throw "Selected export location is blocked by security policy."
+            }
             $profileToExport = Migrate-ProfileSnapshot $settings.Profiles[$name]
             $payload = [ordered]@{
                 FormatVersion = 1
@@ -3884,6 +3888,10 @@ $clearLogButton = New-Object System.Windows.Forms.Button
         $dialog.Filter = "Profile Files (*.json)|*.json|All Files (*.*)|*.*"
         if ($dialog.ShowDialog() -ne [System.Windows.Forms.DialogResult]::OK) { return }
         try {
+            $allowedExt = if ($script:ImportAllowedExtensions -and $script:ImportAllowedExtensions.ContainsKey("Profile")) { @($script:ImportAllowedExtensions["Profile"]) } else { @(".json") }
+            if (-not (Test-ImportExportFilePath -path $dialog.FileName -label "Profile import" -allowedExtensions $allowedExt -RequireExists -MaxBytes ([int64]$script:ProfileImportMaxBytes) -Context "Profile-Import")) {
+                throw "Selected profile file is blocked by security policy."
+            }
             $raw = Read-JsonFileSecure $dialog.FileName ([int]$script:ProfileImportMaxBytes) "Profile import"
             $strictProfileImport = ([bool]$settings.SecurityModeEnabled -or [bool]$settings.StrictProfileImport)
             $hasPayloadProfile = ($raw -and ($raw.PSObject.Properties.Name -contains "Profile"))
@@ -5069,6 +5077,10 @@ $clearLogButton = New-Object System.Windows.Forms.Button
             $dialog.FileName = "Teams-Always-Green.settings.json"
             if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
                 try {
+                    $allowedExt = if ($script:ImportAllowedExtensions -and $script:ImportAllowedExtensions.ContainsKey("Settings")) { @($script:ImportAllowedExtensions["Settings"]) } else { @(".json") }
+                    if (-not (Test-ImportExportFilePath -path $dialog.FileName -label "Settings export" -allowedExtensions $allowedExt -Context "Settings-Export")) {
+                        throw "Selected export location is blocked by security policy."
+                    }
                     $exportSettings = Get-SettingsForSave $settings
                     $exportSettings | Add-Member -MemberType NoteProperty -Name "ExportedAt" -Value (Get-Date).ToString("o") -Force
                     $exportSettings | Add-Member -MemberType NoteProperty -Name "ExportedBy" -Value $env:USERNAME -Force
@@ -5107,6 +5119,10 @@ $clearLogButton = New-Object System.Windows.Forms.Button
             $dialog.Filter = "JSON Files (*.json)|*.json|All Files (*.*)|*.*"
             if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
                 try {
+                    $allowedExt = if ($script:ImportAllowedExtensions -and $script:ImportAllowedExtensions.ContainsKey("Settings")) { @($script:ImportAllowedExtensions["Settings"]) } else { @(".json") }
+                    if (-not (Test-ImportExportFilePath -path $dialog.FileName -label "Settings import" -allowedExtensions $allowedExt -RequireExists -MaxBytes ([int64]$script:SettingsMaxBytes) -Context "Settings-Import")) {
+                        throw "Selected settings file is blocked by security policy."
+                    }
                     $loaded = Read-JsonFileSecure $dialog.FileName ([int]$script:SettingsMaxBytes) "Settings import"
                     $strictImport = ([bool]$settings.SecurityModeEnabled -or [bool]$settings.StrictSettingsImport)
                     $validation = Test-SettingsSchema $loaded -Strict:$strictImport
