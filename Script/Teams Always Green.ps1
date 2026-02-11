@@ -171,6 +171,23 @@ $script:FolderNames = @{
     Debug = "Debug"
     Script = "Script"
 }
+$script:RuntimeModuleAllowList = @(
+    "Core\Logging.ps1",
+    "Core\Paths.ps1",
+    "Core\Runtime.ps1",
+    "Core\Settings.ps1",
+    "Features\UpdateEngine.ps1",
+    "I18n\UiStrings.ps1",
+    "Tray\Menu.ps1",
+    "UI\HistoryDialog.ps1",
+    "UI\SettingsDialog.ps1"
+)
+$script:ImportAllowedExtensions = @{
+    Settings = @(".json")
+    Profile  = @(".json")
+}
+$script:RuntimeModuleLastError = ""
+$script:UpdateModuleAvailable = $true
 $portableMarkerPath = Join-Path $script:AppRoot "Meta\PortableMode.txt"
 $script:PortableMode = Test-Path $portableMarkerPath
 $defaultUserDataRoot = Join-Path ([Environment]::GetFolderPath("LocalApplicationData")) "TeamsAlwaysGreen"
@@ -190,6 +207,19 @@ function Write-PathWarningNow([string]$message) {
     } else {
         Add-PathWarning $message
     }
+}
+
+function Write-SecurityMessage([string]$message, [string]$level = "WARN", [string]$context = "Security") {
+    if ([string]::IsNullOrWhiteSpace($message)) { return }
+    if (Get-Command -Name Write-Log -ErrorAction SilentlyContinue) {
+        Write-Log $message $level $null $context
+        return
+    }
+    if (Get-Command -Name Write-BootstrapLog -ErrorAction SilentlyContinue) {
+        Write-BootstrapLog ("[{0}] {1}" -f $context, $message) $level
+        return
+    }
+    Add-PathWarning ("[{0}] {1}" -f $context, $message)
 }
 
 function Normalize-PathText([string]$path) {
@@ -241,7 +271,17 @@ function Test-UnsafeReparseItem($item) {
     $targets = @()
     try {
         if ($item.PSObject.Properties.Name -contains "Target" -and $null -ne $item.Target) {
-            $targets = @($item.Target | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) })
+            $targets = @(
+                $item.Target | ForEach-Object {
+                    $targetText = [string]$_
+                    if ([string]::IsNullOrWhiteSpace($targetText)) { return }
+                    # Ignore provider placeholders (for example "{}") and only
+                    # treat real filesystem-looking targets as unsafe redirects.
+                    if ($targetText -match '^[A-Za-z]:\\' -or $targetText -match '^\\\\' -or $targetText -match '^[.]{1,2}[\\/]' -or $targetText -match '[\\/]') {
+                        $targetText
+                    }
+                }
+            )
         }
     } catch {
     }
@@ -314,6 +354,202 @@ function Is-PathUnderRoot([string]$path, [string]$root) {
     } catch {
         return $false
     }
+}
+
+function Get-PathRelativeToRoot([string]$path, [string]$root) {
+    if ([string]::IsNullOrWhiteSpace($path) -or [string]::IsNullOrWhiteSpace($root)) { return "" }
+    try {
+        $full = [System.IO.Path]::GetFullPath($path)
+        $rootFull = [System.IO.Path]::GetFullPath($root)
+        if (-not $rootFull.EndsWith('\')) { $rootFull += '\' }
+        if ($full.StartsWith($rootFull, [System.StringComparison]::OrdinalIgnoreCase)) {
+            return $full.Substring($rootFull.Length).TrimStart('\')
+        }
+    } catch {
+    }
+    return ""
+}
+
+function Test-TrustedFilePath([string]$path, [string]$root, [string]$tag = "Security", [string]$label = "File", [switch]$RequireExists) {
+    if ([string]::IsNullOrWhiteSpace($path)) {
+        $script:RuntimeModuleLastError = "Path is empty."
+        Write-SecurityMessage ("{0}: path is empty for {1}." -f $tag, $label) "ERROR" $tag
+        if (Get-Command Write-SecurityAuditEvent -ErrorAction SilentlyContinue) { Write-SecurityAuditEvent "PathPolicyEmpty" "$label" "ERROR" $tag }
+        return $false
+    }
+    $resolved = Get-CanonicalPath $path
+    if ([string]::IsNullOrWhiteSpace($resolved)) {
+        $script:RuntimeModuleLastError = "Failed to resolve path."
+        Write-SecurityMessage ("{0}: failed to resolve path for {1}: {2}" -f $tag, $label, $path) "ERROR" $tag
+        if (Get-Command Write-SecurityAuditEvent -ErrorAction SilentlyContinue) { Write-SecurityAuditEvent "PathPolicyResolveFailed" "$label|$path" "ERROR" $tag }
+        return $false
+    }
+    if (-not (Is-PathUnderRoot $resolved $root)) {
+        $script:RuntimeModuleLastError = "Path is outside app root."
+        Write-SecurityMessage ("{0}: path outside app root blocked for {1}: {2}" -f $tag, $label, $resolved) "ERROR" $tag
+        if (Get-Command Write-SecurityAuditEvent -ErrorAction SilentlyContinue) { Write-SecurityAuditEvent "PathPolicyOutsideRoot" "$label|$resolved" "ERROR" $tag }
+        return $false
+    }
+    if (Test-PathHasReparsePoint -Path $resolved -StopAtPath $root) {
+        Write-SecurityMessage ("{0}: path contains reparse point for {1}: {2}. Allowed under trusted app root policy." -f $tag, $label, $resolved) "WARN" $tag
+        if (Get-Command Write-SecurityAuditEvent -ErrorAction SilentlyContinue) { Write-SecurityAuditEvent "PathPolicyReparseAllowed" "$label|$resolved" "WARN" $tag }
+    }
+    if ($RequireExists -and -not (Test-Path -LiteralPath $resolved -PathType Leaf)) {
+        $script:RuntimeModuleLastError = "Required module file is missing."
+        Write-SecurityMessage ("{0}: required file missing for {1}: {2}" -f $tag, $label, $resolved) "ERROR" $tag
+        if (Get-Command Write-SecurityAuditEvent -ErrorAction SilentlyContinue) { Write-SecurityAuditEvent "PathPolicyMissingFile" "$label|$resolved" "ERROR" $tag }
+        return $false
+    }
+    return $true
+}
+
+function Test-RuntimeModulePathAllowed([string]$path, [string]$tag = "Runtime-Module") {
+    $script:RuntimeModuleLastError = ""
+    if (-not (Test-TrustedFilePath -path $path -root $script:AppRoot -tag $tag -label "Runtime module" -RequireExists)) {
+        if ([string]::IsNullOrWhiteSpace($script:RuntimeModuleLastError)) {
+            $script:RuntimeModuleLastError = "Path trust validation failed."
+        }
+        return $false
+    }
+    $relative = Get-PathRelativeToRoot $path $script:AppRoot
+    if ([string]::IsNullOrWhiteSpace($relative)) {
+        Write-SecurityMessage ("{0}: failed to resolve runtime module relative path: {1}" -f $tag, $path) "ERROR" $tag
+        if (Get-Command Write-SecurityAuditEvent -ErrorAction SilentlyContinue) { Write-SecurityAuditEvent "RuntimeModuleRelativePathMissing" "$path" "ERROR" $tag }
+        $script:RuntimeModuleLastError = "Failed to resolve runtime module relative path."
+        return $false
+    }
+    $normalized = $relative -replace '/', '\'
+    $normalized = $normalized -replace '\\+', '\'
+    if ($normalized.StartsWith("Script\", [System.StringComparison]::OrdinalIgnoreCase)) {
+        $normalized = $normalized.Substring(7)
+    }
+    $allowed = $false
+    foreach ($entry in $script:RuntimeModuleAllowList) {
+        $allowEntry = ([string]$entry -replace '/', '\') -replace '\\+', '\'
+        if ([string]::Equals($allowEntry, $normalized, [System.StringComparison]::OrdinalIgnoreCase)) {
+            $allowed = $true
+            break
+        }
+    }
+    if (-not $allowed) {
+        Write-SecurityMessage ("{0}: runtime module is not allowlisted and was blocked: {1}" -f $tag, $normalized) "ERROR" $tag
+        if (Get-Command Write-SecurityAuditEvent -ErrorAction SilentlyContinue) { Write-SecurityAuditEvent "RuntimeModuleBlocked" "$normalized" "ERROR" $tag }
+        $script:RuntimeModuleLastError = ("Runtime module is not allowlisted: {0}" -f $normalized)
+        return $false
+    }
+    return $true
+}
+
+function Import-RuntimeModule([string]$path, [string]$tag = "Runtime-Module") {
+    if (-not (Test-RuntimeModulePathAllowed -path $path -tag $tag)) { return $false }
+    try {
+        $modulePathFull = Get-CanonicalPath $path
+        $imported = & {
+            param($modulePath)
+            $before = @{}
+            foreach ($fn in (Get-ChildItem Function:\)) {
+                if (-not $before.ContainsKey($fn.Name)) {
+                    $before[$fn.Name] = $true
+                }
+            }
+            . $modulePath
+            $selected = New-Object System.Collections.ArrayList
+            foreach ($fn in (Get-ChildItem Function:\)) {
+                $isNewName = -not $before.ContainsKey($fn.Name)
+                $sameFile = $false
+                try {
+                    if ($fn.ScriptBlock -and $fn.ScriptBlock.File) {
+                        $fnFile = [System.IO.Path]::GetFullPath([string]$fn.ScriptBlock.File)
+                        $sameFile = $fnFile.Equals($modulePath, [System.StringComparison]::OrdinalIgnoreCase)
+                    }
+                } catch {
+                }
+                if ($isNewName -or $sameFile) {
+                    [void]$selected.Add($fn)
+                }
+            }
+            $selected
+        } $modulePathFull
+        $importedList = @($imported)
+        if ($importedList.Count -eq 0) {
+            $script:RuntimeModuleLastError = "Module loaded but exported no discoverable functions."
+            Write-SecurityMessage ("{0}: runtime module loaded but exported no functions: {1}" -f $tag, $path) "ERROR" $tag
+            return $false
+        }
+        foreach ($func in $importedList) {
+            if (-not $func -or -not $func.Name -or -not $func.ScriptBlock) { continue }
+            Set-Item -Path ("Function:\script:{0}" -f $func.Name) -Value $func.ScriptBlock -Force
+        }
+        $script:RuntimeModuleLastError = ""
+        return $true
+    } catch {
+        $script:RuntimeModuleLastError = [string]$_.Exception.Message
+        Write-SecurityMessage ("{0}: runtime module import failed: {1}" -f $tag, $path) "ERROR" $tag
+        if (Get-Command Write-SecurityAuditEvent -ErrorAction SilentlyContinue) { Write-SecurityAuditEvent "RuntimeModuleImportFailed" "$path|$($_.Exception.Message)" "ERROR" $tag }
+        return $false
+    }
+}
+
+function Test-ImportExportFilePath([string]$path, [string]$label, [string[]]$allowedExtensions, [switch]$RequireExists, [int64]$MaxBytes = 0, [string]$Context = "ImportExport") {
+    if ([string]::IsNullOrWhiteSpace($path)) {
+        Write-SecurityMessage ("{0}: blocked empty path for {1}." -f $Context, $label) "WARN" $Context
+        if (Get-Command Write-SecurityAuditEvent -ErrorAction SilentlyContinue) { Write-SecurityAuditEvent "ImportExportEmptyPath" "$label" "WARN" $Context }
+        return $false
+    }
+    $resolved = Get-CanonicalPath $path
+    if ([string]::IsNullOrWhiteSpace($resolved)) {
+        Write-SecurityMessage ("{0}: blocked unresolved path for {1}: {2}" -f $Context, $label, $path) "WARN" $Context
+        if (Get-Command Write-SecurityAuditEvent -ErrorAction SilentlyContinue) { Write-SecurityAuditEvent "ImportExportResolveFailed" "$label|$path" "WARN" $Context }
+        return $false
+    }
+    if ($allowedExtensions -and $allowedExtensions.Count -gt 0) {
+        $ext = [System.IO.Path]::GetExtension($resolved)
+        $okExt = $false
+        foreach ($allowedExt in $allowedExtensions) {
+            if ([string]::Equals($ext, $allowedExt, [System.StringComparison]::OrdinalIgnoreCase)) {
+                $okExt = $true
+                break
+            }
+        }
+        if (-not $okExt) {
+            Write-SecurityMessage ("{0}: blocked path with disallowed extension for {1}: {2}" -f $Context, $label, $resolved) "WARN" $Context
+            if (Get-Command Write-SecurityAuditEvent -ErrorAction SilentlyContinue) { Write-SecurityAuditEvent "ImportExportBadExtension" "$label|$resolved" "WARN" $Context }
+            return $false
+        }
+    }
+    if ($RequireExists -and -not (Test-Path -LiteralPath $resolved -PathType Leaf)) {
+        Write-SecurityMessage ("{0}: required file missing for {1}: {2}" -f $Context, $label, $resolved) "WARN" $Context
+        if (Get-Command Write-SecurityAuditEvent -ErrorAction SilentlyContinue) { Write-SecurityAuditEvent "ImportExportMissingFile" "$label|$resolved" "WARN" $Context }
+        return $false
+    }
+    $reparseScanPath = $resolved
+    if (-not $RequireExists) {
+        try {
+            $parent = Split-Path -Path $resolved -Parent
+            if (-not [string]::IsNullOrWhiteSpace($parent)) { $reparseScanPath = $parent }
+        } catch {
+        }
+    }
+    if (Test-PathHasReparsePoint -Path $reparseScanPath) {
+        Write-SecurityMessage ("{0}: blocked reparse-linked path for {1}: {2}" -f $Context, $label, $resolved) "WARN" $Context
+        if (Get-Command Write-SecurityAuditEvent -ErrorAction SilentlyContinue) { Write-SecurityAuditEvent "ImportExportReparseBlocked" "$label|$resolved" "WARN" $Context }
+        return $false
+    }
+    if ($RequireExists -and $MaxBytes -gt 0) {
+        try {
+            $info = Get-Item -LiteralPath $resolved -ErrorAction Stop
+            if ([int64]$info.Length -gt $MaxBytes) {
+                Write-SecurityMessage ("{0}: blocked oversized file for {1}: {2} bytes > {3} bytes." -f $Context, $label, [int64]$info.Length, $MaxBytes) "WARN" $Context
+                if (Get-Command Write-SecurityAuditEvent -ErrorAction SilentlyContinue) { Write-SecurityAuditEvent "ImportExportFileTooLarge" "$label|$resolved|$([int64]$info.Length)" "WARN" $Context }
+                return $false
+            }
+        } catch {
+            Write-SecurityMessage ("{0}: failed to inspect file for {1}: {2}" -f $Context, $resolved, $_.Exception.Message) "WARN" $Context
+            if (Get-Command Write-SecurityAuditEvent -ErrorAction SilentlyContinue) { Write-SecurityAuditEvent "ImportExportInspectFailed" "$label|$resolved|$($_.Exception.Message)" "WARN" $Context }
+            return $false
+        }
+    }
+    return $true
 }
 
 function Test-TrustedDirectoryPath([string]$path, [string]$root, [bool]$allowExternal) {
@@ -403,6 +639,7 @@ function Harden-AppPermissions {
         $script:MetaDir
     ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) -and (Test-Path $_) }
     $currentUser = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
+    $loggedPrivilegeSkip = $false
     foreach ($path in $paths) {
         try {
             $acl = Get-Acl -Path $path
@@ -428,7 +665,15 @@ function Harden-AppPermissions {
             }
             Set-Acl -Path $path -AclObject $acl
         } catch {
-            Write-Log ("Permission hardening skipped for {0}: {1}" -f $path, $_.Exception.Message) "WARN" $_.Exception "Security"
+            $permissionException = $_.Exception
+            if ($permissionException -is [System.Security.AccessControl.PrivilegeNotHeldException]) {
+                if (-not $loggedPrivilegeSkip) {
+                    Write-Log ("Permission hardening skipped in standard user context: {0}" -f $permissionException.Message) "INFO" $permissionException "Security"
+                    $loggedPrivilegeSkip = $true
+                }
+            } else {
+                Write-Log ("Permission hardening skipped for {0}: {1}" -f $path, $permissionException.Message) "WARN" $permissionException "Security"
+            }
         }
     }
 }
@@ -456,6 +701,27 @@ function Redact-Paths([string]$message) {
         if (-not [string]::IsNullOrWhiteSpace($userProfile)) {
             $result = $result -replace [regex]::Escape($userProfile), "%USERPROFILE%"
         }
+    } catch {
+    }
+    return $result
+}
+
+function Redact-SensitiveText([string]$message) {
+    if ([string]::IsNullOrWhiteSpace($message)) { return $message }
+    $result = Redact-Paths $message
+    try {
+        $result = [regex]::Replace(
+            $result,
+            '(?im)\b(api[_-]?key|access[_-]?token|token|secret|password|passwd|pwd)\b\s*[:=]\s*([^\s|;,]+)',
+            { param($m) "{0}=[REDACTED]" -f $m.Groups[1].Value }
+        )
+        $result = [regex]::Replace(
+            $result,
+            '(?im)\b(authorization\s*:\s*bearer)\s+([A-Za-z0-9\-\._~\+\/]+=*)',
+            { param($m) "{0} [REDACTED]" -f $m.Groups[1].Value }
+        )
+        $result = [regex]::Replace($result, '(?i)\bgh[pousr]_[A-Za-z0-9]{20,}\b', '[REDACTED_TOKEN]')
+        $result = [regex]::Replace($result, '(?i)\bxox[baprs]-[A-Za-z0-9-]{10,}\b', '[REDACTED_TOKEN]')
     } catch {
     }
     return $result
@@ -902,7 +1168,8 @@ function Write-BootStage([string]$label) {
             if (Get-Command Test-StartupStageBudget -ErrorAction SilentlyContinue) {
                 $budgetResult = Test-StartupStageBudget -Stage $label -ElapsedMs $elapsed -Budgets $script:StartupBudgetsMs
                 if ($budgetResult.HasBudget -and -not $budgetResult.WithinBudget) {
-                    if (-not $script:BootBudgetWarned.ContainsKey($budgetResult.StageKey)) {
+                    $warnDeltaMs = [int64]([Math]::Max(500, [Math]::Ceiling([double]$budgetResult.BudgetMs * 0.15)))
+                    if ($budgetResult.DeltaMs -ge $warnDeltaMs -and -not $script:BootBudgetWarned.ContainsKey($budgetResult.StageKey)) {
                         Write-Log ("Boot budget exceeded: {0} {1}ms > {2}ms (+{3}ms)." -f $label, $elapsed, $budgetResult.BudgetMs, $budgetResult.DeltaMs) "WARN" $null "Startup"
                         $script:BootBudgetWarned[$budgetResult.StageKey] = $true
                     }
@@ -1726,7 +1993,33 @@ function Get-StartupSource {
 }
 
 # --- Update engine (release lookup, validation, apply) ---
-. "$PSScriptRoot\Features\UpdateEngine.ps1"
+$updateModulePath = Join-Path $PSScriptRoot "Features\\UpdateEngine.ps1"
+if (-not (Import-RuntimeModule $updateModulePath "Update-Module")) {
+    $script:UpdateModuleAvailable = $false
+    $reason = if ([string]::IsNullOrWhiteSpace($script:RuntimeModuleLastError)) { "Unknown reason." } else { $script:RuntimeModuleLastError }
+    Write-SecurityMessage ("Update module unavailable; update checks disabled. Path={0} Reason={1}" -f $updateModulePath, $reason) "WARN" "Update-Module"
+    if (Get-Command Write-SecurityAuditEvent -ErrorAction SilentlyContinue) {
+        Write-SecurityAuditEvent "UpdateModuleUnavailable" ("Path={0}|Reason={1}" -f $updateModulePath, $reason) "WARN" "Update-Module"
+    }
+    if (-not (Get-Command Invoke-UpdateCheck -ErrorAction SilentlyContinue)) {
+        function Invoke-UpdateCheck {
+            param(
+                [switch]$Force,
+                [object]$Release,
+                [switch]$SilentNoUpdate
+            )
+            Write-SecurityMessage "Update check requested, but update module is unavailable." "WARN" "Update-Module"
+            if ($Force) {
+                [System.Windows.Forms.MessageBox]::Show(
+                    "Update feature is temporarily unavailable in this install.`n`nPlease run QuickSetup or reinstall the app package.",
+                    "Update unavailable",
+                    [System.Windows.Forms.MessageBoxButtons]::OK,
+                    [System.Windows.Forms.MessageBoxIcon]::Warning
+                ) | Out-Null
+            }
+        }
+    }
+}
 
 # --- Single-instance mutex acquisition (acquire/retry) ---
 $createdNew = $false
@@ -1758,6 +2051,7 @@ if (-not $script:HasMutex) {
 $iconPath  = Join-Path $script:AppRoot "Meta\\Icons\\Tray_Icon.ico"
 $script:logPath   = Join-Path $script:LogDirectory "Teams-Always-Green.log"
 $script:AuditLogPath = Join-Path $script:LogDirectory "Teams-Always-Green.audit.log"
+$script:SecurityAuditLogPath = Join-Path $script:LogDirectory "Teams-Always-Green.security.log"
 $script:AuditChainPath = Join-Path $script:MetaDir "Teams-Always-Green.audit.chain.json"
 $script:settingsPath = Join-Path $script:SettingsDirectory "Teams-Always-Green.settings.json"
 # Ensure default folders exist
@@ -1794,6 +2088,8 @@ $script:PeakWorkingSetMB = 0
 $script:FirstErrorSnapshotWritten = $false
 $script:AuditLogEnabled = $true
 $script:AuditLogPath = Join-Path $script:LogDirectory "Teams-Always-Green.audit.log"
+$script:SecurityAuditEnabled = $true
+$script:SecurityAuditLogPath = Join-Path $script:LogDirectory "Teams-Always-Green.security.log"
 $script:LogLevels = @{
     "DEBUG" = 1
     "INFO"  = 2
@@ -1802,7 +2098,7 @@ $script:LogLevels = @{
     "FATAL" = 5
 }
 $script:RecentErrors = New-Object System.Collections.ArrayList
-$script:LogCategoryNames = @("General", "Startup", "Settings", "Schedule", "Hotkeys", "Tray", "Profiles", "Diagnostics", "Logging")
+$script:LogCategoryNames = @("General", "Startup", "Settings", "Schedule", "Hotkeys", "Tray", "Profiles", "Diagnostics", "Logging", "Security")
 $script:LogCategories = @{}
 $script:EventLogSource = "TeamsAlwaysGreen"
 $script:EventLogReady = $false
@@ -1981,10 +2277,11 @@ function Write-AuditLog([string]$action, [string]$context = $null, [string]$acti
         $parts = @("[${timestamp}]", "[AUDIT]", "Action=$action")
         if ($context) { $parts += "Context=$context" }
         if ($actionId) { $parts += "Id=$actionId" }
-        if ($detail) { $parts += "Detail=$detail" }
+        $safeDetail = if ($detail) { Redact-SensitiveText $detail } else { $null }
+        if ($safeDetail) { $parts += "Detail=$safeDetail" }
         if (-not $script:AuditChainLastHash) { $script:AuditChainLastHash = "GENESIS" }
         if ($script:AuditChainLastHash -eq "GENESIS") { Load-AuditChainState }
-        $payloadText = ("{0}|{1}|{2}|{3}|{4}" -f $timestamp, $action, $context, $actionId, $detail)
+        $payloadText = ("{0}|{1}|{2}|{3}|{4}" -f $timestamp, $action, $context, $actionId, $safeDetail)
         $prevHash = if ($script:AuditChainLastHash) { [string]$script:AuditChainLastHash } else { "GENESIS" }
         $entryHash = Get-StringSha256Hex ("{0}|{1}" -f $prevHash, $payloadText)
         $parts += "PrevHash=$prevHash"
@@ -1992,6 +2289,29 @@ function Write-AuditLog([string]$action, [string]$context = $null, [string]$acti
         Add-Content -Path $script:AuditLogPath -Value ($parts -join " ")
         $script:AuditChainLastHash = $entryHash
         Save-AuditChainState
+    } catch {
+    }
+}
+
+function Write-SecurityAuditEvent([string]$eventName, [string]$detail = $null, [string]$level = "WARN", [string]$context = "Security") {
+    if (-not $script:SecurityAuditEnabled) { return }
+    if ([string]::IsNullOrWhiteSpace($eventName)) { return }
+    $normalizedLevel = if ([string]::IsNullOrWhiteSpace($level)) { "WARN" } else { $level.ToUpperInvariant() }
+    if (-not $script:LogLevels.ContainsKey($normalizedLevel)) { $normalizedLevel = "WARN" }
+    try {
+        Ensure-LogDirectoryWritable
+        if (-not $script:SecurityAuditLogPath) {
+            $script:SecurityAuditLogPath = Join-Path $script:LogDirectory "Teams-Always-Green.security.log"
+        }
+        $timestamp = Format-DateTime (Get-Date)
+        $parts = @("[${timestamp}]", "[$normalizedLevel]", "[SECURITY]", "Event=$eventName")
+        if ($context) { $parts += "Context=$context" }
+        if ($detail) { $parts += ("Detail={0}" -f (Redact-SensitiveText $detail)) }
+        Add-Content -Path $script:SecurityAuditLogPath -Value ($parts -join " ")
+    } catch {
+    }
+    try {
+        Write-AuditLog ("Security:{0}" -f $eventName) $context $script:LastUserActionId $detail
     } catch {
     }
 }
@@ -2066,11 +2386,11 @@ function Format-Exception([Exception]$ex) {
     if ($null -eq $ex) { return "" }
     $lines = @(
         "ExceptionType=$($ex.GetType().FullName)"
-        "Message=$($ex.Message)"
+        ("Message={0}" -f (Redact-SensitiveText ([string]$ex.Message)))
     )
     if ($ex.InnerException) {
         $lines += "InnerExceptionType=$($ex.InnerException.GetType().FullName)"
-        $lines += "InnerMessage=$($ex.InnerException.Message)"
+        $lines += ("InnerMessage={0}" -f (Redact-SensitiveText ([string]$ex.InnerException.Message)))
     }
     $includeStack = $false
     if (Get-Variable -Name settings -Scope Script -ErrorAction SilentlyContinue) {
@@ -2079,7 +2399,7 @@ function Format-Exception([Exception]$ex) {
         }
     }
     if ($ex.StackTrace -and $includeStack) {
-        $lines += "StackTrace=$($ex.StackTrace)"
+        $lines += ("StackTrace={0}" -f (Redact-SensitiveText ([string]$ex.StackTrace)))
     }
     return ($lines -join " | ")
 }
@@ -2435,6 +2755,7 @@ function Export-SupportBundle([string]$outputPath) {
         $filesToCopy = @(
             @{ Source = $logPath; Target = "Teams-Always-Green.log" },
             @{ Source = $script:AuditLogPath; Target = "Teams-Always-Green.audit.log" },
+            @{ Source = $script:SecurityAuditLogPath; Target = "Teams-Always-Green.security.log" },
             @{ Source = $script:BootstrapLogPath; Target = "Teams-Always-Green.bootstrap.log" },
             @{ Source = $script:settingsPath; Target = "Teams-Always-Green.settings.json" },
             @{ Source = $script:StatePath; Target = "Teams-Always-Green.state.json" }
@@ -2525,6 +2846,7 @@ function Ensure-LogDirectoryWritable {
     $script:FallbackLogPath = Join-Path $script:LogDirectory "Teams-Always-Green.fallback.log"
     $script:BootstrapLogPath = Join-Path $script:LogDirectory "Teams-Always-Green.bootstrap.log"
     $script:AuditLogPath = Join-Path $script:LogDirectory "Teams-Always-Green.audit.log"
+    $script:SecurityAuditLogPath = Join-Path $script:LogDirectory "Teams-Always-Green.security.log"
     try {
         $locatorValue = Convert-ToRelativePathIfUnderRoot $script:LogDirectory
         Set-Content -Path $script:LogLocatorPath -Value $locatorValue -Encoding ASCII
@@ -2566,9 +2888,7 @@ function Write-Log([string]$message, [string]$level = "INFO", [Exception]$except
     if (-not $script:LogLevels.ContainsKey($levelKey)) {
         $levelKey = "INFO"
     }
-    if (($levelKey -eq "INFO" -or $levelKey -eq "WARN") -and $script:LogLevel -ne "DEBUG") {
-        $message = Redact-Paths $message
-    }
+    $message = Redact-SensitiveText $message
     if (-not $script:LogLevels.ContainsKey($script:LogLevel)) {
         $script:LogLevel = "INFO"
     }
@@ -2734,6 +3054,7 @@ function Set-LogDirectory([string]$directory, [switch]$SkipLog) {
     $script:FallbackLogPath = Join-Path $script:LogDirectory "Teams-Always-Green.fallback.log"
     $script:BootstrapLogPath = Join-Path $script:LogDirectory "Teams-Always-Green.bootstrap.log"
     $script:AuditLogPath = Join-Path $script:LogDirectory "Teams-Always-Green.audit.log"
+    $script:SecurityAuditLogPath = Join-Path $script:LogDirectory "Teams-Always-Green.security.log"
 
     if ($oldDir -ne $script:LogDirectory) {
         try {
@@ -2859,6 +3180,10 @@ function Set-SettingsDirectory([string]$directory, [switch]$SkipLog) {
 # --- Settings load/save and schema migration (read/validate/migrate) ---
 function Load-Settings {
     if (-not (Test-Path $settingsPath)) {
+        return $null
+    }
+    if (-not (Test-ImportExportFilePath -path $settingsPath -label "Settings load" -allowedExtensions @(".json") -RequireExists -MaxBytes ([int64]$script:SettingsMaxBytes) -Context "Settings-Load")) {
+        Write-Log "Settings load blocked by security path policy." "ERROR" $null "Settings-Load"
         return $null
     }
     try {
@@ -3037,6 +3362,10 @@ function Load-State {
     if (-not (Test-Path $script:StatePath)) {
         return $null
     }
+    if (-not (Test-ImportExportFilePath -path $script:StatePath -label "State load" -allowedExtensions @(".json") -RequireExists -MaxBytes ([int64]$script:SettingsMaxBytes) -Context "State-Load")) {
+        Write-Log "State load blocked by security path policy." "ERROR" $null "State-Load"
+        return $null
+    }
     try {
         $raw = Get-Content -Path $script:StatePath -Raw
         $loaded = $raw | ConvertFrom-Json
@@ -3135,6 +3464,10 @@ function Save-StateImmediate($state) {
         }
         if (-not $script:StatePath) {
             $script:StatePath = Join-Path $script:SettingsDirectory "Teams-Always-Green.state.json"
+        }
+        if (-not (Test-ImportExportFilePath -path $script:StatePath -label "State save" -allowedExtensions @(".json") -Context "State-Save")) {
+            Write-Log "State save blocked by security path policy." "ERROR" $null "State-Save"
+            return
         }
         Rotate-StateBackups
         $normalized = Normalize-State $state
@@ -3350,6 +3683,9 @@ function Normalize-Settings($settings) {
     if (-not ($settings.PSObject.Properties.Name -contains "UpdateAllowPrerelease")) { Set-SettingsPropertyValue $settings "UpdateAllowPrerelease" $false }
     if (-not ($settings.PSObject.Properties.Name -contains "UpdateRequireSignature")) { Set-SettingsPropertyValue $settings "UpdateRequireSignature" $true }
     if (-not ($settings.PSObject.Properties.Name -contains "HardenPermissions")) { Set-SettingsPropertyValue $settings "HardenPermissions" $true }
+    if (-not ($settings.PSObject.Properties.Name -contains "LogIncludeStackTrace")) { Set-SettingsPropertyValue $settings "LogIncludeStackTrace" $false }
+    if (-not ($settings.PSObject.Properties.Name -contains "LogToEventLog")) { Set-SettingsPropertyValue $settings "LogToEventLog" $false }
+    if (-not ($settings.PSObject.Properties.Name -contains "ScrubDiagnostics")) { Set-SettingsPropertyValue $settings "ScrubDiagnostics" $true }
     if ([bool]$settings.SecurityModeEnabled) {
         $settings.StrictSettingsImport = $true
         $settings.StrictProfileImport = $true
@@ -3358,6 +3694,9 @@ function Normalize-Settings($settings) {
         $settings.UpdateRequireSignature = $true
         $settings.AllowExternalPaths = $false
         $settings.HardenPermissions = $true
+        $settings.LogIncludeStackTrace = $false
+        $settings.LogToEventLog = $false
+        $settings.ScrubDiagnostics = $true
     }
     $allowExternal = [bool]$settings.AllowExternalPaths
     $settings.SettingsDirectory = Sanitize-DirectorySetting ([string]$settings.SettingsDirectory) $script:FolderNames.Settings "Settings" $allowExternal
@@ -3454,6 +3793,9 @@ function Validate-SettingsForSave($settings) {
     if (-not ($settings.PSObject.Properties.Name -contains "UpdateAllowPrerelease")) { $settings.UpdateAllowPrerelease = $false }
     if (-not ($settings.PSObject.Properties.Name -contains "UpdateRequireSignature")) { $settings.UpdateRequireSignature = $true }
     if (-not ($settings.PSObject.Properties.Name -contains "HardenPermissions")) { $settings.HardenPermissions = $true }
+    if (-not ($settings.PSObject.Properties.Name -contains "LogIncludeStackTrace")) { $settings.LogIncludeStackTrace = $false }
+    if (-not ($settings.PSObject.Properties.Name -contains "LogToEventLog")) { $settings.LogToEventLog = $false }
+    if (-not ($settings.PSObject.Properties.Name -contains "ScrubDiagnostics")) { $settings.ScrubDiagnostics = $true }
     if ([bool]$settings.SecurityModeEnabled) {
         $settings.StrictSettingsImport = $true
         $settings.StrictProfileImport = $true
@@ -3462,6 +3804,9 @@ function Validate-SettingsForSave($settings) {
         $settings.UpdateRequireSignature = $true
         $settings.AllowExternalPaths = $false
         $settings.HardenPermissions = $true
+        $settings.LogIncludeStackTrace = $false
+        $settings.LogToEventLog = $false
+        $settings.ScrubDiagnostics = $true
     }
     if (-not ($settings.PSObject.Properties.Name -contains "AllowExternalPaths")) { $settings.AllowExternalPaths = $false }
     $allowExternal = [bool]$settings.AllowExternalPaths
@@ -3725,6 +4070,14 @@ function Save-SettingsImmediate($settings) {
         }
         $script:settingsPath = Join-Path $script:SettingsDirectory "Teams-Always-Green.settings.json"
         $script:StatePath = Join-Path $script:SettingsDirectory "Teams-Always-Green.state.json"
+        if (-not (Test-ImportExportFilePath -path $script:settingsPath -label "Settings save" -allowedExtensions @(".json") -Context "Settings-Save")) {
+            Write-Log "Settings save blocked by security path policy." "ERROR" $null "Settings-Save"
+            return
+        }
+        if (-not (Test-ImportExportFilePath -path $script:StatePath -label "State save" -allowedExtensions @(".json") -Context "Settings-Save")) {
+            Write-Log "State save blocked by security path policy." "ERROR" $null "Settings-Save"
+            return
+        }
         Rotate-SettingsBackups
         $settingsToSave = Get-SettingsForSave $settings
         $settingsJson = $settingsToSave | ConvertTo-Json -Depth 6
@@ -4260,7 +4613,7 @@ $defaultSettings = [pscustomobject]@{
         INFO  = $false
     }
     VerboseUiLogging = $false
-    ScrubDiagnostics = $false
+    ScrubDiagnostics = $true
     ThemeMode = "Auto"
     LogCategories = @{
         General = $true
@@ -4272,6 +4625,7 @@ $defaultSettings = [pscustomobject]@{
         Profiles = $true
         Diagnostics = $true
         Logging = $true
+        Security = $true
     }
 }
 
@@ -4586,8 +4940,13 @@ try {
         Write-Log ("Script signature verified. Status={0}" -f $signaturePolicy.Status) "INFO" $null "Security"
     } else {
         $reason = if ([string]::IsNullOrWhiteSpace([string]$signaturePolicy.Reason)) { "signature check failed" } else { [string]$signaturePolicy.Reason }
-        $level = if ($signaturePolicy.Enforced) { "ERROR" } else { "WARN" }
-        Write-Log ("Script signature not trusted: {0}" -f $reason) $level $null "Security"
+        $level = if ($signaturePolicy.Enforced) { "ERROR" } else { "INFO" }
+        $signatureMessage = if ($signaturePolicy.Enforced) {
+            "Script signature not trusted: {0}" -f $reason
+        } else {
+            "Script signature not trusted (enforcement disabled): {0}" -f $reason
+        }
+        Write-Log $signatureMessage $level $null "Security"
         if ($signaturePolicy.Enforced) {
             $script:IntegrityFailed = $true
             $script:IntegrityStatus = "SignatureFailed"
@@ -6621,7 +6980,24 @@ function Soft-Restart {
 Sync-SettingsReference $settings
 
 # Load tray menu after core functions are defined
-. "$PSScriptRoot\Tray\Menu.ps1"
+$trayModulePath = Join-Path $PSScriptRoot "Tray\\Menu.ps1"
+if (-not (Test-RuntimeModulePathAllowed -path $trayModulePath -tag "Tray-Module")) {
+    $reason = if ([string]::IsNullOrWhiteSpace($script:RuntimeModuleLastError)) { "Unknown reason." } else { $script:RuntimeModuleLastError }
+    throw ("Failed to import tray module. {0}" -f $reason)
+}
+try {
+    # Tray module defines both functions and top-level runtime objects (for example
+    # context menu instances), so it must load in script scope.
+    . $trayModulePath
+    $script:RuntimeModuleLastError = ""
+} catch {
+    $script:RuntimeModuleLastError = [string]$_.Exception.Message
+    Write-SecurityMessage ("Tray-Module: runtime module import failed: {0}" -f $trayModulePath) "ERROR" "Tray-Module"
+    if (Get-Command Write-SecurityAuditEvent -ErrorAction SilentlyContinue) {
+        Write-SecurityAuditEvent "RuntimeModuleImportFailed" ("{0}|{1}" -f $trayModulePath, $script:RuntimeModuleLastError) "ERROR" "Tray-Module"
+    }
+    throw "Failed to import tray module."
+}
 Write-BootStage "Tray menu loaded"
 if (Get-Command Test-ModuleFunctionContract -ErrorAction SilentlyContinue) {
     $trayRequiredFunctions = @("Update-TrayLabels", "Invoke-TrayAction", "Set-StatusUpdateTimerEnabled")
@@ -6657,15 +7033,17 @@ function Import-ScriptFunctionsToScriptScope([string]$path, [string]$tag) {
         Write-Log ("{0}: UI path not found: {1}" -f $tag, $path) "ERROR" $_.Exception $tag
         return $false
     }
-    if (-not (Is-PathUnderRoot $resolved $script:AppRoot)) {
-        Write-Log ("{0}: UI path outside app root blocked: {1}" -f $tag, $resolved) "ERROR" $null $tag
-        return $false
-    }
-    # Stop reparse scanning at AppRoot to avoid false positives from trusted parent folders
-    # (for example, OneDrive-backed user roots).
-    if (Test-PathHasReparsePoint -Path $resolved -StopAtPath $script:AppRoot) {
-        Write-Log ("{0}: UI path contains reparse point and was blocked: {1}" -f $tag, $resolved) "ERROR" $null $tag
-        return $false
+    if (Get-Command Test-RuntimeModulePathAllowed -ErrorAction SilentlyContinue) {
+        if (-not (Test-RuntimeModulePathAllowed -path $resolved -tag $tag)) {
+            Write-Log ("{0}: UI module path blocked by runtime policy: {1}" -f $tag, $resolved) "ERROR" $null $tag
+            if (Get-Command Write-SecurityAuditEvent -ErrorAction SilentlyContinue) { Write-SecurityAuditEvent "UiModuleBlocked" "$tag|$resolved" "ERROR" $tag }
+            return $false
+        }
+    } else {
+        if (-not (Is-PathUnderRoot $resolved $script:AppRoot)) {
+            Write-Log ("{0}: UI path outside app root blocked: {1}" -f $tag, $resolved) "ERROR" $null $tag
+            return $false
+        }
     }
     $funcs = @()
     try {

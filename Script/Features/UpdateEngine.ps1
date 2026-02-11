@@ -191,6 +191,7 @@ function Invoke-UpdateCheck {
     )
     if (-not (Test-RateLimit "UpdateCheck")) {
         Write-Log "Update check blocked by rate limit." "WARN" $null "Update"
+        if (Get-Command Write-SecurityAuditEvent -ErrorAction SilentlyContinue) { Write-SecurityAuditEvent "UpdateRateLimitBlocked" "UpdateCheck" "WARN" "Update" }
         if ($Force) {
             [System.Windows.Forms.MessageBox]::Show(
                 "Update checks are temporarily rate-limited. Please wait and try again.",
@@ -208,6 +209,7 @@ function Invoke-UpdateCheck {
     $repo = if ($settings.PSObject.Properties.Name -contains "UpdateRepo" -and -not [string]::IsNullOrWhiteSpace([string]$settings.UpdateRepo)) { [string]$settings.UpdateRepo } else { "Teams-Always-Green" }
     if ($owner -notmatch '^[A-Za-z0-9._-]+$' -or $repo -notmatch '^[A-Za-z0-9._-]+$') {
         Write-Log "Update check blocked: owner/repo settings are invalid." "ERROR" $null "Update"
+        if (Get-Command Write-SecurityAuditEvent -ErrorAction SilentlyContinue) { Write-SecurityAuditEvent "UpdateOwnerRepoInvalid" ("Owner={0}|Repo={1}" -f $owner, $repo) "ERROR" "Update" }
         if ($Force) {
             [System.Windows.Forms.MessageBox]::Show(
                 "Update owner/repo settings are invalid.",
@@ -242,6 +244,7 @@ function Invoke-UpdateCheck {
     $trust = Test-ReleaseTrust $release $owner $repo $strictUpdate $allowPrerelease
     if (-not $trust.IsTrusted) {
         Write-Log ("Update blocked by trust policy: {0}" -f $trust.Reason) "ERROR" $null "Update"
+        if (Get-Command Write-SecurityAuditEvent -ErrorAction SilentlyContinue) { Write-SecurityAuditEvent "UpdateTrustBlocked" $trust.Reason "ERROR" "Update" }
         if ($Force) {
             [System.Windows.Forms.MessageBox]::Show(
                 ("Update check failed trust policy.`n`n{0}" -f $trust.Reason),
@@ -307,6 +310,7 @@ function Invoke-UpdateCheck {
     }
     if (-not (Test-TrustedGithubUrl ([string]$asset.browser_download_url) $owner $repo)) {
         Write-Log "Update blocked: asset download URL is untrusted." "ERROR" $null "Update"
+        if (Get-Command Write-SecurityAuditEvent -ErrorAction SilentlyContinue) { Write-SecurityAuditEvent "UpdateUntrustedDownloadUrl" ([string]$asset.browser_download_url) "ERROR" "Update" }
         [System.Windows.Forms.MessageBox]::Show(
             "Update asset URL failed trust validation.",
             "Update blocked",
@@ -319,6 +323,11 @@ function Invoke-UpdateCheck {
     $tempPath = Join-Path $env:TEMP ("Teams Always Green.ps1." + [Guid]::NewGuid().ToString("N") + ".tmp")
     $backupPath = $null
     try {
+        if (Get-Command Test-TrustedFilePath -ErrorAction SilentlyContinue) {
+            if (-not (Test-TrustedFilePath -path $scriptPath -root $script:AppRoot -tag "Update" -label "App script" -RequireExists)) {
+                throw "Current app script path failed trust validation."
+            }
+        }
         Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $tempPath -UseBasicParsing -ErrorAction Stop
         $downloadInfo = Get-Item -Path $tempPath -ErrorAction Stop
         if ($downloadInfo.Length -lt 2048) {
@@ -327,11 +336,13 @@ function Invoke-UpdateCheck {
         $requireHash = ([bool]$settings.UpdateRequireHash -or $strictUpdate)
         $expectedHash = Get-ReleaseAssetHash $release $assetName
         if ($requireHash -and -not $expectedHash) {
+            if (Get-Command Write-SecurityAuditEvent -ErrorAction SilentlyContinue) { Write-SecurityAuditEvent "UpdateHashMissing" ("Release={0}" -f [string](Get-ReleaseVersionString $release)) "ERROR" "Update" }
             throw "Update hash asset is required but missing."
         }
         if ($expectedHash) {
             $actualHash = (Get-FileHash -Algorithm SHA256 -Path $tempPath -ErrorAction Stop).Hash
             if ($expectedHash -ne $actualHash) {
+                if (Get-Command Write-SecurityAuditEvent -ErrorAction SilentlyContinue) { Write-SecurityAuditEvent "UpdateHashMismatch" ("Expected={0}|Actual={1}" -f $expectedHash, $actualHash) "ERROR" "Update" }
                 throw "Downloaded file hash mismatch."
             }
         }
@@ -342,9 +353,11 @@ function Invoke-UpdateCheck {
             }
             $sigBytes = Get-ReleaseAssetSignatureBytes $release $assetName
             if (-not $sigBytes) {
+                if (Get-Command Write-SecurityAuditEvent -ErrorAction SilentlyContinue) { Write-SecurityAuditEvent "UpdateSignatureMissing" ([string](Get-ReleaseVersionString $release)) "ERROR" "Update" }
                 throw "Update signature missing."
             }
             if (-not (Verify-UpdateSignature $tempPath $sigBytes $publicKey)) {
+                if (Get-Command Write-SecurityAuditEvent -ErrorAction SilentlyContinue) { Write-SecurityAuditEvent "UpdateSignatureInvalid" ([string](Get-ReleaseVersionString $release)) "ERROR" "Update" }
                 throw "Update signature verification failed."
             }
         }
@@ -380,6 +393,7 @@ function Invoke-UpdateCheck {
         } catch {
         }
         Write-Log "Update failed: $($_.Exception.Message)" "ERROR" $_.Exception "Update"
+        if (Get-Command Write-SecurityAuditEvent -ErrorAction SilentlyContinue) { Write-SecurityAuditEvent "UpdateApplyFailed" ([string]$_.Exception.Message) "ERROR" "Update" }
         [System.Windows.Forms.MessageBox]::Show(
             "Update failed.`n$($_.Exception.Message)",
             "Update failed",
