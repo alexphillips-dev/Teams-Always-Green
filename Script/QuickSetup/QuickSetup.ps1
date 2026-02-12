@@ -1038,7 +1038,7 @@ function New-Shortcut([string]$shortcutPath, [string]$targetScriptPath, [string]
     $shell = New-Object -ComObject WScript.Shell
     $shortcut = $shell.CreateShortcut($shortcutPath)
     $shortcut.TargetPath = "$env:WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe"
-    $shortcut.Arguments = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$targetScriptPath`""
+    $shortcut.Arguments = "-NoProfile -ExecutionPolicy RemoteSigned -WindowStyle Hidden -File `"$targetScriptPath`""
     $shortcut.WorkingDirectory = $workingDir
     $shortcut.WindowStyle = 7
     $iconPath = Join-Path $workingDir "Meta\Icons\Tray_Icon.ico"
@@ -1983,14 +1983,14 @@ if ($wizard.Action -eq "Launch") {
     if (-not (Test-Path $targetScript)) {
         Show-SetupError "Launch failed: app script not found at $targetScript"
     } elseif (-not (Test-Path $launchVbs)) {
-        $launchArgs = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$targetScript`""
+        $launchArgs = "-NoProfile -ExecutionPolicy RemoteSigned -WindowStyle Hidden -File `"$targetScript`""
         try {
             $proc = Start-Process "$env:WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe" -ArgumentList $launchArgs -WorkingDirectory $installPath -PassThru -ErrorAction Stop
             Write-SetupLog ("Launch started (hidden). PID={0}" -f $proc.Id)
         } catch {
             Write-SetupLog ("Launch failed (hidden): {0}" -f $_.Exception.Message)
             try {
-                $proc = Start-Process "$env:WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe" -ArgumentList ("-NoProfile -ExecutionPolicy Bypass -File `"$targetScript`"") -WorkingDirectory $installPath -PassThru -ErrorAction Stop
+                $proc = Start-Process "$env:WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe" -ArgumentList ("-NoProfile -ExecutionPolicy RemoteSigned -File `"$targetScript`"") -WorkingDirectory $installPath -PassThru -ErrorAction Stop
                 Write-SetupLog ("Launch started (visible). PID={0}" -f $proc.Id)
             } catch {
                 Show-SetupError ("Launch failed: {0}" -f $_.Exception.Message)
@@ -1998,7 +1998,7 @@ if ($wizard.Action -eq "Launch") {
         }
     }
 } elseif ($wizard.Action -eq "Settings") {
-    Start-Process "$env:WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe" -ArgumentList "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$targetScript`" -SettingsOnly" -WorkingDirectory $installPath
+    Start-Process "$env:WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe" -ArgumentList "-NoProfile -ExecutionPolicy RemoteSigned -WindowStyle Hidden -File `"$targetScript`" -SettingsOnly" -WorkingDirectory $installPath
 } elseif ($wizard.Action -eq "Folder") {
     Start-Process "explorer.exe" $installPath
 }
@@ -2151,14 +2151,14 @@ if ($action -eq "Launch") {
     if (-not (Test-Path $targetScript)) {
         Show-SetupError "Launch failed: app script not found at $targetScript"
     } elseif (-not (Test-Path $launchVbs)) {
-        $launchArgs = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$targetScript`""
+        $launchArgs = "-NoProfile -ExecutionPolicy RemoteSigned -WindowStyle Hidden -File `"$targetScript`""
         try {
             $proc = Start-Process "$env:WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe" -ArgumentList $launchArgs -WorkingDirectory $installPath -PassThru -ErrorAction Stop
             Write-SetupLog ("Launch started (hidden). PID={0}" -f $proc.Id)
         } catch {
             Write-SetupLog ("Launch failed (hidden): {0}" -f $_.Exception.Message)
             try {
-                $proc = Start-Process "$env:WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe" -ArgumentList ("-NoProfile -ExecutionPolicy Bypass -File `"$targetScript`"") -WorkingDirectory $installPath -PassThru -ErrorAction Stop
+                $proc = Start-Process "$env:WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe" -ArgumentList ("-NoProfile -ExecutionPolicy RemoteSigned -File `"$targetScript`"") -WorkingDirectory $installPath -PassThru -ErrorAction Stop
                 Write-SetupLog ("Launch started (visible). PID={0}" -f $proc.Id)
             } catch {
                 Show-SetupError ("Launch failed: {0}" -f $_.Exception.Message)
@@ -2166,7 +2166,7 @@ if ($action -eq "Launch") {
         }
     }
 } elseif ($action -eq "Settings") {
-        Start-Process "$env:WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe" -ArgumentList "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$targetScript`" -SettingsOnly" -WorkingDirectory $installPath
+        Start-Process "$env:WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe" -ArgumentList "-NoProfile -ExecutionPolicy RemoteSigned -WindowStyle Hidden -File `"$targetScript`" -SettingsOnly" -WorkingDirectory $installPath
     } elseif ($action -eq "Folder") {
         Start-Process "explorer.exe" $installPath
     }

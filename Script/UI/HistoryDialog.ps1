@@ -1,4 +1,7 @@
-﻿function Show-HistoryDialog {
+﻿function Get-HistoryUiModuleVersion {
+    return "1.0.0"
+}
+function Show-HistoryDialog {
     $form = New-Object System.Windows.Forms.Form
     $form.Text = L "History"
     $form.StartPosition = "CenterScreen"
@@ -839,3 +842,4 @@
 
     [void]$form.ShowDialog()
 }
+

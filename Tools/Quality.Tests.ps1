@@ -5,13 +5,16 @@ BeforeAll {
     $script:mainScript = Join-Path $script:repoRoot "Script/Teams Always Green.ps1"
     $script:settingsDialogScript = Join-Path $script:repoRoot "Script/UI/SettingsDialog.ps1"
     $script:historyDialogScript = Join-Path $script:repoRoot "Script/UI/HistoryDialog.ps1"
+    $script:trayMenuScript = Join-Path $script:repoRoot "Script/Tray/Menu.ps1"
     $script:updateEngineScript = Join-Path $script:repoRoot "Script/Features/UpdateEngine.ps1"
     $script:coreRuntimeScript = Join-Path $script:repoRoot "Script/Core/Runtime.ps1"
+    $script:uiStringsScript = Join-Path $script:repoRoot "Script/I18n/UiStrings.ps1"
     $script:versionPath = Join-Path $script:repoRoot "VERSION"
     $script:changelogPath = Join-Path $script:repoRoot "CHANGELOG.md"
     $script:mainText = Get-Content -Raw -Path $script:mainScript
     $script:settingsDialogText = Get-Content -Raw -Path $script:settingsDialogScript
     $script:historyDialogText = Get-Content -Raw -Path $script:historyDialogScript
+    $script:trayMenuText = Get-Content -Raw -Path $script:trayMenuScript
     $script:updateEngineText = Get-Content -Raw -Path $script:updateEngineScript
     $script:coreRuntimeText = Get-Content -Raw -Path $script:coreRuntimeScript
 
@@ -69,13 +72,30 @@ Describe "Quality: Critical Features" {
 
     It "contains UI safety wrapper and event-id logging hooks" {
         $script:mainText | Should -Match 'function\s+Invoke-UiSafeAction'
+        $script:mainText | Should -Match 'function\s+Write-LogExceptionDeduped'
         $script:mainText | Should -Match 'function\s+Get-LogEventId'
         $script:mainText | Should -Match '\[E=\$eventId\]'
+    }
+
+    It "contains self-heal and repair mode helpers" {
+        $script:mainText | Should -Match 'function\s+Get-CrashRecoveryTier'
+        $script:mainText | Should -Match 'function\s+Start-RepairMode'
+        $script:mainText | Should -Match 'function\s+Start-HealthMonitor'
+        $script:mainText | Should -Match 'function\s+Test-SavedSettingsFile'
+        $script:mainText | Should -Match 'Ensure-TrayModuleFallback'
     }
 
     It "contains settings startup fallback UI" {
         $script:settingsDialogText | Should -Match 'function\s+Show-SettingsFallbackDialog'
         $script:settingsDialogText | Should -Match 'Show-SettingsFallbackDialog -ErrorMessage'
+    }
+
+    It "loads update module before tray module at startup" {
+        $updateLoad = $script:mainText.IndexOf('$updateModulePath = Join-Path $PSScriptRoot "Features\\UpdateEngine.ps1"')
+        $trayLoad = $script:mainText.IndexOf('$trayModulePath = Join-Path $PSScriptRoot "Tray\\Menu.ps1"')
+        $updateLoad | Should -BeGreaterThan -1
+        $trayLoad | Should -BeGreaterThan -1
+        $updateLoad | Should -BeLessThan $trayLoad
     }
 }
 
@@ -88,6 +108,7 @@ Describe "Quality: Profile and Update Coverage" {
     }
 
     It "supports manual update checks with release injection and no-update flow" {
+        $script:updateEngineText | Should -Match 'function\s+Get-UpdateModuleVersion'
         $script:updateEngineText | Should -Match 'function\s+Invoke-UpdateCheck'
         $script:updateEngineText | Should -Match '\[object\]\$Release'
         $script:updateEngineText | Should -Match '\[switch\]\$SilentNoUpdate'
@@ -97,11 +118,24 @@ Describe "Quality: Profile and Update Coverage" {
         $script:updateEngineText | Should -Match 'Test-RateLimit "UpdateCheck"'
     }
 
+    It "uses timeout and retry policy for update network calls" {
+        $script:updateEngineText | Should -Match 'function\s+Get-UpdateNetworkPolicy'
+        $script:updateEngineText | Should -Match 'function\s+Invoke-UpdateRestRequest'
+        $script:updateEngineText | Should -Match 'function\s+Invoke-UpdateDownloadRequest'
+        $script:settingsDialogText | Should -Match 'AboutUpdateJobTimeoutSeconds'
+        $script:settingsDialogText | Should -Match 'Invoke-RestMethod\s+-Uri\s+\$uri\s+-Headers\s+\$headers\s+-TimeoutSec'
+    }
+
     It "keeps profile hover handlers theme-safe" {
         $script:settingsDialogText | Should -Match 'SetDeleteProfileButtonHover'
         $script:settingsDialogText | Should -Match 'SetNewProfileButtonHover'
         $script:settingsDialogText | Should -Match 'DeleteProfileButtonThemeForeColor'
         $script:settingsDialogText | Should -Match 'NewProfileButtonThemeForeColor'
+    }
+
+    It "exposes crash recovery reset action in diagnostics" {
+        $script:settingsDialogText | Should -Match 'Reset Crash State'
+        $script:mainText | Should -Match 'function\s+Reset-CrashRecoveryState'
     }
 }
 
@@ -139,6 +173,7 @@ Describe "Quality: UI Integration Contracts" {
 
         $contract = Test-ModuleFunctionContract -ModuleTag "Settings-UI" -FunctionMap $functionMap -RequiredFunctions @("Show-SettingsDialog", "Show-LogTailDialog", "Ensure-SettingsDialogVisible")
         $contract.IsValid | Should -BeTrue
+        $functionMap.ContainsKey("Get-SettingsUiModuleVersion") | Should -BeTrue
     }
 
     It "imports history UI functions and satisfies required contract" {
@@ -147,6 +182,23 @@ Describe "Quality: UI Integration Contracts" {
         $ok | Should -BeTrue
         $contract = Test-ModuleFunctionContract -ModuleTag "History-UI" -FunctionMap $script:ImportedUiFunctions -RequiredFunctions @("Show-HistoryDialog")
         $contract.IsValid | Should -BeTrue
+        $script:ImportedUiFunctions.ContainsKey("Get-HistoryUiModuleVersion") | Should -BeTrue
+    }
+
+    It "validates tray module exported-function contract" {
+        $tokens = $null
+        $errors = $null
+        $ast = [System.Management.Automation.Language.Parser]::ParseFile($script:trayMenuScript, [ref]$tokens, [ref]$errors)
+        $errors | Should -BeNullOrEmpty
+
+        $functionMap = @{}
+        $ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $true) | ForEach-Object {
+            $functionMap[$_.Name] = [scriptblock]::Create("param()")
+        }
+
+        $contract = Test-ModuleFunctionContract -ModuleTag "Tray-Module" -FunctionMap $functionMap -RequiredFunctions @("Update-TrayLabels", "Invoke-TrayAction", "Set-StatusUpdateTimerEnabled")
+        $contract.IsValid | Should -BeTrue
+        $functionMap.ContainsKey("Get-TrayModuleVersion") | Should -BeTrue
     }
 }
 
@@ -172,6 +224,55 @@ Describe "Quality: Startup Budgets" {
         $parsed = Convert-BootLogLineToStageTiming "[2/11/2026 2:18 PM] [INFO] Boot: Startup complete +4050ms"
         $parsed.Stage | Should -Be "Startup complete"
         [int64]$parsed.ElapsedMs | Should -Be 4050
+    }
+}
+
+Describe "Quality: Localization Coverage" {
+    BeforeAll {
+        . $script:uiStringsScript
+        $script:uiLanguages = @($script:UiStrings.Keys | Sort-Object)
+        $script:uiNonEnglishLanguages = @($script:uiLanguages | Where-Object { $_ -ne "en" })
+        $script:requiredUiKeys = @(
+            "Settings",
+            "General",
+            "Scheduling",
+            "Hotkeys",
+            "Logging",
+            "Profiles",
+            "Appearance",
+            "Diagnostics",
+            "Advanced",
+            "About",
+            "Language",
+            "Save",
+            "Cancel",
+            "Done",
+            "Start",
+            "Stop",
+            "Pause",
+            "Resume"
+        )
+    }
+
+    It "contains required UI keys for every language table" {
+        foreach ($lang in $script:uiLanguages) {
+            foreach ($key in $script:requiredUiKeys) {
+                $script:UiStrings[$lang].ContainsKey($key) | Should -BeTrue
+            }
+        }
+    }
+
+    It "keeps broad translation coverage for required UI keys in non-English languages" {
+        foreach ($lang in $script:uiNonEnglishLanguages) {
+            $translatedCount = 0
+            foreach ($key in $script:requiredUiKeys) {
+                $value = [string]$script:UiStrings[$lang][$key]
+                $english = [string]$script:UiStrings["en"][$key]
+                [string]::IsNullOrWhiteSpace($value) | Should -BeFalse
+                if ($value -ne $english) { $translatedCount++ }
+            }
+            $translatedCount | Should -BeGreaterOrEqual 12
+        }
     }
 }
 
@@ -227,6 +328,27 @@ Describe "Quality: Settings Migration Unit Tests" {
         }
         $migrated = Migrate-Settings $future
         [int]$migrated.SchemaVersion | Should -Be 99
+    }
+
+    It "adds update security keys when migrating from schema 8" {
+        $script:DataRoot = "C:\\Temp\\TeamsAlwaysGreen"
+        $script:SettingsSchemaVersion = 9
+        $script:SecurityDefaultUpdateOwner = "alexphillips-dev"
+        $script:SecurityDefaultUpdateRepo = "Teams-Always-Green"
+
+        $legacy = [pscustomobject]@{
+            SchemaVersion = 8
+            IntervalSeconds = 60
+            LogLevel = "INFO"
+        }
+        $migrated = Migrate-Settings $legacy
+
+        [int]$migrated.SchemaVersion | Should -Be 9
+        $migrated.PSObject.Properties.Name | Should -Contain "UpdateOwner"
+        $migrated.PSObject.Properties.Name | Should -Contain "UpdateRepo"
+        $migrated.PSObject.Properties.Name | Should -Contain "UpdateRequireHash"
+        $migrated.PSObject.Properties.Name | Should -Contain "UpdateRequireSignature"
+        $migrated.PSObject.Properties.Name | Should -Contain "HardenPermissions"
     }
 }
 
