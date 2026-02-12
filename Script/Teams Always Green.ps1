@@ -44,6 +44,8 @@
 # - Keep the install structure intact (Script/Meta/Debug and launcher files)
 # - Runtime files live under DataRoot (default: %LocalAppData%\TeamsAlwaysGreen)
 
+[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseApprovedVerbs', '', Scope='Function', Target='*', Justification='Legacy function names are intentionally retained for compatibility.')]
+[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseSingularNouns', '', Scope='Function', Target='*', Justification='Legacy function names are intentionally retained for compatibility.')]
 # --- Runtime setup and WinForms initialization (load assemblies, set UI defaults) ---
 param(
     [switch]$SettingsOnly
@@ -152,8 +154,8 @@ function Get-StringSha256Hex([string]$text) {
     }
 }
 
-function Get-ProfileExportSignature([string]$name, $profile) {
-    $normalizedProfile = Migrate-ProfileSnapshot $profile
+function Get-ProfileExportSignature([string]$name, $profileSnapshot) {
+    $normalizedProfile = Migrate-ProfileSnapshot $profileSnapshot
     $canonicalPayload = [ordered]@{
         FormatVersion = 1
         Name = [string]$name
@@ -5147,42 +5149,42 @@ function Get-ProfileLastGood([string]$name) {
     return $null
 }
 
-function Migrate-ProfileSnapshot($profile) {
-    if (-not $profile) { return $profile }
-    if ($profile -is [hashtable]) {
-        if (-not $profile.ContainsKey("ProfileSchemaVersion")) { $profile["ProfileSchemaVersion"] = $script:ProfileSchemaVersion }
-        if (-not $profile.ContainsKey("ReadOnly")) { $profile["ReadOnly"] = $false }
-        return $profile
+function Migrate-ProfileSnapshot($profileSnapshot) {
+    if (-not $profileSnapshot) { return $profileSnapshot }
+    if ($profileSnapshot -is [hashtable]) {
+        if (-not $profileSnapshot.ContainsKey("ProfileSchemaVersion")) { $profileSnapshot["ProfileSchemaVersion"] = $script:ProfileSchemaVersion }
+        if (-not $profileSnapshot.ContainsKey("ReadOnly")) { $profileSnapshot["ReadOnly"] = $false }
+        return $profileSnapshot
     }
-    if (-not ($profile.PSObject.Properties.Name -contains "ProfileSchemaVersion")) {
-        $profile | Add-Member -MemberType NoteProperty -Name "ProfileSchemaVersion" -Value $script:ProfileSchemaVersion -Force
+    if (-not ($profileSnapshot.PSObject.Properties.Name -contains "ProfileSchemaVersion")) {
+        $profileSnapshot | Add-Member -MemberType NoteProperty -Name "ProfileSchemaVersion" -Value $script:ProfileSchemaVersion -Force
     }
-    if (-not ($profile.PSObject.Properties.Name -contains "ReadOnly")) {
-        $profile | Add-Member -MemberType NoteProperty -Name "ReadOnly" -Value $false -Force
+    if (-not ($profileSnapshot.PSObject.Properties.Name -contains "ReadOnly")) {
+        $profileSnapshot | Add-Member -MemberType NoteProperty -Name "ReadOnly" -Value $false -Force
     }
-    return $profile
+    return $profileSnapshot
 }
 
-function Test-ProfileSnapshot($profile, [switch]$Strict) {
+function Test-ProfileSnapshot($profileSnapshot, [switch]$Strict) {
     $issues = @()
-    if (-not $profile) {
+    if (-not $profileSnapshot) {
         $issues += "Profile is null."
         return [pscustomobject]@{ IsValid = $false; Issues = $issues }
     }
-    if (-not ($profile -is [hashtable] -or $profile -is [pscustomobject])) {
+    if (-not ($profileSnapshot -is [hashtable] -or $profileSnapshot -is [pscustomobject])) {
         $issues += "Profile is not an object."
         return [pscustomobject]@{ IsValid = $false; Issues = $issues }
     }
     $required = @("IntervalSeconds", "HotkeyToggle", "HotkeyStartStop", "HotkeyPauseResume")
     foreach ($key in $required) {
-        $hasKey = if ($profile -is [hashtable]) { $profile.ContainsKey($key) } else { $profile.PSObject.Properties.Name -contains $key }
+        $hasKey = if ($profileSnapshot -is [hashtable]) { $profileSnapshot.ContainsKey($key) } else { $profileSnapshot.PSObject.Properties.Name -contains $key }
         if (-not $hasKey) { $issues += "Missing $key" }
     }
     $intervalValue = $null
-    if ($profile -is [hashtable]) {
-        if ($profile.ContainsKey("IntervalSeconds")) { $intervalValue = $profile["IntervalSeconds"] }
-    } elseif ($profile.PSObject.Properties.Name -contains "IntervalSeconds") {
-        $intervalValue = $profile.IntervalSeconds
+    if ($profileSnapshot -is [hashtable]) {
+        if ($profileSnapshot.ContainsKey("IntervalSeconds")) { $intervalValue = $profileSnapshot["IntervalSeconds"] }
+    } elseif ($profileSnapshot.PSObject.Properties.Name -contains "IntervalSeconds") {
+        $intervalValue = $profileSnapshot.IntervalSeconds
     }
     if ($null -ne $intervalValue) {
         $interval = 0
@@ -5193,12 +5195,12 @@ function Test-ProfileSnapshot($profile, [switch]$Strict) {
     if ($Strict) {
         $allowed = @($script:ProfilePropertyNames + $script:ProfileMetadataKeys)
         $unknown = @()
-        if ($profile -is [hashtable]) {
-            foreach ($key in $profile.Keys) {
+        if ($profileSnapshot -is [hashtable]) {
+            foreach ($key in $profileSnapshot.Keys) {
                 if (-not ($allowed -contains [string]$key)) { $unknown += [string]$key }
             }
         } else {
-            foreach ($prop in $profile.PSObject.Properties.Name) {
+            foreach ($prop in $profileSnapshot.PSObject.Properties.Name) {
                 if (-not ($allowed -contains [string]$prop)) { $unknown += [string]$prop }
             }
         }
@@ -5209,13 +5211,13 @@ function Test-ProfileSnapshot($profile, [switch]$Strict) {
     return [pscustomobject]@{ IsValid = ($issues.Count -eq 0); Issues = $issues }
 }
 
-function Get-ProfileReadOnly($profile) {
-    if (-not $profile) { return $false }
-    if ($profile -is [hashtable]) {
-        if ($profile.ContainsKey("ReadOnly")) { return [bool]$profile["ReadOnly"] }
+function Get-ProfileReadOnly($profileSnapshot) {
+    if (-not $profileSnapshot) { return $false }
+    if ($profileSnapshot -is [hashtable]) {
+        if ($profileSnapshot.ContainsKey("ReadOnly")) { return [bool]$profileSnapshot["ReadOnly"] }
         return $false
     }
-    if ($profile.PSObject.Properties.Name -contains "ReadOnly") { return [bool]$profile.ReadOnly }
+    if ($profileSnapshot.PSObject.Properties.Name -contains "ReadOnly") { return [bool]$profileSnapshot.ReadOnly }
     return $false
 }
 
@@ -5237,9 +5239,9 @@ function Get-ProfileSnapshotHashFromSettings($source) {
     return ($pairs -join "|")
 }
 
-function Get-ProfileDiffSummary($currentSettings, $profile, [int]$maxKeys = 10) {
+function Get-ProfileDiffSummary($currentSettings, $targetProfile, [int]$maxKeys = 10) {
     $current = Get-ProfileSnapshot $currentSettings
-    $target = Migrate-ProfileSnapshot $profile
+    $target = Migrate-ProfileSnapshot $targetProfile
     $changed = @()
     $changes = @()
     foreach ($name in $script:ProfilePropertyNames) {
@@ -5341,10 +5343,10 @@ function Format-ProfileDiffValue($value, [string]$key = $null) {
     return $text
 }
 
-function Confirm-ProfileSwitch([string]$name, $profile) {
+function Confirm-ProfileSwitch([string]$name, $targetProfile) {
     $script:ProfileApplySelectionPending = $false
     $script:ProfileSwitchSelectedKeys = @()
-    $diff = Get-ProfileDiffSummary $settings $profile
+    $diff = Get-ProfileDiffSummary $settings $targetProfile
     if ($diff.Count -le 0) { return $true }
     $previewMax = 14
     $previewChanges = @($diff.Changes | Select-Object -First $previewMax)
@@ -5530,8 +5532,8 @@ function Get-ProfileSnapshot($source) {
     return $snapshot
 }
 
-function Apply-ProfileSnapshot($target, $profile) {
-    $profile = Migrate-ProfileSnapshot $profile
+function Apply-ProfileSnapshot($target, $profileSnapshot) {
+    $profileSnapshot = Migrate-ProfileSnapshot $profileSnapshot
     $applySelection = [bool]$script:ProfileApplySelectionPending
     $selectedKeys = @()
     if ($applySelection -and ($script:ProfileSwitchSelectedKeys -is [System.Collections.IEnumerable])) {
@@ -5543,7 +5545,7 @@ function Apply-ProfileSnapshot($target, $profile) {
         if ($settings -and ($settings.PSObject.Properties.Name -contains "StrictProfileImport") -and [bool]$settings.StrictProfileImport) { $strictProfileValidation = $true }
     } catch {
     }
-    $validation = Test-ProfileSnapshot $profile -Strict:$strictProfileValidation
+    $validation = Test-ProfileSnapshot $profileSnapshot -Strict:$strictProfileValidation
     if (-not $validation.IsValid) {
         $msg = "Profile is invalid: " + (($validation.Issues | Select-Object -First 4) -join ", ")
         Write-Log $msg "WARN" $null "Profiles"
@@ -5553,13 +5555,13 @@ function Apply-ProfileSnapshot($target, $profile) {
     }
     $overrideSchedule = $true
     $hasOverrideFlag = $false
-    if ($profile -is [hashtable]) {
-        if ($profile.ContainsKey("ScheduleOverrideEnabled")) {
-            $overrideSchedule = [bool]$profile["ScheduleOverrideEnabled"]
+    if ($profileSnapshot -is [hashtable]) {
+        if ($profileSnapshot.ContainsKey("ScheduleOverrideEnabled")) {
+            $overrideSchedule = [bool]$profileSnapshot["ScheduleOverrideEnabled"]
             $hasOverrideFlag = $true
         }
-    } elseif ($profile -and ($profile.PSObject.Properties.Name -contains "ScheduleOverrideEnabled")) {
-        $overrideSchedule = [bool]$profile.ScheduleOverrideEnabled
+    } elseif ($profileSnapshot -and ($profileSnapshot.PSObject.Properties.Name -contains "ScheduleOverrideEnabled")) {
+        $overrideSchedule = [bool]$profileSnapshot.ScheduleOverrideEnabled
         $hasOverrideFlag = $true
     }
     if (-not $hasOverrideFlag) {
@@ -5574,12 +5576,12 @@ function Apply-ProfileSnapshot($target, $profile) {
         if (-not $overrideSchedule -and $name -in @("ScheduleEnabled", "ScheduleStart", "ScheduleEnd", "ScheduleWeekdays", "ScheduleSuspendUntil")) {
             continue
         }
-        if ($profile -is [hashtable]) {
-            if ($profile.ContainsKey($name)) {
-                Set-SettingsPropertyValue $target $name $profile[$name]
+        if ($profileSnapshot -is [hashtable]) {
+            if ($profileSnapshot.ContainsKey($name)) {
+                Set-SettingsPropertyValue $target $name $profileSnapshot[$name]
             }
-        } elseif ($profile.PSObject.Properties.Name -contains $name) {
-            Set-SettingsPropertyValue $target $name $profile.$name
+        } elseif ($profileSnapshot.PSObject.Properties.Name -contains $name) {
+            Set-SettingsPropertyValue $target $name $profileSnapshot.$name
         }
     }
     $script:ProfileApplySelectionPending = $false
@@ -5813,7 +5815,6 @@ $script:TabDefaultsMap = @{
 }
 
 $settingsLoadedFromFile = $true
-$settingsPreJson = $null
 $convertToStableObject = {
     param($value)
     if ($null -eq $value) { return $null }
@@ -5853,11 +5854,6 @@ if (-not $settings) {
         Write-Log "Safe Mode forced due to settings recovery failure." "WARN" $null "Load-Settings"
     }
 } else {
-    try {
-        $settingsPreJson = (& $convertToStableObject $settings) | ConvertTo-Json -Depth 8
-    } catch {
-        $settingsPreJson = $null
-    }
     try { Purge-SettingsBackups } catch { }
     $settings = Migrate-Settings $settings
     foreach ($prop in $defaultSettings.PSObject.Properties.Name) {
@@ -5990,10 +5986,10 @@ if (Ensure-StockProfiles $settings) {
 }
 
 foreach ($name in @(Get-ObjectKeys $settings.Profiles)) {
-    $profile = $settings.Profiles[$name]
-    $profile = Migrate-ProfileSnapshot $profile
+    $currentProfile = $settings.Profiles[$name]
+    $currentProfile = Migrate-ProfileSnapshot $currentProfile
     $strictProfileValidation = ([bool]$settings.SecurityModeEnabled -or [bool]$settings.StrictProfileImport)
-    $validation = Test-ProfileSnapshot $profile -Strict:$strictProfileValidation
+    $validation = Test-ProfileSnapshot $currentProfile -Strict:$strictProfileValidation
     if (-not $validation.IsValid) {
         $lastGood = Get-ProfileLastGood $name
         if ($lastGood) {
@@ -6005,8 +6001,8 @@ foreach ($name in @(Get-ObjectKeys $settings.Profiles)) {
             Write-Log ("Profile '$name' failed validation: {0}" -f (($validation.Issues | Select-Object -First 4) -join ", ")) "WARN" $null "Profiles"
         }
     } else {
-        $settings.Profiles[$name] = $profile
-        Update-ProfileLastGood $name $profile
+        $settings.Profiles[$name] = $currentProfile
+        Update-ProfileLastGood $name $currentProfile
     }
 }
 $rollbackCheck = Test-RollbackProtectionState $settings
@@ -6182,9 +6178,8 @@ if (-not $state) {
         $state.Stats = Convert-ToHashtable $settings.Stats
     }
 }
-$runtimeMigrated = $false
 if ($script:PendingRuntimeFromSettings -and $script:PendingRuntimeFromSettings.Count -gt 0) {
-    $runtimeMigrated = Apply-RuntimeOverridesToState $state $script:PendingRuntimeFromSettings
+    Apply-RuntimeOverridesToState $state $script:PendingRuntimeFromSettings | Out-Null
 }
 $currentSettingsHash = Get-SettingsFileHash
 if ($currentSettingsHash) {
@@ -6383,7 +6378,6 @@ if ($script:LogLevel -eq "DEBUG") {
 }
 Write-Log (Get-PathHealthSummary) "DEBUG" $null "Init"
 $buildStamp = if ($appBuildTimestamp) { Format-DateTime $appBuildTimestamp } else { "Unknown" }
-$scriptHashValue = if ($appScriptHash) { $appScriptHash } else { "Unknown" }
 Write-Log ("Session start: SessionID={0} Profile={1} LogLevel={2} Version={3} SchemaVersion={4} Build={5}" -f `
     $script:RunId, $settings.ActiveProfile, $settings.LogLevel, $appVersion, $script:SettingsSchemaVersion, $buildStamp) "INFO" $null "Init"
 Write-Log ("Session path: LogPath={0}" -f $logPath) "INFO" $null "Init"
@@ -9116,7 +9110,6 @@ function Show-StartPrompt {
 # --- Optional: confirmation prompt on launch ---
 $overrideAtStartup = $script:OverrideMinimalMode
 $overrideLogOnce = $false
-$overrideState = $null
 if (-not $overrideAtStartup -and (Test-Path $script:CrashStatePath)) {
     try {
         $rawOverride = Get-Content -Path $script:CrashStatePath -Raw
@@ -9125,7 +9118,6 @@ if (-not $overrideAtStartup -and (Test-Path $script:CrashStatePath)) {
             if ($loadedOverride -and ($loadedOverride.PSObject.Properties.Name -contains "OverrideMinimalMode") -and [bool]$loadedOverride.OverrideMinimalMode) {
                 $overrideAtStartup = $true
                 $script:OverrideMinimalMode = $true
-                $overrideState = $loadedOverride
                 if (-not ($loadedOverride.PSObject.Properties.Name -contains "OverrideMinimalModeLogged") -or -not [bool]$loadedOverride.OverrideMinimalModeLogged) {
                     $overrideLogOnce = $true
                 }
