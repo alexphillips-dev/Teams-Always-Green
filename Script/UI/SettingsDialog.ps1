@@ -1,11 +1,12 @@
 ﻿# --- Settings dialog creation and event wiring (build/bind) ---
+function Get-SettingsUiModuleVersion {
+    return "1.0.0"
+}
+
 function Show-SettingsDialog {
     Write-Log "UI: Settings open requested." "DEBUG" $null "Settings-Dialog"
     try {
         $script:SettingsDialogStart = Get-Date
-        $script:settings = Ensure-SettingsCollections $script:settings
-        $script:settings = Normalize-Settings (Migrate-Settings $script:settings)
-        $settings = $script:settings
         $script:SettingsIconRoot = if ($script:AppRoot) { $script:AppRoot } else { (Split-Path -Path $scriptPath -Parent) }
         if ($script:SettingsForm -and -not $script:SettingsForm.IsDisposed) {
             $reuseOk = $true
@@ -35,6 +36,38 @@ function Show-SettingsDialog {
                 $reuseOk = $false
             }
             if ($reuseOk) { return }
+        }
+        $script:settings = Ensure-SettingsCollections $script:settings
+        $script:settings = Normalize-Settings (Migrate-Settings $script:settings)
+        $settings = $script:settings
+        $deletedProfilesMetaRoot = $null
+        if ($script:DataRoot -and -not [string]::IsNullOrWhiteSpace([string]$script:DataRoot)) {
+            $deletedProfilesMetaRoot = Join-Path $script:DataRoot "Meta"
+        } else {
+            $localDataRoot = Join-Path ([Environment]::GetFolderPath("LocalApplicationData")) "TeamsAlwaysGreen"
+            $deletedProfilesMetaRoot = Join-Path $localDataRoot "Meta"
+        }
+        $script:DeletedProfilesRecycleBinPath = Join-Path $deletedProfilesMetaRoot "Teams-Always-Green.deletedprofiles.json"
+        $script:DeletedProfilesRecycleBin = New-Object System.Collections.ArrayList
+        if ($script:DeletedProfilesRecycleBinPath -and (Test-Path $script:DeletedProfilesRecycleBinPath)) {
+            try {
+                $savedEntries = Get-Content -Path $script:DeletedProfilesRecycleBinPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+                foreach ($saved in @($savedEntries)) {
+                    if ($null -ne $saved) { [void]$script:DeletedProfilesRecycleBin.Add($saved) }
+                }
+            } catch {
+                Write-Log "UI: Failed to load deleted profile recovery cache; starting empty." "WARN" $_.Exception "Profiles"
+            }
+        }
+        if (-not (Get-Variable -Name DeletedProfileRecoveryWindowMinutes -Scope Script -ErrorAction SilentlyContinue)) {
+            $script:DeletedProfileRecoveryWindowMinutes = 15
+        } else {
+            try {
+                $windowMinutes = [int]$script:DeletedProfileRecoveryWindowMinutes
+                if ($windowMinutes -lt 1) { $script:DeletedProfileRecoveryWindowMinutes = 15 }
+            } catch {
+                $script:DeletedProfileRecoveryWindowMinutes = 15
+            }
         }
         $form = New-Object System.Windows.Forms.Form
         $script:SettingsForm = $form
@@ -582,8 +615,32 @@ function Show-SettingsDialog {
         Write-Log "Minimal mode cleared by user." "WARN" $null "Settings"
     })
 
+    $script:SettingsBannerResetCrashButton = New-Object System.Windows.Forms.Button
+    $script:SettingsBannerResetCrashButton.Text = "Reset Crash State"
+    $script:SettingsBannerResetCrashButton.AutoSize = $true
+    $script:SettingsBannerResetCrashButton.Visible = $false
+    $script:SettingsBannerResetCrashButton.Add_Click({
+        $choice = [System.Windows.Forms.MessageBox]::Show(
+            "Reset crash counters and safe mode state now?",
+            "Reset Crash State",
+            [System.Windows.Forms.MessageBoxButtons]::YesNo,
+            [System.Windows.Forms.MessageBoxIcon]::Question
+        )
+        if ($choice -ne [System.Windows.Forms.DialogResult]::Yes) { return }
+        if (Get-Command -Name Reset-CrashRecoveryState -ErrorAction SilentlyContinue) {
+            Reset-CrashRecoveryState
+        } elseif (Get-Command -Name Reset-SafeMode -ErrorAction SilentlyContinue) {
+            Reset-SafeMode
+        }
+        $script:MinimalModeActive = $false
+        $script:MinimalModeReason = $null
+        if ($script:UpdateSettingsBanner) { & $script:UpdateSettingsBanner }
+        if (Get-Command -Name Show-ActionToast -ErrorAction SilentlyContinue) { Show-ActionToast "Crash state reset" }
+    })
+
     $script:SettingsBannerPanel.Controls.Add($script:SettingsBannerLabel) | Out-Null
     $script:SettingsBannerPanel.Controls.Add($script:SettingsBannerExitMinimalButton) | Out-Null
+    $script:SettingsBannerPanel.Controls.Add($script:SettingsBannerResetCrashButton) | Out-Null
     $script:SettingsBannerPanel.Controls.Add($script:SettingsBannerRestoreButton) | Out-Null
 
     $script:UpdateSettingsBanner = {
@@ -627,6 +684,7 @@ function Show-SettingsDialog {
         }
         $script:SettingsBannerLabel.Text = ($lines -join " ")
         $script:SettingsBannerExitMinimalButton.Visible = [bool]$script:MinimalModeActive
+        $script:SettingsBannerResetCrashButton.Visible = [bool]$script:MinimalModeActive
         $script:SettingsBannerRestoreButton.Visible = [bool]$script:MinimalModeActive
         $script:SettingsBannerPanel.Visible = $true
         if ($autoCorrectVisible -and $settings -and ($settings.PSObject.Properties.Name -contains "AutoCorrectedNoticeSeen")) {
@@ -993,9 +1051,19 @@ function Show-SettingsDialog {
             $selectedCode = [string]$settings.UiLanguage
         }
         if ([string]::IsNullOrWhiteSpace($selectedCode)) { $selectedCode = "auto" }
-        $selectedItem = $items | Where-Object { $_.Code -eq $selectedCode } | Select-Object -First 1
-        if ($selectedItem) {
-            $script:languageBox.SelectedItem = $selectedItem
+        $selectedCode = $selectedCode.Trim().ToLowerInvariant()
+        $selectedIndex = -1
+        for ($idx = 0; $idx -lt $script:languageBox.Items.Count; $idx++) {
+            $entry = $script:languageBox.Items[$idx]
+            if ($entry -and $entry.PSObject.Properties.Name -contains "Code") {
+                if ([string]$entry.Code -eq $selectedCode) {
+                    $selectedIndex = $idx
+                    break
+                }
+            }
+        }
+        if ($selectedIndex -ge 0) {
+            $script:languageBox.SelectedIndex = $selectedIndex
         } elseif ($script:languageBox.Items.Count -gt 0) {
             $script:languageBox.SelectedIndex = 0
         }
@@ -1003,9 +1071,21 @@ function Show-SettingsDialog {
     if ($script:UpdateLanguageItems) { & $script:UpdateLanguageItems ([string]$settings.UiLanguage) }
     $script:languageBox.Add_SelectedIndexChanged({
         if ($script:SettingsIsApplying) { return }
+        $previousCode = [string](Get-SettingsPropertyValue $settings "UiLanguage" "auto")
+        if ([string]::IsNullOrWhiteSpace($previousCode)) { $previousCode = "auto" }
+        $previousCode = $previousCode.Trim().ToLowerInvariant()
         $selected = $script:languageBox.SelectedItem
+        $code = $null
         if ($selected -and $selected.PSObject.Properties.Name -contains "Code") {
             $code = [string]$selected.Code
+        } elseif ($script:languageBox.SelectedValue -and ($script:languageBox.SelectedValue -is [string])) {
+            $code = [string]$script:languageBox.SelectedValue
+        }
+        if (-not [string]::IsNullOrWhiteSpace($code)) {
+            $code = $code.Trim().ToLowerInvariant()
+            if ([string]::IsNullOrWhiteSpace($code)) { $code = "auto" }
+            $settings.UiLanguage = $code
+            if ($script:settings) { $script:settings.UiLanguage = $code }
             $script:UiLanguage = Resolve-UiLanguage $code
             if ($script:UpdateLanguageItems) {
                 $script:SettingsIsApplying = $true
@@ -1037,11 +1117,18 @@ function Show-SettingsDialog {
             if ($script:SettingsForm -and -not $script:SettingsForm.IsDisposed) {
                 Localize-ControlTree $script:SettingsForm
                 if ($script:ApplySettingsLocalizationOverrides) { & $script:ApplySettingsLocalizationOverrides }
+                try {
+                    $script:SettingsForm.PerformLayout()
+                    $script:SettingsForm.Refresh()
+                } catch {
+                }
             }
             if ($script:TrayMenu) { Localize-MenuItems $script:TrayMenu.Items }
             if (Get-Command Update-TrayLabels -ErrorAction SilentlyContinue) { Update-TrayLabels }
+            if ($code -ne $previousCode) {
+                Set-SettingsDirty $true
+            }
         }
-        Set-SettingsDirty $true
     })
 
     $script:rememberChoiceBox = New-Object System.Windows.Forms.CheckBox
@@ -2193,6 +2280,117 @@ $clearLogButton = New-Object System.Windows.Forms.Button
     })
     $script:RunHealthCheckButton = $runHealthCheckButton
 
+    $resetCrashStateButton = New-Object System.Windows.Forms.Button
+    $resetCrashStateButton.Text = "Reset Crash State"
+    $resetCrashStateButton.Width = 140
+    $resetCrashStateButton.Tag = "Reset Crash State"
+    $resetCrashStateButton.Add_Click({
+        & $script:RunSettingsAction "Reset Crash State" {
+            $choice = [System.Windows.Forms.MessageBox]::Show(
+                "Reset crash counters and clear Safe Mode now?`n`nThis helps recover from repeated startup failure states.",
+                "Reset Crash State",
+                [System.Windows.Forms.MessageBoxButtons]::YesNo,
+                [System.Windows.Forms.MessageBoxIcon]::Question
+            )
+            if ($choice -ne [System.Windows.Forms.DialogResult]::Yes) { return }
+            if (Get-Command -Name Reset-CrashRecoveryState -ErrorAction SilentlyContinue) {
+                Reset-CrashRecoveryState
+            } elseif (Get-Command -Name Reset-SafeMode -ErrorAction SilentlyContinue) {
+                Reset-SafeMode
+            }
+            [System.Windows.Forms.MessageBox]::Show(
+                "Crash recovery state has been reset.",
+                "Diagnostics",
+                [System.Windows.Forms.MessageBoxButtons]::OK,
+                [System.Windows.Forms.MessageBoxIcon]::Information
+            ) | Out-Null
+        }
+    })
+    $script:ResetCrashStateButton = $resetCrashStateButton
+
+    $openDiagnosticsFolderButton = New-Object System.Windows.Forms.Button
+    $openDiagnosticsFolderButton.Text = "Open Diagnostics Folder"
+    $openDiagnosticsFolderButton.Width = 160
+    $openDiagnosticsFolderButton.Add_Click({
+        & $script:RunSettingsAction "Open Diagnostics Folder" {
+            $targetFolder = if (-not [string]::IsNullOrWhiteSpace($script:LogDirectory)) { $script:LogDirectory } elseif (-not [string]::IsNullOrWhiteSpace($logPath)) { (Split-Path -Path $logPath -Parent) } else { $script:DataRoot }
+            if ([string]::IsNullOrWhiteSpace($targetFolder)) { throw "Diagnostics folder is not available." }
+            if (-not (Test-Path -LiteralPath $targetFolder)) {
+                New-Item -ItemType Directory -Path $targetFolder -Force | Out-Null
+            }
+            Start-Process explorer.exe $targetFolder
+            if (Get-Command -Name Show-ActionToast -ErrorAction SilentlyContinue) { Show-ActionToast "Opened diagnostics folder" }
+        }
+    })
+    $script:OpenDiagnosticsFolderButton = $openDiagnosticsFolderButton
+
+    $restorePreviousSettingsButton = New-Object System.Windows.Forms.Button
+    $restorePreviousSettingsButton.Text = "Restore Previous Settings..."
+    $restorePreviousSettingsButton.Width = 190
+    $restorePreviousSettingsButton.Add_Click({
+        & $script:RunSettingsAction "Restore Previous Settings" {
+            if (-not (Get-Command -Name Get-SettingsVersionSnapshotFiles -ErrorAction SilentlyContinue)) {
+                throw "Settings version snapshots are unavailable in this build."
+            }
+            $snapshots = @(Get-SettingsVersionSnapshotFiles)
+            if ($snapshots.Count -eq 0) {
+                [System.Windows.Forms.MessageBox]::Show(
+                    "No settings snapshots are available yet.",
+                    "Restore Settings",
+                    [System.Windows.Forms.MessageBoxButtons]::OK,
+                    [System.Windows.Forms.MessageBoxIcon]::Information
+                ) | Out-Null
+                return
+            }
+            $dialog = New-Object System.Windows.Forms.OpenFileDialog
+            $dialog.Title = "Restore Previous Settings"
+            $dialog.Filter = "JSON Files (*.json)|*.json|All Files (*.*)|*.*"
+            $dialog.InitialDirectory = $script:SettingsVersionsDir
+            $dialog.FileName = $snapshots[0].Name
+            if ($dialog.ShowDialog() -ne [System.Windows.Forms.DialogResult]::OK) { return }
+
+            if (-not (Get-Command -Name Restore-SettingsFromVersionSnapshot -ErrorAction SilentlyContinue)) {
+                throw "Restore function is unavailable."
+            }
+            $restoreResult = Restore-SettingsFromVersionSnapshot $dialog.FileName
+            if (-not $restoreResult.Success) {
+                throw $restoreResult.Message
+            }
+            $settings = $script:settings
+            if ($script:ApplySettingsToControls) { & $script:ApplySettingsToControls $settings }
+            Set-SettingsDirty $false
+            if (Get-Command -Name Show-ActionToast -ErrorAction SilentlyContinue) { Show-ActionToast "Settings restored from snapshot" }
+            [System.Windows.Forms.MessageBox]::Show(
+                "Settings were restored from:`n$($restoreResult.Path)",
+                "Restore Settings",
+                [System.Windows.Forms.MessageBoxButtons]::OK,
+                [System.Windows.Forms.MessageBoxIcon]::Information
+            ) | Out-Null
+        }
+    })
+    $script:RestorePreviousSettingsButton = $restorePreviousSettingsButton
+
+    $showDiagnosticsExportFollowup = {
+        param([string]$filePath, [bool]$scrubbed)
+        if ([string]::IsNullOrWhiteSpace($filePath)) { return }
+        $message = "Diagnostics exported successfully.`n`nPath: $filePath`nScrubbed: $(if ($scrubbed) { "Yes" } else { "No" })`n`nYes = Open folder`nNo = Copy file path"
+        $choice = [System.Windows.Forms.MessageBox]::Show(
+            $message,
+            "Diagnostics Exported",
+            [System.Windows.Forms.MessageBoxButtons]::YesNoCancel,
+            [System.Windows.Forms.MessageBoxIcon]::Information
+        )
+        if ($choice -eq [System.Windows.Forms.DialogResult]::Yes) {
+            $folder = Split-Path -Path $filePath -Parent
+            if (-not [string]::IsNullOrWhiteSpace($folder) -and (Test-Path -LiteralPath $folder)) {
+                Start-Process explorer.exe $folder
+            }
+        } elseif ($choice -eq [System.Windows.Forms.DialogResult]::No) {
+            [System.Windows.Forms.Clipboard]::SetText($filePath)
+        }
+    }
+    $script:ShowDiagnosticsExportFollowup = $showDiagnosticsExportFollowup
+
     $exportDiagnosticsButton = New-Object System.Windows.Forms.Button
     $exportDiagnosticsButton.Text = "Export Diagnostics..."
     $exportDiagnosticsButton.Width = 140
@@ -2271,6 +2469,8 @@ $clearLogButton = New-Object System.Windows.Forms.Button
             $exportSize = 0
             try { $exportSize = (Get-Item -Path $dialog.FileName).Length } catch { }
             Write-Log "Exported diagnostics to $($dialog.FileName) ($exportSize bytes)." "INFO" $null "Export-Diagnostics"
+            if ($script:ShowDiagnosticsExportFollowup) { & $script:ShowDiagnosticsExportFollowup $dialog.FileName ([bool]$settings.ScrubDiagnostics) }
+            if (Get-Command -Name Show-ActionToast -ErrorAction SilentlyContinue) { Show-ActionToast "Diagnostics exported" }
         }
     })
     $script:ExportDiagnosticsButton = $exportDiagnosticsButton
@@ -2328,6 +2528,7 @@ $clearLogButton = New-Object System.Windows.Forms.Button
             $text = $lines -join "`r`n"
             [System.Windows.Forms.Clipboard]::SetText($text)
             Write-Log "Diagnostics copied to clipboard (lines=$($lines.Count))." "INFO" $null "Diagnostics"
+            if (Get-Command -Name Show-ActionToast -ErrorAction SilentlyContinue) { Show-ActionToast "Diagnostics copied to clipboard" }
         }
     })
     $script:CopyDiagnosticsButton = $copyDiagnosticsButton
@@ -2391,6 +2592,7 @@ $clearLogButton = New-Object System.Windows.Forms.Button
             $reportSize = 0
             try { $reportSize = (Get-Item -Path $dialog.FileName).Length } catch { }
             Write-Log "Exported issue report to $($dialog.FileName) ($reportSize bytes)." "INFO" $null "Diagnostics"
+            if (Get-Command -Name Show-ActionToast -ErrorAction SilentlyContinue) { Show-ActionToast "Issue report exported" }
         }
     })
     $script:ReportIssueButton = $reportIssueButton
@@ -2964,6 +3166,8 @@ $clearLogButton = New-Object System.Windows.Forms.Button
     $script:AboutCheckButton = $aboutCheckButton
     $script:ResetAboutCheckUi = {
         $script:AboutCheckInProgress = $false
+        $script:AboutUpdateJobStartedUtc = $null
+        $script:AboutUpdateJobTimeoutSec = $null
         if ($script:AboutCheckButton) {
             $script:AboutCheckButton.Text = "Check Now"
             $script:AboutCheckButton.Enabled = $true
@@ -2977,6 +3181,21 @@ $clearLogButton = New-Object System.Windows.Forms.Button
             $script:AboutCheckButton.Text = "Checking..."
         }
         try {
+            $owner = if ($settings.PSObject.Properties.Name -contains "UpdateOwner" -and -not [string]::IsNullOrWhiteSpace([string]$settings.UpdateOwner)) { [string]$settings.UpdateOwner } else { "alexphillips-dev" }
+            $repo = if ($settings.PSObject.Properties.Name -contains "UpdateRepo" -and -not [string]::IsNullOrWhiteSpace([string]$settings.UpdateRepo)) { [string]$settings.UpdateRepo } else { "Teams-Always-Green" }
+            $timeoutSec = 8
+            if (Get-Variable -Name UpdateNetworkTimeoutSeconds -Scope Script -ErrorAction SilentlyContinue) {
+                $timeoutSec = [Math]::Max(3, [Math]::Min(60, [int]$script:UpdateNetworkTimeoutSeconds))
+            }
+            $maxAttempts = 3
+            if (Get-Variable -Name UpdateNetworkMaxAttempts -Scope Script -ErrorAction SilentlyContinue) {
+                $maxAttempts = [Math]::Max(1, [Math]::Min(5, [int]$script:UpdateNetworkMaxAttempts))
+            }
+            $jobTimeoutSec = 25
+            if (Get-Variable -Name AboutUpdateJobTimeoutSeconds -Scope Script -ErrorAction SilentlyContinue) {
+                $jobTimeoutSec = [Math]::Max(10, [Math]::Min(120, [int]$script:AboutUpdateJobTimeoutSeconds))
+            }
+            $script:AboutUpdateJobTimeoutSec = $jobTimeoutSec
             if ($script:AboutUpdatePollTimer) {
                 try { $script:AboutUpdatePollTimer.Stop() } catch { }
                 try { $script:AboutUpdatePollTimer.Dispose() } catch { }
@@ -2986,27 +3205,38 @@ $clearLogButton = New-Object System.Windows.Forms.Button
                 try { Remove-Job -Job $script:AboutUpdateJob -Force -ErrorAction SilentlyContinue } catch { }
                 $script:AboutUpdateJob = $null
             }
+            $script:AboutUpdateJobStartedUtc = [DateTime]::UtcNow
 
             $script:AboutUpdateJob = Start-Job -ScriptBlock {
-                param([string]$owner, [string]$repo)
+                param([string]$owner, [string]$repo, [int]$timeoutSec, [int]$maxAttempts)
                 try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 } catch { }
-                try {
-                    $uri = "https://api.github.com/repos/$owner/$repo/releases/latest"
-                    $headers = @{ "User-Agent" = "TeamsAlwaysGreen" }
-                    $release = Invoke-RestMethod -Uri $uri -Headers $headers -ErrorAction Stop
-                    [PSCustomObject]@{
-                        Ok      = $true
-                        Release = $release
-                        Error   = ""
-                    }
-                } catch {
-                    [PSCustomObject]@{
-                        Ok      = $false
-                        Release = $null
-                        Error   = $_.Exception.Message
+                $uri = "https://api.github.com/repos/$owner/$repo/releases/latest"
+                $headers = @{ "User-Agent" = "TeamsAlwaysGreen" }
+                $attempts = [Math]::Max(1, $maxAttempts)
+                $timeout = [Math]::Max(3, $timeoutSec)
+                $lastError = ""
+                for ($attempt = 1; $attempt -le $attempts; $attempt++) {
+                    try {
+                        $release = Invoke-RestMethod -Uri $uri -Headers $headers -TimeoutSec $timeout -ErrorAction Stop
+                        [PSCustomObject]@{
+                            Ok       = $true
+                            Release  = $release
+                            Error    = ""
+                            Attempts = $attempt
+                        }
+                        return
+                    } catch {
+                        $lastError = $_.Exception.Message
+                        if ($attempt -lt $attempts) { Start-Sleep -Milliseconds (250 * $attempt) }
                     }
                 }
-            } -ArgumentList "alexphillips-dev", "Teams-Always-Green"
+                [PSCustomObject]@{
+                    Ok       = $false
+                    Release  = $null
+                    Error    = $lastError
+                    Attempts = $attempts
+                }
+            } -ArgumentList $owner, $repo, $timeoutSec, $maxAttempts
 
             $script:AboutUpdatePollTimer = New-Object System.Windows.Forms.Timer
             $script:AboutUpdatePollTimer.Interval = 250
@@ -3021,6 +3251,36 @@ $clearLogButton = New-Object System.Windows.Forms.Button
                         if ($script:ResetAboutCheckUi) { & $script:ResetAboutCheckUi }
                         return
                     }
+                    if ($script:AboutUpdateJobStartedUtc) {
+                        $effectiveJobTimeoutSec = 25
+                        if (Get-Variable -Name AboutUpdateJobTimeoutSec -Scope Script -ErrorAction SilentlyContinue) {
+                            try {
+                                $effectiveJobTimeoutSec = [Math]::Max(10, [Math]::Min(120, [int]$script:AboutUpdateJobTimeoutSec))
+                            } catch {
+                                $effectiveJobTimeoutSec = 25
+                            }
+                        }
+                        $elapsedSeconds = ([DateTime]::UtcNow - $script:AboutUpdateJobStartedUtc).TotalSeconds
+                        if ($elapsedSeconds -ge $effectiveJobTimeoutSec) {
+                            try { Stop-Job -Job $script:AboutUpdateJob -ErrorAction SilentlyContinue } catch { }
+                            try { Remove-Job -Job $script:AboutUpdateJob -Force -ErrorAction SilentlyContinue } catch { }
+                            $script:AboutUpdateJob = $null
+                            $script:AboutUpdateJobStartedUtc = $null
+                            if ($script:AboutUpdatePollTimer) {
+                                $script:AboutUpdatePollTimer.Stop()
+                                $script:AboutUpdatePollTimer.Dispose()
+                                $script:AboutUpdatePollTimer = $null
+                            }
+                            [System.Windows.Forms.MessageBox]::Show(
+                                "Update check timed out. Please try again.",
+                                "Update check",
+                                [System.Windows.Forms.MessageBoxButtons]::OK,
+                                [System.Windows.Forms.MessageBoxIcon]::Warning
+                            ) | Out-Null
+                            if ($script:ResetAboutCheckUi) { & $script:ResetAboutCheckUi }
+                            return
+                        }
+                    }
                     if ($script:AboutUpdateJob.State -in @("Completed", "Failed", "Stopped")) {
                         if ($script:AboutUpdatePollTimer) {
                             $script:AboutUpdatePollTimer.Stop()
@@ -3031,6 +3291,7 @@ $clearLogButton = New-Object System.Windows.Forms.Button
                         try { $result = Receive-Job -Job $script:AboutUpdateJob -ErrorAction SilentlyContinue | Select-Object -First 1 } catch { }
                         try { Remove-Job -Job $script:AboutUpdateJob -Force -ErrorAction SilentlyContinue } catch { }
                         $script:AboutUpdateJob = $null
+                        $script:AboutUpdateJobStartedUtc = $null
 
                         if (-not $result -or -not [bool]$result.Ok -or -not $result.Release) {
                             $message = "Unable to check for updates right now."
@@ -3275,7 +3536,7 @@ $clearLogButton = New-Object System.Windows.Forms.Button
 
     $profileActionsLayout = New-Object System.Windows.Forms.TableLayoutPanel
     $profileActionsLayout.ColumnCount = 1
-    $profileActionsLayout.RowCount = 2
+    $profileActionsLayout.RowCount = 3
     $profileActionsLayout.AutoSize = $true
     $profileActionsLayout.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Percent, 100)))
 
@@ -3291,6 +3552,12 @@ $clearLogButton = New-Object System.Windows.Forms.Button
     $transferGroup.AutoSizeMode = [System.Windows.Forms.AutoSizeMode]::GrowAndShrink
     $transferGroup.Padding = New-Object System.Windows.Forms.Padding(8, 10, 8, 8)
 
+    $recoveryGroup = New-Object System.Windows.Forms.GroupBox
+    $recoveryGroup.Text = "Recovery"
+    $recoveryGroup.AutoSize = $true
+    $recoveryGroup.AutoSizeMode = [System.Windows.Forms.AutoSizeMode]::GrowAndShrink
+    $recoveryGroup.Padding = New-Object System.Windows.Forms.Padding(8, 10, 8, 8)
+
     $manageButtons = New-Object System.Windows.Forms.FlowLayoutPanel
     $manageButtons.FlowDirection = "LeftToRight"
     $manageButtons.WrapContents = $true
@@ -3302,6 +3569,12 @@ $clearLogButton = New-Object System.Windows.Forms.Button
     $transferButtons.WrapContents = $true
     $transferButtons.AutoSize = $true
     $transferButtons.Dock = "Fill"
+
+    $recoveryButtons = New-Object System.Windows.Forms.FlowLayoutPanel
+    $recoveryButtons.FlowDirection = "LeftToRight"
+    $recoveryButtons.WrapContents = $true
+    $recoveryButtons.AutoSize = $true
+    $recoveryButtons.Dock = "Fill"
 
     $newProfileButton = New-Object System.Windows.Forms.Button
     $newProfileButton.Text = "New..."
@@ -3396,6 +3669,12 @@ $clearLogButton = New-Object System.Windows.Forms.Button
     $duplicateProfileButton.Text = "Copy As..."
     $duplicateProfileButton.Width = 90
 
+    $restoreDeletedProfileButton = New-Object System.Windows.Forms.Button
+    $restoreDeletedProfileButton.Text = "Restore Deleted..."
+    $restoreDeletedProfileButton.Width = 140
+    $restoreDeletedProfileButton.Enabled = $true
+    $script:RestoreDeletedProfileButton = $restoreDeletedProfileButton
+
     $loadProfileButton = New-Object System.Windows.Forms.Button
     $loadProfileButton.Text = "Load"
     $loadProfileButton.Width = 80
@@ -3410,12 +3689,15 @@ $clearLogButton = New-Object System.Windows.Forms.Button
     $transferButtons.Controls.Add($loadProfileButton) | Out-Null
     $transferButtons.Controls.Add($exportProfileButton) | Out-Null
     $transferButtons.Controls.Add($importProfileButton) | Out-Null
+    $recoveryButtons.Controls.Add($restoreDeletedProfileButton) | Out-Null
 
     $manageGroup.Controls.Add($manageButtons)
     $transferGroup.Controls.Add($transferButtons)
+    $recoveryGroup.Controls.Add($recoveryButtons)
 
     $profileActionsLayout.Controls.Add($manageGroup, 0, 0)
     $profileActionsLayout.Controls.Add($transferGroup, 0, 1)
+    $profileActionsLayout.Controls.Add($recoveryGroup, 0, 2)
 
     $profileLayout.Controls.Add($profileLabel, 0, 0)
     $profileLayout.Controls.Add($script:profileBox, 1, 0)
@@ -3424,6 +3706,183 @@ $clearLogButton = New-Object System.Windows.Forms.Button
     $profileLayout.Controls.Add($script:profileDirtyLabel, 1, 3)
     $profileLayout.Controls.Add($profileActionsLayout, 1, 4)
     $profileGroup.Controls.Add($profileLayout)
+
+    $script:CloneProfileObject = {
+        param($value)
+        if (Get-Command -Name Copy-ObjectDeep -ErrorAction SilentlyContinue) {
+            return (Copy-ObjectDeep $value)
+        }
+        try {
+            return ($value | ConvertTo-Json -Depth 12 | ConvertFrom-Json)
+        } catch {
+            return $value
+        }
+    }
+    $script:GetDeletedProfilesRecoveryFilePath = {
+        if (-not [string]::IsNullOrWhiteSpace([string]$script:DeletedProfilesRecycleBinPath)) {
+            return $script:DeletedProfilesRecycleBinPath
+        }
+        $metaRoot = $null
+        if ($script:DataRoot -and -not [string]::IsNullOrWhiteSpace([string]$script:DataRoot)) {
+            $metaRoot = Join-Path $script:DataRoot "Meta"
+        } else {
+            $metaRoot = Join-Path ([Environment]::GetFolderPath("LocalApplicationData")) "TeamsAlwaysGreen\\Meta"
+        }
+        $script:DeletedProfilesRecycleBinPath = Join-Path $metaRoot "Teams-Always-Green.deletedprofiles.json"
+        return $script:DeletedProfilesRecycleBinPath
+    }
+    $script:ReadDeletedProfilesRecoveryEntries = {
+        $path = if ($script:GetDeletedProfilesRecoveryFilePath) { & $script:GetDeletedProfilesRecoveryFilePath } else { $null }
+        if ([string]::IsNullOrWhiteSpace([string]$path) -or -not (Test-Path $path)) { return @() }
+        try {
+            $raw = Get-Content -Path $path -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+            return @($raw)
+        } catch {
+            Write-Log "UI: Failed to read deleted profile recovery cache." "WARN" $_.Exception "Profiles"
+            return @()
+        }
+    }
+    $script:WriteDeletedProfilesRecoveryEntries = {
+        param($entries)
+        $path = if ($script:GetDeletedProfilesRecoveryFilePath) { & $script:GetDeletedProfilesRecoveryFilePath } else { $null }
+        if ([string]::IsNullOrWhiteSpace([string]$path)) { return }
+        try {
+            $cacheDir = Split-Path -Path $path -Parent
+            if (-not [string]::IsNullOrWhiteSpace($cacheDir) -and -not (Test-Path $cacheDir)) {
+                New-Item -Path $cacheDir -ItemType Directory -Force | Out-Null
+            }
+            @($entries) | ConvertTo-Json -Depth 20 | Set-Content -Path $path -Encoding UTF8
+            Write-Log ("UI: Deleted profile recovery cache saved. Path={0} Count={1}" -f $path, @($entries).Count) "INFO" $null "Settings-Dialog"
+        } catch {
+            Write-Log "UI: Failed to persist deleted profile recovery cache." "WARN" $_.Exception "Profiles"
+        }
+    }
+    $script:EnsureDeletedProfilesRecycleBin = {
+        $entries = @()
+        if ($script:ReadDeletedProfilesRecoveryEntries) { $entries = @(& $script:ReadDeletedProfilesRecoveryEntries) }
+        $script:DeletedProfilesRecycleBin = New-Object System.Collections.ArrayList
+        foreach ($entry in $entries) { if ($null -ne $entry) { [void]$script:DeletedProfilesRecycleBin.Add($entry) } }
+        return $script:DeletedProfilesRecycleBin
+    }
+    $script:SaveDeletedProfilesRecycleBin = {
+        $entries = @()
+        if ($script:EnsureDeletedProfilesRecycleBin) {
+            $recycleBin = & $script:EnsureDeletedProfilesRecycleBin
+            $entries = @($recycleBin)
+        }
+        if ($script:WriteDeletedProfilesRecoveryEntries) { & $script:WriteDeletedProfilesRecoveryEntries $entries }
+    }
+    $script:GetDeletedProfileEntryField = {
+        param($entry, [string]$fieldName)
+        if ($null -eq $entry -or [string]::IsNullOrWhiteSpace($fieldName)) { return $null }
+        if ($entry -is [hashtable]) {
+            if ($entry.ContainsKey($fieldName)) { return $entry[$fieldName] }
+            return $null
+        }
+        if ($entry.PSObject -and ($entry.PSObject.Properties.Name -contains $fieldName)) {
+            return $entry.$fieldName
+        }
+        return $null
+    }
+    $script:PruneDeletedProfilesRecycleBin = {
+        $recycleBin = @()
+        if ($script:ReadDeletedProfilesRecoveryEntries) { $recycleBin = @(& $script:ReadDeletedProfilesRecoveryEntries) }
+        if ($recycleBin.Count -eq 0) { return }
+        $now = Get-Date
+        $kept = @()
+        $removedAny = $false
+        foreach ($entry in $recycleBin) {
+            if (-not $entry) { $removedAny = $true; continue }
+            $expiresAt = $null
+            try {
+                $rawExpiry = if ($script:GetDeletedProfileEntryField) { & $script:GetDeletedProfileEntryField $entry "ExpiresAt" } else { $null }
+                if ($null -ne $rawExpiry) {
+                    $expiresAt = [datetime]$rawExpiry
+                } else {
+                    # Keep entries that do not have expiry metadata to avoid accidental loss.
+                    $expiresAt = $now.AddYears(1)
+                }
+            } catch { $expiresAt = $null }
+            if ($null -ne $expiresAt -and $expiresAt -le $now) {
+                $removedAny = $true
+                continue
+            }
+            $kept += $entry
+        }
+        if ($removedAny -and $script:WriteDeletedProfilesRecoveryEntries) { & $script:WriteDeletedProfilesRecoveryEntries $kept }
+    }
+    $script:GetRecoverableDeletedProfiles = {
+        if ($script:PruneDeletedProfilesRecycleBin) { & $script:PruneDeletedProfilesRecycleBin }
+        $recycleBin = @()
+        if ($script:ReadDeletedProfilesRecoveryEntries) { $recycleBin = @(& $script:ReadDeletedProfilesRecoveryEntries) }
+        if ($recycleBin.Count -eq 0) { return @() }
+        $now = Get-Date
+        $entries = @()
+        foreach ($entry in @($recycleBin)) {
+            if (-not $entry) { continue }
+            $entryName = if ($script:GetDeletedProfileEntryField) { & $script:GetDeletedProfileEntryField $entry "Name" } else { $null }
+            if ([string]::IsNullOrWhiteSpace([string]$entryName)) { continue }
+            $expiresAt = $null
+            try {
+                $rawExpiry = if ($script:GetDeletedProfileEntryField) { & $script:GetDeletedProfileEntryField $entry "ExpiresAt" } else { $null }
+                if ($null -ne $rawExpiry) { $expiresAt = [datetime]$rawExpiry }
+            } catch { $expiresAt = $null }
+            if ($null -ne $expiresAt -and $expiresAt -le $now) { continue }
+            $entries += $entry
+        }
+        return @($entries | Sort-Object -Property DeletedAt -Descending)
+    }
+    $script:GetRecoverableVersionedProfiles = {
+        return @()
+    }
+    $script:UpdateRestoreDeletedProfileButtonState = {
+        if (-not $script:RestoreDeletedProfileButton -or $script:RestoreDeletedProfileButton.IsDisposed) { return }
+        $recoverableCount = 0
+        if ($script:GetRecoverableDeletedProfiles) {
+            $recoverableCount = @(& $script:GetRecoverableDeletedProfiles).Count
+        }
+        $script:RestoreDeletedProfileButton.Enabled = $true
+        if ($recoverableCount -gt 0) {
+            $script:RestoreDeletedProfileButton.Text = "Restore Deleted... ($recoverableCount)"
+        } else {
+            $script:RestoreDeletedProfileButton.Text = "Restore Deleted..."
+        }
+    }
+    $script:AddDeletedProfileToRecycleBin = {
+        param([string]$name, $profileSnapshot, $lastGoodSnapshot)
+        if ([string]::IsNullOrWhiteSpace($name)) { return }
+        $recycleBin = @()
+        if ($script:ReadDeletedProfilesRecoveryEntries) { $recycleBin = @(& $script:ReadDeletedProfilesRecoveryEntries) }
+        $now = Get-Date
+        $expiresAt = $now.AddMinutes([double]$script:DeletedProfileRecoveryWindowMinutes)
+        $entry = [pscustomobject]@{
+            Id = [Guid]::NewGuid().ToString("N")
+            Name = $name
+            Profile = $profileSnapshot
+            LastGood = $lastGoodSnapshot
+            DeletedAt = $now
+            ExpiresAt = $expiresAt
+        }
+        $recycleBin += $entry
+        Write-Log ("UI: Profile recycle add: Name={0} ExpiresAt={1:o} Count={2}" -f $name, $expiresAt, @($recycleBin).Count) "INFO" $null "Profiles"
+        if ($script:WriteDeletedProfilesRecoveryEntries) { & $script:WriteDeletedProfilesRecoveryEntries $recycleBin }
+        if ($script:UpdateRestoreDeletedProfileButtonState) { & $script:UpdateRestoreDeletedProfileButtonState }
+    }
+    $script:RemoveDeletedProfileFromRecycleBin = {
+        param([string]$entryId)
+        if ([string]::IsNullOrWhiteSpace($entryId)) { return }
+        $recycleBin = @()
+        if ($script:ReadDeletedProfilesRecoveryEntries) { $recycleBin = @(& $script:ReadDeletedProfilesRecoveryEntries) }
+        if ($recycleBin.Count -eq 0) { return }
+        $filtered = @()
+        foreach ($entry in $recycleBin) {
+            $candidateId = if ($script:GetDeletedProfileEntryField) { & $script:GetDeletedProfileEntryField $entry "Id" } else { $null }
+            if (-not [string]::IsNullOrWhiteSpace([string]$candidateId) -and ([string]$candidateId -eq $entryId)) { continue }
+            $filtered += $entry
+        }
+        if ($script:WriteDeletedProfilesRecoveryEntries) { & $script:WriteDeletedProfilesRecoveryEntries $filtered }
+        if ($script:UpdateRestoreDeletedProfileButtonState) { & $script:UpdateRestoreDeletedProfileButtonState }
+    }
 
     $script:refreshProfileList = {
         if (Get-Command -Name Ensure-StockProfiles -ErrorAction SilentlyContinue) {
@@ -3450,6 +3909,7 @@ $clearLogButton = New-Object System.Windows.Forms.Button
             $script:profileReadOnlyBox.Checked = (Get-ProfileReadOnly $profile)
         }
         $script:SettingsIsApplying = $false
+        if ($script:UpdateRestoreDeletedProfileButtonState) { & $script:UpdateRestoreDeletedProfileButtonState }
         if ($script:UpdateProfileDirtyIndicator) { & $script:UpdateProfileDirtyIndicator }
     }
 
@@ -3491,6 +3951,7 @@ $clearLogButton = New-Object System.Windows.Forms.Button
         if ($updateProfilesMenu) { & $updateProfilesMenu }
         $sw.Stop()
         Write-Log "UI: Profile switched: $newName (ms=$($sw.ElapsedMilliseconds))" "DEBUG" $null "Profiles"
+        if (Get-Command -Name Show-ActionToast -ErrorAction SilentlyContinue) { Show-ActionToast ("Profile switched to {0}" -f $newName) }
     })
 
     $script:getProfileFromControls = {
@@ -3590,10 +4051,20 @@ $clearLogButton = New-Object System.Windows.Forms.Button
         }
     }
 
-    $confirmProfileWritable = {
+    $script:ConfirmProfileWritable = {
         param([string]$name, [string]$action)
         if ($script:EnsureProfilesHashtable) { & $script:EnsureProfilesHashtable }
         if ([string]::IsNullOrWhiteSpace($name)) { return $false }
+        $protectedProfiles = @("Default")
+        if (($action -eq "Delete" -or $action -eq "Rename") -and ($protectedProfiles -contains $name)) {
+            [System.Windows.Forms.MessageBox]::Show(
+                "Profile '$name' is protected and cannot be $($action.ToLowerInvariant()).",
+                "Protected Profile",
+                [System.Windows.Forms.MessageBoxButtons]::OK,
+                [System.Windows.Forms.MessageBoxIcon]::Information
+            ) | Out-Null
+            return $false
+        }
         if (-not ((Get-ObjectKeys $settings.Profiles) -contains $name)) { return $true }
         $isReadOnly = Get-ProfileReadOnly $settings.Profiles[$name]
         if ($isReadOnly -and ($action -eq "Save" -or $action -eq "Overwrite")) {
@@ -3617,7 +4088,7 @@ $clearLogButton = New-Object System.Windows.Forms.Button
             if ($script:profileBox.SelectedItem -eq $null) { return }
             $sw = [System.Diagnostics.Stopwatch]::StartNew()
             $name = [string]$script:profileBox.SelectedItem
-            if (-not (& $confirmProfileWritable $name "Save")) { return }
+            if (-not (& $script:ConfirmProfileWritable $name "Save")) { return }
             $settings.Profiles[$name] = & $script:getProfileFromControls
             $settings.ActiveProfile = $name
             $settings = Apply-ProfileSnapshot $settings $settings.Profiles[$name]
@@ -3629,6 +4100,7 @@ $clearLogButton = New-Object System.Windows.Forms.Button
             if ($script:ClearProfileDirtyIndicator) { & $script:ClearProfileDirtyIndicator }
             $sw.Stop()
             Write-Log "UI: Profile saved: $name (ms=$($sw.ElapsedMilliseconds))" "DEBUG" $null "Profiles"
+            if (Get-Command -Name Show-ActionToast -ErrorAction SilentlyContinue) { Show-ActionToast ("Profile saved: {0}" -f $name) }
         } catch {
             Write-Log "UI: Profile save failed." "ERROR" $_.Exception "Profiles"
             if ($_.InvocationInfo) {
@@ -3653,7 +4125,7 @@ $clearLogButton = New-Object System.Windows.Forms.Button
             $sw = [System.Diagnostics.Stopwatch]::StartNew()
             $name = $name.Trim()
             if ((Get-ObjectKeys $settings.Profiles) -contains $name) {
-                if (-not (& $confirmProfileWritable $name "Overwrite")) { return }
+                if (-not (& $script:ConfirmProfileWritable $name "Overwrite")) { return }
                 $result = [System.Windows.Forms.MessageBox]::Show(
                     "Profile '$name' exists. Overwrite?",
                     "Overwrite Profile",
@@ -3673,6 +4145,7 @@ $clearLogButton = New-Object System.Windows.Forms.Button
             if ($script:ClearProfileDirtyIndicator) { & $script:ClearProfileDirtyIndicator }
             $sw.Stop()
             Write-Log "UI: Profile saved as: $name (ms=$($sw.ElapsedMilliseconds))" "DEBUG" $null "Profiles"
+            if (Get-Command -Name Show-ActionToast -ErrorAction SilentlyContinue) { Show-ActionToast ("Profile saved: {0}" -f $name) }
         } catch {
             Write-Log "UI: Profile save-as failed." "ERROR" $_.Exception "Profiles"
             if ($_.InvocationInfo) {
@@ -3716,6 +4189,7 @@ $clearLogButton = New-Object System.Windows.Forms.Button
         if ($updateProfilesMenu) { & $updateProfilesMenu }
         $sw.Stop()
         Write-Log "UI: Profile copied: $sourceName -> $name (ms=$($sw.ElapsedMilliseconds))" "DEBUG" $null "Profiles"
+        if (Get-Command -Name Show-ActionToast -ErrorAction SilentlyContinue) { Show-ActionToast ("Profile copied: {0}" -f $name) }
     })
 
     $loadProfileButton.Add_Click({
@@ -3738,6 +4212,7 @@ $clearLogButton = New-Object System.Windows.Forms.Button
         if ($updateProfilesMenu) { & $updateProfilesMenu }
         $sw.Stop()
         Write-Log "UI: Profile loaded: $name (ms=$($sw.ElapsedMilliseconds))" "DEBUG" $null "Profiles"
+        if (Get-Command -Name Show-ActionToast -ErrorAction SilentlyContinue) { Show-ActionToast ("Profile loaded: {0}" -f $name) }
     })
 
     $newProfileButton.Add_Click({
@@ -3763,6 +4238,7 @@ $clearLogButton = New-Object System.Windows.Forms.Button
         if ($updateProfilesMenu) { & $updateProfilesMenu }
         $sw.Stop()
         Write-Log "UI: Profile created: $name (ms=$($sw.ElapsedMilliseconds))" "DEBUG" $null "Profiles"
+        if (Get-Command -Name Show-ActionToast -ErrorAction SilentlyContinue) { Show-ActionToast ("Profile created: {0}" -f $name) }
     })
 
     $renameProfileButton.Add_Click({
@@ -3770,7 +4246,7 @@ $clearLogButton = New-Object System.Windows.Forms.Button
         if ($script:profileBox.SelectedItem -eq $null) { return }
         $sw = [System.Diagnostics.Stopwatch]::StartNew()
         $oldName = [string]$script:profileBox.SelectedItem
-        if (-not (& $confirmProfileWritable $oldName "Rename")) { return }
+        if (-not (& $script:ConfirmProfileWritable $oldName "Rename")) { return }
         $name = [Microsoft.VisualBasic.Interaction]::InputBox("Enter a new name for '$oldName':", "Rename Profile", $oldName)
         if ([string]::IsNullOrWhiteSpace($name)) { return }
         $name = $name.Trim()
@@ -3797,6 +4273,7 @@ $clearLogButton = New-Object System.Windows.Forms.Button
         if ($updateProfilesMenu) { & $updateProfilesMenu }
         $sw.Stop()
         Write-Log "UI: Profile renamed: $oldName -> $name (ms=$($sw.ElapsedMilliseconds))" "DEBUG" $null "Profiles"
+        if (Get-Command -Name Show-ActionToast -ErrorAction SilentlyContinue) { Show-ActionToast ("Profile renamed: {0}" -f $name) }
     })
 
     $deleteProfileButton.Add_Click({
@@ -3804,7 +4281,7 @@ $clearLogButton = New-Object System.Windows.Forms.Button
         if ($script:profileBox.SelectedItem -eq $null) { return }
         $sw = [System.Diagnostics.Stopwatch]::StartNew()
         $name = [string]$script:profileBox.SelectedItem
-        if (-not (& $confirmProfileWritable $name "Delete")) { return }
+        if (-not (& $script:ConfirmProfileWritable $name "Delete")) { return }
         if ((Get-ObjectKeys $settings.Profiles).Count -le 1) {
             [System.Windows.Forms.MessageBox]::Show(
                 "At least one profile must remain.",
@@ -3821,17 +4298,212 @@ $clearLogButton = New-Object System.Windows.Forms.Button
             [System.Windows.Forms.MessageBoxIcon]::Warning
         )
         if ($result -ne [System.Windows.Forms.DialogResult]::Yes) { return }
+        $deletedSnapshot = Migrate-ProfileSnapshot $settings.Profiles[$name]
+        if ($script:CloneProfileObject) { $deletedSnapshot = & $script:CloneProfileObject $deletedSnapshot }
+        $deletedLastGood = Get-ProfileLastGood $name
+        if ($null -ne $deletedLastGood -and $script:CloneProfileObject) {
+            $deletedLastGood = & $script:CloneProfileObject $deletedLastGood
+        }
+        if ($script:AddDeletedProfileToRecycleBin) {
+            & $script:AddDeletedProfileToRecycleBin $name $deletedSnapshot $deletedLastGood
+        }
         $settings.Profiles.Remove($name)
-        Remove-ProfileLastGood $name
         if ($settings.ActiveProfile -eq $name) {
             $profileKeys = @(Get-ObjectKeys $settings.Profiles)
             if ($profileKeys.Count -gt 0) { $settings.ActiveProfile = $profileKeys[0] }
         }
         Save-Settings $settings
+        Remove-ProfileLastGood $name
+        try {
+            if (Get-Command -Name Get-ProfileVersionSnapshotDir -ErrorAction SilentlyContinue) {
+                $profileVersionDir = Get-ProfileVersionSnapshotDir $name
+                if (-not [string]::IsNullOrWhiteSpace($profileVersionDir) -and (Test-Path $profileVersionDir)) {
+                    Remove-Item -Path $profileVersionDir -Recurse -Force -ErrorAction SilentlyContinue
+                    Write-Log ("UI: Deleted profile snapshots removed for '{0}'." -f $name) "INFO" $null "Profiles"
+                }
+            }
+        } catch {
+            Write-Log ("UI: Failed to remove deleted profile snapshots for '{0}'." -f $name) "WARN" $_.Exception "Profiles"
+        }
         & $script:refreshProfileList
         if ($updateProfilesMenu) { & $updateProfilesMenu }
         $sw.Stop()
         Write-Log "UI: Profile deleted: $name (ms=$($sw.ElapsedMilliseconds))" "DEBUG" $null "Profiles"
+        if (Get-Command -Name Show-ActionToast -ErrorAction SilentlyContinue) { Show-ActionToast ("Profile deleted: {0}" -f $name) }
+    })
+
+    $restoreDeletedProfileButton.Add_Click({
+        if ($script:EnsureProfilesHashtable) { & $script:EnsureProfilesHashtable }
+        $recoverable = @()
+        if ($script:GetRecoverableDeletedProfiles) {
+            $recoverable = @(& $script:GetRecoverableDeletedProfiles)
+        }
+        if ($recoverable.Count -eq 0) {
+            $deletedProfilesVar = Get-Variable -Name DeletedProfilesRecycleBin -Scope Script -ErrorAction SilentlyContinue
+            if ($deletedProfilesVar -and ($deletedProfilesVar.Value -is [System.Collections.ArrayList])) {
+                $now = Get-Date
+                foreach ($entry in @($deletedProfilesVar.Value)) {
+                    if (-not $entry) { continue }
+                    $entryName = if ($script:GetDeletedProfileEntryField) { & $script:GetDeletedProfileEntryField $entry "Name" } else { $null }
+                    if ([string]::IsNullOrWhiteSpace([string]$entryName)) { continue }
+                    $expiresAt = $null
+                    try {
+                        $rawExpiry = if ($script:GetDeletedProfileEntryField) { & $script:GetDeletedProfileEntryField $entry "ExpiresAt" } else { $null }
+                        if ($null -ne $rawExpiry) { $expiresAt = [datetime]$rawExpiry }
+                    } catch { $expiresAt = $null }
+                    if ($null -eq $expiresAt -or $expiresAt -le $now) { continue }
+                    $recoverable += $entry
+                }
+                if ($recoverable.Count -gt 0) {
+                    $recoverable = @($recoverable | Sort-Object -Property DeletedAt -Descending)
+                }
+            }
+        }
+        Write-Log ("UI: Profile restore requested. RecoverableCount={0}" -f $recoverable.Count) "INFO" $null "Profiles"
+        if ($recoverable.Count -eq 0) {
+            if ($script:UpdateRestoreDeletedProfileButtonState) { & $script:UpdateRestoreDeletedProfileButtonState }
+            [System.Windows.Forms.MessageBox]::Show(
+                "No recently deleted profiles are available to restore.",
+                "Restore Profile",
+                [System.Windows.Forms.MessageBoxButtons]::OK,
+                [System.Windows.Forms.MessageBoxIcon]::Information
+            ) | Out-Null
+            return
+        }
+
+        $entry = $null
+        if ($recoverable.Count -gt 1) {
+            $pickerForm = New-Object System.Windows.Forms.Form
+            $pickerForm.Text = "Select Profile to Restore"
+            $pickerForm.StartPosition = "CenterParent"
+            $pickerForm.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::FixedDialog
+            $pickerForm.MaximizeBox = $false
+            $pickerForm.MinimizeBox = $false
+            $pickerForm.ShowInTaskbar = $false
+            $pickerForm.ClientSize = New-Object System.Drawing.Size(520, 320)
+
+            $pickerHeader = New-Object System.Windows.Forms.Label
+            $pickerHeader.Text = "Choose a deleted profile to restore:"
+            $pickerHeader.AutoSize = $true
+            $pickerHeader.Location = New-Object System.Drawing.Point(12, 12)
+
+            $pickerList = New-Object System.Windows.Forms.ListBox
+            $pickerList.Location = New-Object System.Drawing.Point(12, 36)
+            $pickerList.Size = New-Object System.Drawing.Size(496, 220)
+
+            for ($i = 0; $i -lt $recoverable.Count; $i++) {
+                $candidate = $recoverable[$i]
+                $candidateName = [string](& $script:GetDeletedProfileEntryField $candidate "Name")
+                $candidateDeletedAt = $null
+                try { $candidateDeletedAt = [datetime](& $script:GetDeletedProfileEntryField $candidate "DeletedAt") } catch { $candidateDeletedAt = $null }
+                $timeText = if ($candidateDeletedAt) { $candidateDeletedAt.ToString("g") } else { "Unknown time" }
+                [void]$pickerList.Items.Add(("{0}  (Deleted, {1})" -f $candidateName, $timeText))
+            }
+            if ($pickerList.Items.Count -gt 0) { $pickerList.SelectedIndex = 0 }
+
+            $restorePickButton = New-Object System.Windows.Forms.Button
+            $restorePickButton.Text = "Restore"
+            $restorePickButton.DialogResult = [System.Windows.Forms.DialogResult]::OK
+            $restorePickButton.Size = New-Object System.Drawing.Size(100, 28)
+            $restorePickButton.Location = New-Object System.Drawing.Point(304, 276)
+
+            $cancelPickButton = New-Object System.Windows.Forms.Button
+            $cancelPickButton.Text = "Cancel"
+            $cancelPickButton.DialogResult = [System.Windows.Forms.DialogResult]::Cancel
+            $cancelPickButton.Size = New-Object System.Drawing.Size(100, 28)
+            $cancelPickButton.Location = New-Object System.Drawing.Point(408, 276)
+
+            $pickerForm.Controls.Add($pickerHeader) | Out-Null
+            $pickerForm.Controls.Add($pickerList) | Out-Null
+            $pickerForm.Controls.Add($restorePickButton) | Out-Null
+            $pickerForm.Controls.Add($cancelPickButton) | Out-Null
+            $pickerForm.AcceptButton = $restorePickButton
+            $pickerForm.CancelButton = $cancelPickButton
+
+            $pickResult = $pickerForm.ShowDialog()
+            if ($pickResult -ne [System.Windows.Forms.DialogResult]::OK -or $pickerList.SelectedIndex -lt 0) {
+                return
+            }
+            $entry = $recoverable[$pickerList.SelectedIndex]
+        } else {
+            $entry = $recoverable[0]
+        }
+
+        $sourceName = [string](& $script:GetDeletedProfileEntryField $entry "Name")
+        $minutesRemaining = 0
+        try {
+            $rawExpiry = & $script:GetDeletedProfileEntryField $entry "ExpiresAt"
+            if ($null -ne $rawExpiry) {
+                $minutesRemaining = [int][Math]::Max(0, [Math]::Ceiling(([datetime]$rawExpiry - (Get-Date)).TotalMinutes))
+            }
+        } catch { $minutesRemaining = 0 }
+        $confirmText = "Restore recently deleted profile '$sourceName'?"
+        if ($minutesRemaining -gt 0) {
+            $confirmText += "`n`nRestore window remaining: about $minutesRemaining minute(s)."
+        }
+        $confirm = [System.Windows.Forms.MessageBox]::Show(
+            $confirmText,
+            "Restore Deleted Profile",
+            [System.Windows.Forms.MessageBoxButtons]::YesNo,
+            [System.Windows.Forms.MessageBoxIcon]::Question
+        )
+        if ($confirm -ne [System.Windows.Forms.DialogResult]::Yes) { return }
+
+        $targetName = $sourceName
+        if ((Get-ObjectKeys $settings.Profiles) -contains $targetName) {
+            $existingPrompt = [System.Windows.Forms.MessageBox]::Show(
+                "A profile named '$targetName' already exists.`n`nYes = overwrite existing profile`nNo = restore with a new name`nCancel = abort",
+                "Profile Exists",
+                [System.Windows.Forms.MessageBoxButtons]::YesNoCancel,
+                [System.Windows.Forms.MessageBoxIcon]::Question
+            )
+            if ($existingPrompt -eq [System.Windows.Forms.DialogResult]::Cancel) { return }
+            if ($existingPrompt -eq [System.Windows.Forms.DialogResult]::Yes) {
+                if (-not (& $script:ConfirmProfileWritable $targetName "Overwrite")) { return }
+            } else {
+                $suffix = 1
+                do {
+                    $targetName = "{0} (Restored {1})" -f $sourceName, $suffix
+                    $suffix++
+                } while ((Get-ObjectKeys $settings.Profiles) -contains $targetName)
+            }
+        }
+
+        $restoredProfile = & $script:GetDeletedProfileEntryField $entry "Profile"
+        if ($script:CloneProfileObject) { $restoredProfile = & $script:CloneProfileObject $restoredProfile }
+        if ($null -eq $restoredProfile) {
+            [System.Windows.Forms.MessageBox]::Show(
+                "Unable to restore '$sourceName' because its recovery snapshot is invalid.",
+                "Restore Failed",
+                [System.Windows.Forms.MessageBoxButtons]::OK,
+                [System.Windows.Forms.MessageBoxIcon]::Error
+            ) | Out-Null
+            return
+        }
+
+        $settings.Profiles[$targetName] = $restoredProfile
+        $settings.ActiveProfile = $targetName
+        $settings = Apply-ProfileSnapshot $settings $settings.Profiles[$targetName]
+        if ($script:ApplySettingsToControls) { & $script:ApplySettingsToControls $settings }
+        if ($script:profileReadOnlyBox) { $script:profileReadOnlyBox.Checked = (Get-ProfileReadOnly $settings.Profiles[$targetName]) }
+
+        $restoredLastGood = & $script:GetDeletedProfileEntryField $entry "LastGood"
+        if ($null -ne $restoredLastGood) {
+            if ($script:CloneProfileObject) { $restoredLastGood = & $script:CloneProfileObject $restoredLastGood }
+            Update-ProfileLastGood $targetName $restoredLastGood
+        } else {
+            Update-ProfileLastGood $targetName (Migrate-ProfileSnapshot $settings.Profiles[$targetName])
+        }
+
+        Save-Settings $settings
+        $entryId = [string](& $script:GetDeletedProfileEntryField $entry "Id")
+        if ($script:RemoveDeletedProfileFromRecycleBin -and -not [string]::IsNullOrWhiteSpace($entryId)) { & $script:RemoveDeletedProfileFromRecycleBin $entryId }
+        & $script:refreshProfileList
+        if ($updateProfilesMenu) { & $updateProfilesMenu }
+        if ($script:UpdateProfileDirtyIndicator) { & $script:UpdateProfileDirtyIndicator }
+        if ($script:ClearProfileDirtyIndicator) { & $script:ClearProfileDirtyIndicator }
+        Write-Log "UI: Profile restored: $sourceName -> $targetName" "DEBUG" $null "Profiles"
+        if (Get-Command -Name Show-ActionToast -ErrorAction SilentlyContinue) { Show-ActionToast ("Profile restored: {0}" -f $targetName) }
     })
 
     $exportProfileButton.Add_Click({
@@ -3860,6 +4532,7 @@ $clearLogButton = New-Object System.Windows.Forms.Button
             $payload["Signature"] = Get-ProfileExportSignature $name $profileToExport
             $payload | ConvertTo-Json -Depth 6 | Set-Content -Path $dialog.FileName -Encoding UTF8
             Write-Log "Profile exported: $name -> $($dialog.FileName)" "INFO" $null "Profiles"
+            if (Get-Command -Name Show-ActionToast -ErrorAction SilentlyContinue) { Show-ActionToast ("Profile exported: {0}" -f $name) }
         } catch {
             [System.Windows.Forms.MessageBox]::Show(
                 "Failed to export profile.`n$($_.Exception.Message)",
@@ -3942,7 +4615,7 @@ $clearLogButton = New-Object System.Windows.Forms.Button
             if ([string]::IsNullOrWhiteSpace($name)) { return }
             $name = $name.Trim()
             if ((Get-ObjectKeys $settings.Profiles) -contains $name) {
-                if (-not (& $confirmProfileWritable $name "Overwrite")) { return }
+                if (-not (& $script:ConfirmProfileWritable $name "Overwrite")) { return }
                 $result = [System.Windows.Forms.MessageBox]::Show(
                     "Profile '$name' exists. Overwrite?",
                     "Overwrite Profile",
@@ -3958,6 +4631,7 @@ $clearLogButton = New-Object System.Windows.Forms.Button
             & $script:refreshProfileList
             if ($updateProfilesMenu) { & $updateProfilesMenu }
             Write-Log "Profile imported: $name" "INFO" $null "Profiles"
+            if (Get-Command -Name Show-ActionToast -ErrorAction SilentlyContinue) { Show-ActionToast ("Profile imported: {0}" -f $name) }
         } catch {
             [System.Windows.Forms.MessageBox]::Show(
                 "Failed to import profile.`n$($_.Exception.Message)",
@@ -4054,8 +4728,11 @@ $clearLogButton = New-Object System.Windows.Forms.Button
         try {
             if ($script:AddSettingRow) {
                 if ($script:RunHealthCheckButton) { & $script:AddSettingRow $panel "Run Health Check" $script:RunHealthCheckButton | Out-Null }
+                if ($script:ResetCrashStateButton) { & $script:AddSettingRow $panel "Reset Crash State" $script:ResetCrashStateButton | Out-Null }
+                if ($script:OpenDiagnosticsFolderButton) { & $script:AddSettingRow $panel "Open Diagnostics Folder" $script:OpenDiagnosticsFolderButton | Out-Null }
                 if ($script:ExportDiagnosticsButton) { & $script:AddSettingRow $panel "Export Diagnostics" $script:ExportDiagnosticsButton | Out-Null }
                 if ($script:CopyDiagnosticsButton) { & $script:AddSettingRow $panel "Copy Diagnostics" $script:CopyDiagnosticsButton | Out-Null }
+                if ($script:RestorePreviousSettingsButton) { & $script:AddSettingRow $panel "Restore Previous Settings" $script:RestorePreviousSettingsButton | Out-Null }
                 if ($script:ScrubDiagnosticsBox) { & $script:AddSettingRow $panel "Scrub Diagnostics" $script:ScrubDiagnosticsBox | Out-Null }
                 if ($script:ReportIssueButton) { & $script:AddSettingRow $panel "Report Issue" $script:ReportIssueButton | Out-Null }
             }
@@ -4226,22 +4903,43 @@ $clearLogButton = New-Object System.Windows.Forms.Button
     & $addSettingRow $hotkeyPanel "Validate Hotkeys" $validateHotkeysButton | Out-Null
     & $addSettingRow $hotkeyPanel "Test Hotkeys" $simulateHotkeysPanel | Out-Null
 
+    $securityHelpLabel = New-Object System.Windows.Forms.Label
+    $securityHelpLabel.AutoSize = $true
+    $securityHelpLabel.MaximumSize = New-Object System.Drawing.Size(460, 0)
+    $securityHelpLabel.ForeColor = [System.Drawing.Color]::DarkGray
+    $securityHelpLabel.Text = "Tip: Security Mode enables strict import and update checks. Use this in production; disable only for trusted troubleshooting."
+
+    $signatureHelpLabel = New-Object System.Windows.Forms.Label
+    $signatureHelpLabel.AutoSize = $true
+    $signatureHelpLabel.MaximumSize = New-Object System.Drawing.Size(460, 0)
+    $signatureHelpLabel.ForeColor = [System.Drawing.Color]::DarkGray
+    $signatureHelpLabel.Text = "Tip: Script signature validation requires trusted certificates. Keep thumbprints scoped to your approved signer set."
+
+    $updateTrustHelpLabel = New-Object System.Windows.Forms.Label
+    $updateTrustHelpLabel.AutoSize = $true
+    $updateTrustHelpLabel.MaximumSize = New-Object System.Drawing.Size(460, 0)
+    $updateTrustHelpLabel.ForeColor = [System.Drawing.Color]::DarkGray
+    $updateTrustHelpLabel.Text = "Tip: Keep Update Owner/Repo pinned to your official source and require hash/signature checks to reduce supply-chain risk."
+
     & $addSettingRow $advancedPanel "Safe Mode Enabled" $script:SafeModeEnabledBox | Out-Null
     & $addSettingRow $advancedPanel "Safe Mode Failure Threshold" $script:safeModeThresholdBox | Out-Null
     $script:ErrorLabels["Safe Mode Failure Threshold"] = & $addErrorRow $advancedPanel
     if ($script:AddSpacerRow) { & $script:AddSpacerRow $advancedPanel }
     & $addSettingRow $advancedPanel "Security Mode" $script:securityModeBox | Out-Null
+    & $addFullRow $advancedPanel $securityHelpLabel
     & $addSettingRow $advancedPanel "Strict Settings Import" $script:strictSettingsImportBox | Out-Null
     & $addSettingRow $advancedPanel "Strict Profile Import" $script:strictProfileImportBox | Out-Null
     & $addSettingRow $advancedPanel "Strict Update Policy" $script:strictUpdatePolicyBox | Out-Null
     & $addSettingRow $advancedPanel "Require Script Signature" $script:requireScriptSignatureBox | Out-Null
     & $addSettingRow $advancedPanel "Trusted Signer Thumbprints" $script:trustedSignerThumbprintsBox | Out-Null
+    & $addFullRow $advancedPanel $signatureHelpLabel
     & $addSettingRow $advancedPanel "Allow External Paths" $script:allowExternalPathsBox | Out-Null
     & $addSettingRow $advancedPanel "Harden Permissions" $script:hardenPermissionsBox | Out-Null
     & $addSettingRow $advancedPanel "Update Owner" $script:updateOwnerBox | Out-Null
     & $addSettingRow $advancedPanel "Update Repo" $script:updateRepoBox | Out-Null
     & $addSettingRow $advancedPanel "Require Update Hash" $script:updateRequireHashBox | Out-Null
     & $addSettingRow $advancedPanel "Require Update Signature" $script:updateRequireSignatureBox | Out-Null
+    & $addFullRow $advancedPanel $updateTrustHelpLabel
     & $addSettingRow $advancedPanel "Allow Pre-release Updates" $script:updateAllowPrereleaseBox | Out-Null
     & $addSettingRow $advancedPanel "Allow Downgrade Updates" $script:updateAllowDowngradeBox | Out-Null
     if ($script:AddSpacerRow) { & $script:AddSpacerRow $advancedPanel }
@@ -4377,6 +5075,33 @@ $clearLogButton = New-Object System.Windows.Forms.Button
     $settingsUiRefreshInProgress = $false
     $script:SettingsUiRefreshInProgress = $false
     $script:settingsDialogLastSaved = $null
+
+    $script:ApplyAccessibilityDefaults = {
+        param([System.Windows.Forms.Control]$rootControl)
+        if (-not $rootControl) { return }
+        $walk = $null
+        $walk = {
+            param([System.Windows.Forms.Control]$node)
+            if (-not $node) { return }
+            try {
+                if ($node -is [System.Windows.Forms.Label]) { $node.TabStop = $false }
+                if ([string]::IsNullOrWhiteSpace([string]$node.AccessibleName) -and -not [string]::IsNullOrWhiteSpace([string]$node.Text)) {
+                    $node.AccessibleName = [string]$node.Text
+                }
+                if ($node -is [System.Windows.Forms.Button]) {
+                    if ($node.MinimumSize.Height -lt 28) {
+                        $minWidth = [Math]::Max(80, $node.MinimumSize.Width)
+                        $node.MinimumSize = New-Object System.Drawing.Size($minWidth, 28)
+                    }
+                    if ($node.Height -lt 28) { $node.Height = 28 }
+                }
+            } catch { }
+            foreach ($child in $node.Controls) {
+                & $walk $child
+            }
+        }
+        & $walk $rootControl
+    }
 
     $script:CopySettingsObject = {
         param($src)
@@ -4680,6 +5405,8 @@ $clearLogButton = New-Object System.Windows.Forms.Button
         "Log Files" = "Files written in the log folder, including rotations and settings backup copies."
         "Validate Folders" = "Check that app folders exist and are writable."
         "Run Health Check" = "Run a quick health check for folders and settings."
+        "Reset Crash State" = "Clear crash counters and Safe Mode state for recovery."
+        "Open Diagnostics Folder" = "Open the folder that stores logs and diagnostics outputs."
         "Copy Status" = "Copy current status details to the clipboard."
         "Log Max Size (KB)" = "Rotate the log when it exceeds this size."
         "Log Retention (days)" = "Delete old log files after this many days. Set to 0 to keep indefinitely."
@@ -4694,6 +5421,7 @@ $clearLogButton = New-Object System.Windows.Forms.Button
         "Settings Files" = "Settings files stored in the selected folder."
         "Export Diagnostics" = "Write a diagnostics summary to a text file."
         "Copy Diagnostics" = "Copy a diagnostics summary to the clipboard."
+        "Restore Previous Settings" = "Restore settings from a previously saved version snapshot."
         "Scrub Diagnostics" = "Redact usernames and local paths in diagnostics outputs."
         "Report Issue" = "Export diagnostics plus the last 200 log lines."
         "Export/Import Settings" = "Save settings to a file or load settings from a file."
@@ -4729,6 +5457,7 @@ $clearLogButton = New-Object System.Windows.Forms.Button
     & $setToolTip $newProfileButton "Create a new profile from the current settings."
     & $setToolTip $renameProfileButton "Rename the selected profile."
     & $setToolTip $deleteProfileButton "Delete the selected profile."
+    & $setToolTip $restoreDeletedProfileButton "Restore the most recently deleted profile."
     & $setToolTip $exportProfileButton "Export the selected profile to a file."
     & $setToolTip $importProfileButton "Import a profile from a file."
     & $setToolTip $saveProfileButton "Save current settings into the selected profile."
@@ -4738,6 +5467,9 @@ $clearLogButton = New-Object System.Windows.Forms.Button
     & $setToolTip $previewChangesButton "Preview changes without saving."
     & $setToolTip $undoChangesButton "Revert changes back to the last saved settings."
     & $setToolTip $copyDiagnosticsButton "Copy diagnostics to the clipboard."
+    if ($resetCrashStateButton) { & $setToolTip $resetCrashStateButton "Clear crash counters and Safe Mode state." }
+    if ($openDiagnosticsFolderButton) { & $setToolTip $openDiagnosticsFolderButton "Open the diagnostics/logs folder." }
+    if ($restorePreviousSettingsButton) { & $setToolTip $restorePreviousSettingsButton "Restore settings from a version snapshot." }
 
     $script:SettingsStatusPanel = $statusPanel
     $script:SettingsHotkeyPanel = $hotkeyPanel
@@ -5043,6 +5775,7 @@ $clearLogButton = New-Object System.Windows.Forms.Button
     if ($form) {
         $form.Add_Shown({
             try {
+                if ($script:ApplyAccessibilityDefaults) { & $script:ApplyAccessibilityDefaults $form }
                 Set-SettingsDirty $false
                 if ($script:ClearProfileDirtyIndicator) { & $script:ClearProfileDirtyIndicator }
             } catch { }
@@ -5495,7 +6228,7 @@ $clearLogButton = New-Object System.Windows.Forms.Button
                 }
             }
         }
-        if ($script:SettingsTabControl -and $script:SettingsTabControl.SelectedTab) {
+        if ($script:openSettingsLastTabBox -and [bool]$script:openSettingsLastTabBox.Checked -and $script:SettingsTabControl -and $script:SettingsTabControl.SelectedTab) {
             $pending.LastSettingsTab = if ($script:GetSettingsTabKey) { & $script:GetSettingsTabKey $script:SettingsTabControl.SelectedTab } else { [string]$script:SettingsTabControl.SelectedTab.Text }
         }
         Sync-ActiveProfileSnapshot $pending
@@ -5510,8 +6243,175 @@ $clearLogButton = New-Object System.Windows.Forms.Button
         }
     }
 
+    $script:GetSettingValueForDiffPreview = {
+        param($source, [string]$key)
+        if ($null -eq $source -or [string]::IsNullOrWhiteSpace($key)) {
+            return [pscustomobject]@{ Exists = $false; Value = $null }
+        }
+        try {
+            if ($source -is [System.Collections.IDictionary]) {
+                if ($source.Contains($key)) {
+                    return [pscustomobject]@{ Exists = $true; Value = $source[$key] }
+                }
+                if ($source.ContainsKey($key)) {
+                    return [pscustomobject]@{ Exists = $true; Value = $source[$key] }
+                }
+            }
+        } catch {
+        }
+        try {
+            $prop = $source.PSObject.Properties[$key]
+            if ($prop) {
+                return [pscustomobject]@{ Exists = $true; Value = $prop.Value }
+            }
+        } catch {
+        }
+        return [pscustomobject]@{ Exists = $false; Value = $null }
+    }
+
+    $script:FormatSettingValueForDiffPreview = {
+        param($value, [int]$depth = 0)
+        if ($null -eq $value) { return "<null>" }
+        if ($depth -ge 3) { return "<...>" }
+        if ($value -is [datetime]) { return $value.ToString("yyyy-MM-dd HH:mm:ss") }
+        if ($value -is [bool]) { return ($(if ($value) { "True" } else { "False" })) }
+        if ($value -is [System.Collections.IDictionary]) {
+            $pairs = @()
+            foreach ($entry in @($value.GetEnumerator() | Sort-Object { [string]$_.Key })) {
+                $pairValue = & $script:FormatSettingValueForDiffPreview $entry.Value ($depth + 1)
+                $pairs += ("{0}={1}" -f [string]$entry.Key, $pairValue)
+            }
+            return "@{" + ($pairs -join "; ") + "}"
+        }
+        if ($value -is [System.Collections.IEnumerable] -and -not ($value -is [string])) {
+            $items = @($value)
+            $formattedItems = @()
+            $maxItems = [Math]::Min($items.Count, 10)
+            for ($i = 0; $i -lt $maxItems; $i++) {
+                $formattedItems += (& $script:FormatSettingValueForDiffPreview $items[$i] ($depth + 1))
+            }
+            if ($items.Count -gt $maxItems) {
+                $formattedItems += ("...({0} more)" -f ($items.Count - $maxItems))
+            }
+            return "[" + ($formattedItems -join ", ") + "]"
+        }
+        $text = ""
+        try { $text = [string]$value } catch { $text = "<unprintable>" }
+        if ([string]::IsNullOrWhiteSpace($text)) { return '""' }
+        $text = ($text -replace "`r?`n", " ").Trim()
+        if ($text.Length -gt 140) { $text = $text.Substring(0, 137) + "..." }
+        return $text
+    }
+
+    $script:GetSettingsPreviewSectionForKey = {
+        param([string]$key)
+        if ([string]::IsNullOrWhiteSpace($key)) { return "Other" }
+
+        try {
+            if ($script:TabDefaultsMap -and ($script:TabDefaultsMap -is [System.Collections.IDictionary])) {
+                foreach ($entry in $script:TabDefaultsMap.GetEnumerator()) {
+                    $tabName = [string]$entry.Key
+                    $tabProps = @($entry.Value)
+                    if ($tabProps -contains $key) {
+                        return $tabName
+                    }
+                }
+            }
+        } catch {
+        }
+
+        if ($key -like "Schedule*" -or $key -like "Pause*") { return "Scheduling" }
+        if ($key -like "Hotkey*") { return "Hotkeys" }
+        if ($key -like "Log*" -or $key -eq "LogDirectory") { return "Logging" }
+        if ($key -eq "Profiles" -or $key -eq "ActiveProfile") { return "Profiles" }
+        if ($key -like "Theme*" -or $key -like "StatusColor*" -or $key -like "*Tooltip*" -or $key -eq "FontSize" -or $key -eq "SettingsFontSize" -or $key -eq "CompactMode" -or $key -eq "QuietMode") { return "Appearance" }
+        if ($key -like "Update*" -or $key -like "Strict*" -or $key -like "Security*" -or $key -like "Require*" -or $key -like "Trusted*" -or $key -eq "AllowExternalPaths" -or $key -eq "HardenPermissions" -or $key -eq "DataRoot") { return "Advanced" }
+        if ($key -eq "IntervalSeconds" -or $key -like "Start*" -or $key -like "Remember*" -or $key -eq "UiLanguage" -or $key -eq "DateTimeFormat" -or $key -eq "UseSystemDateTimeFormat" -or $key -eq "SystemDateTimeFormatMode" -or $key -eq "OpenSettingsAtLastTab" -or $key -eq "FirstRunWizardCompleted") { return "General" }
+
+        return "Other"
+    }
+
+    $script:ShowSettingsDiffPreviewDialog = {
+        param(
+            [string]$summaryText,
+            [string[]]$lines,
+            [int]$totalCount,
+            [int]$shownCount
+        )
+
+        $dialog = New-Object System.Windows.Forms.Form
+        $dialog.Text = "Preview Changes"
+        $dialog.StartPosition = "CenterParent"
+        $dialog.Size = New-Object System.Drawing.Size(760, 520)
+        $dialog.MinimumSize = New-Object System.Drawing.Size(620, 420)
+        $dialog.ShowInTaskbar = $false
+
+        $layout = New-Object System.Windows.Forms.TableLayoutPanel
+        $layout.Dock = "Fill"
+        $layout.ColumnCount = 1
+        $layout.RowCount = 3
+        $layout.Padding = New-Object System.Windows.Forms.Padding(12)
+        $layout.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::AutoSize)))
+        $layout.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Percent, 100)))
+        $layout.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::AutoSize)))
+
+        $summaryLabel = New-Object System.Windows.Forms.Label
+        $summaryLabel.AutoSize = $true
+        $summaryLabel.Text = $summaryText
+        $summaryLabel.Margin = New-Object System.Windows.Forms.Padding(3, 0, 3, 8)
+
+        $detailsBox = New-Object System.Windows.Forms.TextBox
+        $detailsBox.Multiline = $true
+        $detailsBox.ReadOnly = $true
+        $detailsBox.Dock = "Fill"
+        $detailsBox.ScrollBars = [System.Windows.Forms.ScrollBars]::Both
+        $detailsBox.WordWrap = $false
+        $detailsBox.Font = New-Object System.Drawing.Font("Consolas", 9)
+        $detailsText = if ($lines -and $lines.Count -gt 0) { $lines -join "`r`n`r`n" } else { "No changes detected." }
+        if ($totalCount -gt $shownCount) {
+            $detailsText += ("`r`n`r`n...and {0} more change(s)." -f ($totalCount - $shownCount))
+        }
+        $detailsBox.Text = $detailsText
+
+        $buttonRow = New-Object System.Windows.Forms.FlowLayoutPanel
+        $buttonRow.FlowDirection = [System.Windows.Forms.FlowDirection]::RightToLeft
+        $buttonRow.WrapContents = $false
+        $buttonRow.AutoSize = $true
+        $buttonRow.Dock = "Fill"
+
+        $okButton = New-Object System.Windows.Forms.Button
+        $okButton.Text = "OK"
+        $okButton.Width = 100
+        $okButton.DialogResult = [System.Windows.Forms.DialogResult]::OK
+        $buttonRow.Controls.Add($okButton) | Out-Null
+
+        $layout.Controls.Add($summaryLabel, 0, 0)
+        $layout.Controls.Add($detailsBox, 0, 1)
+        $layout.Controls.Add($buttonRow, 0, 2)
+        $dialog.Controls.Add($layout)
+        $dialog.AcceptButton = $okButton
+        $dialog.CancelButton = $okButton
+        $dialog.Add_Shown({
+            try { $detailsBox.Select(0, 0) } catch { }
+            try { $okButton.Focus() } catch { }
+        })
+
+        if ($iconPath -and (Test-Path $iconPath)) {
+            try { $dialog.Icon = New-Object System.Drawing.Icon($iconPath) } catch { }
+        }
+        try {
+            if (Get-Command -Name Apply-ThemeToControl -ErrorAction SilentlyContinue) {
+                Apply-ThemeToControl $dialog $script:ThemePalette $script:UseDarkTheme
+            }
+        } catch {
+        }
+
+        [void]$dialog.ShowDialog($script:SettingsForm)
+    }
+
     $script:ShowPendingSettingsDiff = {
         param($pendingSettings)
+        $baseSettings = if ($script:settingsDialogLastSaved) { $script:settingsDialogLastSaved } else { $settings }
         $baseSnapshot = if ($script:LastSettingsSnapshot) { $script:LastSettingsSnapshot } else { Get-SettingsSnapshot $settings }
         $pendingSnapshot = Get-SettingsSnapshot $pendingSettings
         $pendingHash = Get-SettingsSnapshotHash $pendingSnapshot
@@ -5525,8 +6425,9 @@ $clearLogButton = New-Object System.Windows.Forms.Button
             ) | Out-Null
             return $false
         }
-        $pendingDiffs = @(Get-SettingsDiff $baseSnapshot $pendingSnapshot)
-        if ($pendingDiffs.Count -eq 0) {
+        $summary = Get-SettingsDiffSummary $baseSettings $pendingSettings 500
+        $changedKeys = @($summary.Keys)
+        if ($changedKeys.Count -eq 0) {
             [System.Windows.Forms.MessageBox]::Show(
                 "No changes detected.",
                 "Preview Changes",
@@ -5535,24 +6436,51 @@ $clearLogButton = New-Object System.Windows.Forms.Button
             ) | Out-Null
             return $false
         }
-        $maxLines = 20
-        $shown = $pendingDiffs | Select-Object -First $maxLines
-        $message = "Changes preview:`n`n" + ($shown -join "`n")
-        if ($pendingDiffs.Count -gt $maxLines) {
-            $message += "`n`n...and $($pendingDiffs.Count - $maxLines) more."
+
+        $maxLines = 30
+        $shownKeys = @($changedKeys | Select-Object -First $maxLines)
+        $sectionOrder = @("General", "Scheduling", "Hotkeys", "Logging", "Profiles", "Appearance", "Advanced", "Other")
+        $sectionBuckets = @{}
+        foreach ($key in $shownKeys) {
+            $beforeInfo = & $script:GetSettingValueForDiffPreview $baseSettings $key
+            $afterInfo = & $script:GetSettingValueForDiffPreview $pendingSettings $key
+            $beforeText = if ($beforeInfo.Exists) { & $script:FormatSettingValueForDiffPreview $beforeInfo.Value } else { "<missing>" }
+            $afterText = if ($afterInfo.Exists) { & $script:FormatSettingValueForDiffPreview $afterInfo.Value } else { "<missing>" }
+            $sectionName = & $script:GetSettingsPreviewSectionForKey $key
+            if (-not $sectionBuckets.ContainsKey($sectionName)) { $sectionBuckets[$sectionName] = @() }
+            $sectionBuckets[$sectionName] += ("{0}`r`n    {1}`r`n    -> {2}" -f $key, $beforeText, $afterText)
         }
-        [System.Windows.Forms.MessageBox]::Show(
-            $message,
-            "Preview Changes",
-            [System.Windows.Forms.MessageBoxButtons]::OK,
-            [System.Windows.Forms.MessageBoxIcon]::Information
-        ) | Out-Null
+
+        $detailLines = @()
+        $knownSections = @()
+        foreach ($name in $sectionOrder) {
+            if ($sectionBuckets.ContainsKey($name) -and $sectionBuckets[$name].Count -gt 0) {
+                $knownSections += $name
+            }
+        }
+        $dynamicSections = @($sectionBuckets.Keys | Where-Object { $sectionOrder -notcontains $_ } | Sort-Object)
+        foreach ($sectionName in @($knownSections + $dynamicSections)) {
+            $items = @($sectionBuckets[$sectionName])
+            if ($items.Count -eq 0) { continue }
+            $suffix = if ($items.Count -eq 1) { "" } else { "s" }
+            $detailLines += ("[{0}] ({1} change{2})" -f $sectionName, $items.Count, $suffix)
+            $detailLines += $items
+        }
+        $summaryText = "{0} setting(s) will change." -f $changedKeys.Count
+        & $script:ShowSettingsDiffPreviewDialog $summaryText $detailLines $changedKeys.Count $shownKeys.Count
         return $true
     }
 
     $previewChangesButton.Add_Click({
         & $script:RunSettingsAction "Preview Changes" {
-            $collectResult = & $script:CollectSettingsFromControls -ShowErrors
+            $previousSuppressPathWarnings = $false
+            try { $previousSuppressPathWarnings = [bool]$script:SuppressPathWarnings } catch { $previousSuppressPathWarnings = $false }
+            $script:SuppressPathWarnings = $true
+            try {
+                $collectResult = & $script:CollectSettingsFromControls -ShowErrors
+            } finally {
+                $script:SuppressPathWarnings = $previousSuppressPathWarnings
+            }
             if (-not $collectResult -or $collectResult.Errors.Count -gt 0) { return }
             if (& $script:ShowPendingSettingsDiff $collectResult.Settings) {
                 Write-Log "UI: Settings preview displayed." "DEBUG" $null "Settings-Dialog"
@@ -5624,35 +6552,41 @@ $clearLogButton = New-Object System.Windows.Forms.Button
         }
 
         Write-Log "UI: ---------- Settings Save ----------" "DEBUG" $null "Settings-Dialog"
-        Save-Settings $settings
+        Save-Settings $settings -Immediate
         if ($updateProfilesMenu) { & $updateProfilesMenu }
 
-        if ($script:QuickQuietModeItem) { $script:QuickQuietModeItem.Checked = [bool]$settings.QuietMode }
-        if ($updateQuickSettingsChecks) { & $updateQuickSettingsChecks }
-        $script:LogLevel = [string]$settings.LogLevel
-        if ([string]::IsNullOrWhiteSpace($script:LogLevel)) { $script:LogLevel = "INFO" }
-        $script:LogLevel = $script:LogLevel.ToUpperInvariant()
-        if (-not $script:LogLevels.ContainsKey($script:LogLevel)) { $script:LogLevel = "INFO" }
-        $settings.DateTimeFormat = Normalize-DateTimeFormat ([string]$settings.DateTimeFormat)
-        $script:DateTimeFormat = $settings.DateTimeFormat
-        $script:UseSystemDateTimeFormat = [bool]$settings.UseSystemDateTimeFormat
-        $script:SystemDateTimeFormatMode = if ([string]::IsNullOrWhiteSpace([string]$settings.SystemDateTimeFormatMode)) { "Short" } else { [string]$settings.SystemDateTimeFormatMode }
-        $pickerFormat = if ($script:UseSystemDateTimeFormat) { if ($script:SystemDateTimeFormatMode -eq "Long") { "F" } else { "g" } } else { $script:DateTimeFormat }
-        if ($script:LastTogglePicker) { $script:LastTogglePicker.CustomFormat = $pickerFormat }
-        if ($script:pauseUntilBox) { $script:pauseUntilBox.CustomFormat = $pickerFormat }
-        if ($script:scheduleSuspendUntilBox) { $script:scheduleSuspendUntilBox.CustomFormat = $pickerFormat }
-        if ($script:dateTimeFormatBox) { $script:dateTimeFormatBox.Text = $script:DateTimeFormat }
-        if ($script:useSystemDateTimeFormatBox) {
-            $script:useSystemDateTimeFormatBox.Checked = $script:UseSystemDateTimeFormat
+        $previousApplying = [bool]$script:SettingsIsApplying
+        $script:SettingsIsApplying = $true
+        try {
+            if ($script:QuickQuietModeItem) { $script:QuickQuietModeItem.Checked = [bool]$settings.QuietMode }
+            if ($updateQuickSettingsChecks) { & $updateQuickSettingsChecks }
+            $script:LogLevel = [string]$settings.LogLevel
+            if ([string]::IsNullOrWhiteSpace($script:LogLevel)) { $script:LogLevel = "INFO" }
+            $script:LogLevel = $script:LogLevel.ToUpperInvariant()
+            if (-not $script:LogLevels.ContainsKey($script:LogLevel)) { $script:LogLevel = "INFO" }
+            $settings.DateTimeFormat = Normalize-DateTimeFormat ([string]$settings.DateTimeFormat)
+            $script:DateTimeFormat = $settings.DateTimeFormat
+            $script:UseSystemDateTimeFormat = [bool]$settings.UseSystemDateTimeFormat
+            $script:SystemDateTimeFormatMode = if ([string]::IsNullOrWhiteSpace([string]$settings.SystemDateTimeFormatMode)) { "Short" } else { [string]$settings.SystemDateTimeFormatMode }
+            $pickerFormat = if ($script:UseSystemDateTimeFormat) { if ($script:SystemDateTimeFormatMode -eq "Long") { "F" } else { "g" } } else { $script:DateTimeFormat }
+            if ($script:LastTogglePicker) { $script:LastTogglePicker.CustomFormat = $pickerFormat }
+            if ($script:pauseUntilBox) { $script:pauseUntilBox.CustomFormat = $pickerFormat }
+            if ($script:scheduleSuspendUntilBox) { $script:scheduleSuspendUntilBox.CustomFormat = $pickerFormat }
+            if ($script:dateTimeFormatBox) { $script:dateTimeFormatBox.Text = $script:DateTimeFormat }
+            if ($script:useSystemDateTimeFormatBox) {
+                $script:useSystemDateTimeFormatBox.Checked = $script:UseSystemDateTimeFormat
+            }
+            if ($script:systemDateTimeFormatModeBox) {
+                $script:systemDateTimeFormatModeBox.SelectedItem = if ($script:SystemDateTimeFormatMode -eq "Long") { "Long" } else { "Short" }
+            }
+            if ($script:dateTimeFormatPresetBox) { $script:dateTimeFormatPresetBox.SelectedIndex = 0 }
+            if ($script:dateTimeFormatBox) { $script:dateTimeFormatBox.Enabled = -not $script:UseSystemDateTimeFormat }
+            if ($script:dateTimeFormatPresetBox) { $script:dateTimeFormatPresetBox.Enabled = -not $script:UseSystemDateTimeFormat }
+            if ($script:systemDateTimeFormatModeBox) { $script:systemDateTimeFormatModeBox.Enabled = $script:UseSystemDateTimeFormat }
+            if ($script:updateDateTimePreview) { & $script:updateDateTimePreview }
+        } finally {
+            $script:SettingsIsApplying = $previousApplying
         }
-        if ($script:systemDateTimeFormatModeBox) {
-            $script:systemDateTimeFormatModeBox.SelectedItem = if ($script:SystemDateTimeFormatMode -eq "Long") { "Long" } else { "Short" }
-        }
-        if ($script:dateTimeFormatPresetBox) { $script:dateTimeFormatPresetBox.SelectedIndex = 0 }
-        if ($script:dateTimeFormatBox) { $script:dateTimeFormatBox.Enabled = -not $script:UseSystemDateTimeFormat }
-        if ($script:dateTimeFormatPresetBox) { $script:dateTimeFormatPresetBox.Enabled = -not $script:UseSystemDateTimeFormat }
-        if ($script:systemDateTimeFormatModeBox) { $script:systemDateTimeFormatModeBox.Enabled = $script:UseSystemDateTimeFormat }
-        if ($script:updateDateTimePreview) { & $script:updateDateTimePreview }
         Update-LogLevelMenuChecks
         if ($logLevelChanged -and $script:DebugModeUntil) {
             Disable-DebugMode
@@ -6156,6 +7090,16 @@ $clearLogButton = New-Object System.Windows.Forms.Button
             $script:SettingsFirstPaintDone = $true
             if ($script:UpdateStatusTimerState) { Invoke-SettingsShownStep "UpdateStatusTimerState" { & $script:UpdateStatusTimerState } }
         }
+        Invoke-SettingsShownStep "ClearInitDirty" {
+            if ($script:SettingsForm -and -not $script:SettingsForm.IsDisposed) {
+                $script:SettingsForm.BeginInvoke([Action]{
+                    try {
+                        Set-SettingsDirty $false
+                        if ($script:ClearProfileDirtyIndicator) { & $script:ClearProfileDirtyIndicator }
+                    } catch { }
+                }) | Out-Null
+            }
+        }
     })
 
     $form.Add_SizeChanged({
@@ -6168,6 +7112,35 @@ $clearLogButton = New-Object System.Windows.Forms.Button
     })
 
     $form.Add_FormClosing({
+        param($sender, $e)
+        $isUserClose = $false
+        try { $isUserClose = ($e.CloseReason -eq [System.Windows.Forms.CloseReason]::UserClosing) } catch { $isUserClose = $false }
+        if ($isUserClose -and -not $script:isShuttingDown -and -not $script:CleanupDone) {
+            try {
+                if ($script:openSettingsLastTabBox) {
+                    $settings.OpenSettingsAtLastTab = [bool]$script:openSettingsLastTabBox.Checked
+                }
+                if ($settings.OpenSettingsAtLastTab -and $script:SettingsTabControl -and $script:SettingsTabControl.SelectedTab) {
+                    $settings.LastSettingsTab = if ($script:GetSettingsTabKey) { & $script:GetSettingsTabKey $script:SettingsTabControl.SelectedTab } else { [string]$script:SettingsTabControl.SelectedTab.Text }
+                    Save-Settings $settings
+                }
+            } catch { }
+            try { $e.Cancel = $true } catch { }
+            try {
+                if ($sender -and -not $sender.IsDisposed) { $sender.Hide() }
+            } catch { }
+            try {
+                if ($script:SettingsStatusTimer) { $script:SettingsStatusTimer.Stop() }
+                if ($script:SettingsSearchTimer) { $script:SettingsSearchTimer.Stop() }
+            } catch { }
+            try {
+                Set-SettingsDirty $false
+                if ($script:ClearProfileDirtyIndicator) { & $script:ClearProfileDirtyIndicator }
+                if ($script:UpdateSettingsBanner) { & $script:UpdateSettingsBanner }
+            } catch { }
+            Write-Log "UI: Settings dialog hidden (reuse enabled)." "DEBUG" $null "Settings-Dialog"
+            return
+        }
         if ($script:openSettingsLastTabBox) {
             $settings.OpenSettingsAtLastTab = [bool]$script:openSettingsLastTabBox.Checked
         }
@@ -6194,6 +7167,8 @@ $clearLogButton = New-Object System.Windows.Forms.Button
             try { Remove-Job -Job $script:AboutUpdateJob -Force -ErrorAction SilentlyContinue } catch { }
             $script:AboutUpdateJob = $null
         }
+        $script:AboutUpdateJobStartedUtc = $null
+        $script:AboutUpdateJobTimeoutSec = $null
         $script:AboutCheckInProgress = $false
         $script:DeleteProfileButton = $null
         $script:DeleteProfileButtonDefaultForeColor = $null
@@ -6205,7 +7180,20 @@ $clearLogButton = New-Object System.Windows.Forms.Button
         $script:NewProfileButtonThemeForeColor = $null
         $script:SetNewProfileButtonNormal = $null
         $script:SetNewProfileButtonHover = $null
+        $script:RestoreDeletedProfileButton = $null
         $script:GetProfileActionButtonForeColor = $null
+        $script:ConfirmProfileWritable = $null
+        $script:CloneProfileObject = $null
+        $script:EnsureDeletedProfilesRecycleBin = $null
+        $script:SaveDeletedProfilesRecycleBin = $null
+        $script:DeletedProfilesRecycleBinPath = $null
+        $script:GetDeletedProfileEntryField = $null
+        $script:PruneDeletedProfilesRecycleBin = $null
+        $script:GetRecoverableDeletedProfiles = $null
+        $script:GetRecoverableVersionedProfiles = $null
+        $script:UpdateRestoreDeletedProfileButtonState = $null
+        $script:AddDeletedProfileToRecycleBin = $null
+        $script:RemoveDeletedProfileFromRecycleBin = $null
         $script:applySecurityModeState = $null
         $script:securityModeBox = $null
         $script:strictSettingsImportBox = $null

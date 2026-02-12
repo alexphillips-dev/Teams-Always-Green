@@ -1,26 +1,31 @@
 # --- Tray icon + context menu (build + handlers) ---
 $contextMenu = New-Object System.Windows.Forms.ContextMenuStrip
 $script:TrayMenu = $contextMenu
-$contextMenu.ShowItemToolTips = $false
+$script:TrayUseCustomTooltips = $false
+$contextMenu.ShowItemToolTips = (-not $script:TrayUseCustomTooltips)
 $script:TrayMenuOpening = $false
 $script:TrayTooltipDelayMs = 900
-$script:TrayMenuToolTip = New-Object System.Windows.Forms.ToolTip
-$script:TrayMenuToolTip.InitialDelay = $script:TrayTooltipDelayMs
-$script:TrayMenuToolTip.ReshowDelay = 400
-$script:TrayMenuToolTip.AutoPopDelay = 8000
-$script:TrayMenuToolTip.ShowAlways = $true
+$script:TrayMenuToolTip = $null
 $script:TrayTooltipPendingText = $null
-$script:TrayTooltipTimer = New-Object System.Windows.Forms.Timer
-$script:TrayTooltipTimer.Interval = $script:TrayTooltipDelayMs
-$script:TrayTooltipTimer.Add_Tick({
-    $script:TrayTooltipTimer.Stop()
-    if ([string]::IsNullOrWhiteSpace($script:TrayTooltipPendingText)) { return }
-    try {
-        $pos = [System.Windows.Forms.Cursor]::Position
-        $pt = $contextMenu.PointToClient($pos)
-        $script:TrayMenuToolTip.Show($script:TrayTooltipPendingText, $contextMenu, $pt)
-    } catch { }
-})
+$script:TrayTooltipTimer = $null
+if ($script:TrayUseCustomTooltips) {
+    $script:TrayMenuToolTip = New-Object System.Windows.Forms.ToolTip
+    $script:TrayMenuToolTip.InitialDelay = $script:TrayTooltipDelayMs
+    $script:TrayMenuToolTip.ReshowDelay = 400
+    $script:TrayMenuToolTip.AutoPopDelay = 8000
+    $script:TrayMenuToolTip.ShowAlways = $true
+    $script:TrayTooltipTimer = New-Object System.Windows.Forms.Timer
+    $script:TrayTooltipTimer.Interval = $script:TrayTooltipDelayMs
+    $script:TrayTooltipTimer.Add_Tick({
+        $script:TrayTooltipTimer.Stop()
+        if ([string]::IsNullOrWhiteSpace($script:TrayTooltipPendingText)) { return }
+        try {
+            $pos = [System.Windows.Forms.Cursor]::Position
+            $pt = $contextMenu.PointToClient($pos)
+            $script:TrayMenuToolTip.Show($script:TrayTooltipPendingText, $contextMenu, $pt)
+        } catch { }
+    })
+}
 
 if (Get-Command Sync-SettingsReference -ErrorAction SilentlyContinue) {
     Sync-SettingsReference $script:Settings
@@ -40,9 +45,14 @@ try {
     Set-Variable -Name settings -Scope Script -Value $script:Settings -Force
 } catch { }
 
+function Get-TrayModuleVersion {
+    return "1.0.0"
+}
+
 function Set-MenuTooltip([System.Windows.Forms.ToolStripItem]$item, [string]$text) {
     if (-not $item) { return }
     $item.ToolTipText = $text
+    if (-not $script:TrayUseCustomTooltips) { return }
     $item.Add_MouseEnter({
         param($sender, $e)
         if ([string]::IsNullOrWhiteSpace($sender.ToolTipText)) { return }

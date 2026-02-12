@@ -1,6 +1,71 @@
 # --- Update engine (release lookup, validation, apply) ---
 # Extracted from main script for maintainability.
 
+function Get-UpdateModuleVersion {
+    return "1.0.0"
+}
+
+function Get-UpdateNetworkPolicy([switch]$Manual) {
+    $timeoutSec = if ($Manual) { 10 } else { 8 }
+    $maxAttempts = if ($Manual) { 3 } else { 2 }
+    try {
+        if (Get-Variable -Name UpdateNetworkTimeoutSeconds -Scope Script -ErrorAction SilentlyContinue) {
+            $candidateTimeout = [int]$script:UpdateNetworkTimeoutSeconds
+            if ($candidateTimeout -ge 3 -and $candidateTimeout -le 60) { $timeoutSec = $candidateTimeout }
+        }
+    } catch {
+    }
+    try {
+        if (Get-Variable -Name UpdateNetworkMaxAttempts -Scope Script -ErrorAction SilentlyContinue) {
+            $candidateAttempts = [int]$script:UpdateNetworkMaxAttempts
+            if ($candidateAttempts -ge 1 -and $candidateAttempts -le 5) { $maxAttempts = $candidateAttempts }
+        }
+    } catch {
+    }
+    return [pscustomobject]@{
+        TimeoutSec  = $timeoutSec
+        MaxAttempts = $maxAttempts
+    }
+}
+
+function Invoke-UpdateRestRequest([string]$uri, [hashtable]$headers, [int]$timeoutSec, [int]$maxAttempts, [string]$context = "Update") {
+    $attempts = [Math]::Max(1, $maxAttempts)
+    $timeout = [Math]::Max(3, $timeoutSec)
+    $lastException = $null
+    for ($attempt = 1; $attempt -le $attempts; $attempt++) {
+        try {
+            return Invoke-RestMethod -Uri $uri -Headers $headers -TimeoutSec $timeout -ErrorAction Stop
+        } catch {
+            $lastException = $_.Exception
+            if ($attempt -lt $attempts) { Start-Sleep -Milliseconds (250 * $attempt) }
+        }
+    }
+    if ($lastException) {
+        Write-Log ("{0} request failed after {1} attempt(s): {2}" -f $context, $attempts, $lastException.Message) "WARN" $lastException "Update"
+    }
+    return $null
+}
+
+function Invoke-UpdateDownloadRequest([string]$uri, [string]$outFile, [int]$timeoutSec, [int]$maxAttempts, [string]$context = "Update") {
+    $attempts = [Math]::Max(1, $maxAttempts)
+    $timeout = [Math]::Max(3, $timeoutSec)
+    $headers = @{ "User-Agent" = "TeamsAlwaysGreen" }
+    $lastException = $null
+    for ($attempt = 1; $attempt -le $attempts; $attempt++) {
+        try {
+            Invoke-WebRequest -Uri $uri -Headers $headers -OutFile $outFile -UseBasicParsing -TimeoutSec $timeout -ErrorAction Stop
+            return $true
+        } catch {
+            $lastException = $_.Exception
+            if ($attempt -lt $attempts) { Start-Sleep -Milliseconds (250 * $attempt) }
+        }
+    }
+    if ($lastException) {
+        Write-Log ("{0} download failed after {1} attempt(s): {2}" -f $context, $attempts, $lastException.Message) "WARN" $lastException "Update"
+    }
+    return $false
+}
+
 function Get-LatestReleaseInfo([string]$owner, [string]$repo) {
     if ([string]::IsNullOrWhiteSpace($owner) -or [string]::IsNullOrWhiteSpace($repo)) { return $null }
     if ($owner -notmatch '^[A-Za-z0-9._-]+$' -or $repo -notmatch '^[A-Za-z0-9._-]+$') {
@@ -13,12 +78,8 @@ function Get-LatestReleaseInfo([string]$owner, [string]$repo) {
         [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
     } catch {
     }
-    try {
-        return Invoke-RestMethod -Uri $uri -Headers $headers -ErrorAction Stop
-    } catch {
-        Write-Log "Update check failed: $($_.Exception.Message)" "WARN" $_.Exception "Update"
-        return $null
-    }
+    $policy = Get-UpdateNetworkPolicy
+    return Invoke-UpdateRestRequest -uri $uri -headers $headers -timeoutSec $policy.TimeoutSec -maxAttempts $policy.MaxAttempts -context "Update check"
 }
 
 function Test-TrustedGithubUrl([string]$url, [string]$owner, [string]$repo) {
@@ -118,8 +179,10 @@ function Get-ReleaseAssetHash([object]$release, [string]$assetName) {
     if (-not $hashAsset) { $hashAsset = Get-ReleaseAsset $release ($assetName + ".sha256.txt") }
     if (-not $hashAsset -or -not $hashAsset.browser_download_url) { return $null }
     $tempHash = Join-Path $env:TEMP ("TeamsAlwaysGreen.hash." + [Guid]::NewGuid().ToString("N") + ".tmp")
+    $policy = Get-UpdateNetworkPolicy
     try {
-        Invoke-WebRequest -Uri $hashAsset.browser_download_url -OutFile $tempHash -UseBasicParsing -ErrorAction Stop
+        $downloaded = Invoke-UpdateDownloadRequest -uri ([string]$hashAsset.browser_download_url) -outFile $tempHash -timeoutSec $policy.TimeoutSec -maxAttempts $policy.MaxAttempts -context "Update hash"
+        if (-not $downloaded) { return $null }
         $raw = (Get-Content -Path $tempHash -Raw).Trim()
         if ([string]::IsNullOrWhiteSpace($raw)) { return $null }
         $parts = $raw -split "\s+"
@@ -146,8 +209,10 @@ function Get-ReleaseAssetSignatureBytes([object]$release, [string]$assetName) {
     $sigAsset = Get-ReleaseAsset $release ($assetName + ".sig")
     if (-not $sigAsset -or -not $sigAsset.browser_download_url) { return $null }
     $tempSig = Join-Path $env:TEMP ("TeamsAlwaysGreen.sig." + [Guid]::NewGuid().ToString("N") + ".tmp")
+    $policy = Get-UpdateNetworkPolicy
     try {
-        Invoke-WebRequest -Uri $sigAsset.browser_download_url -OutFile $tempSig -UseBasicParsing -ErrorAction Stop
+        $downloaded = Invoke-UpdateDownloadRequest -uri ([string]$sigAsset.browser_download_url) -outFile $tempSig -timeoutSec $policy.TimeoutSec -maxAttempts $policy.MaxAttempts -context "Update signature"
+        if (-not $downloaded) { return $null }
         $raw = (Get-Content -Path $tempSig -Raw).Trim()
         if ([string]::IsNullOrWhiteSpace($raw)) { return $null }
         if ($raw -match "^[A-Fa-f0-9]+$") {
@@ -328,7 +393,11 @@ function Invoke-UpdateCheck {
                 throw "Current app script path failed trust validation."
             }
         }
-        Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $tempPath -UseBasicParsing -ErrorAction Stop
+        $policy = Get-UpdateNetworkPolicy -Manual
+        $downloaded = Invoke-UpdateDownloadRequest -uri ([string]$asset.browser_download_url) -outFile $tempPath -timeoutSec $policy.TimeoutSec -maxAttempts $policy.MaxAttempts -context "Update apply"
+        if (-not $downloaded) {
+            throw "Unable to download update asset within timeout/retry policy."
+        }
         $downloadInfo = Get-Item -Path $tempPath -ErrorAction Stop
         if ($downloadInfo.Length -lt 2048) {
             throw "Downloaded file looks too small."
@@ -382,7 +451,7 @@ function Invoke-UpdateCheck {
         if (Get-Command -Name Flush-LogBuffer -ErrorAction SilentlyContinue) { Flush-LogBuffer }
         Release-MutexOnce
         $script:CleanupDone = $true
-        Start-Process -FilePath "powershell.exe" -WindowStyle Hidden -WorkingDirectory $script:AppRoot -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$scriptPath`""
+        Start-Process -FilePath "powershell.exe" -WindowStyle Hidden -WorkingDirectory $script:AppRoot -ArgumentList "-NoProfile -ExecutionPolicy RemoteSigned -File `"$scriptPath`""
         [System.Windows.Forms.Application]::Exit()
     } catch {
         try { if (Test-Path $tempPath) { Remove-Item -Path $tempPath -Force } } catch { }
