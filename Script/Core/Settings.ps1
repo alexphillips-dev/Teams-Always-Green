@@ -1,5 +1,73 @@
 Set-StrictMode -Version Latest
 
+function Test-HasProperty {
+    param(
+        [Parameter(Mandatory = $true)]$Object,
+        [Parameter(Mandatory = $true)][string]$Name
+    )
+    if ($null -eq $Object) { return $false }
+    if ([string]::IsNullOrWhiteSpace($Name)) { return $false }
+    try {
+        return ($Object.PSObject.Properties.Name -contains $Name)
+    } catch {
+        return $false
+    }
+}
+
+function Get-PropertyValue {
+    param(
+        [Parameter(Mandatory = $true)]$Object,
+        [Parameter(Mandatory = $true)][string]$Name,
+        $Default = $null
+    )
+    if (-not (Test-HasProperty $Object $Name)) { return $Default }
+    try { return $Object.$Name } catch { return $Default }
+}
+
+function Set-PropertyValue {
+    param(
+        [Parameter(Mandatory = $true)]$Object,
+        [Parameter(Mandatory = $true)][string]$Name,
+        $Value
+    )
+    if ($null -eq $Object -or [string]::IsNullOrWhiteSpace($Name)) { return }
+    try {
+        if (-not (Test-HasProperty $Object $Name)) {
+            $Object | Add-Member -MemberType NoteProperty -Name $Name -Value $Value -Force
+        } else {
+            $Object.$Name = $Value
+        }
+    } catch {
+        try { $Object | Add-Member -MemberType NoteProperty -Name $Name -Value $Value -Force } catch { $null = $_ }
+    }
+}
+
+function Get-SettingBool {
+    param($Settings, [string]$Name, [bool]$Default = $false)
+    $value = Get-PropertyValue $Settings $Name $Default
+    try { return [bool]$value } catch { return $Default }
+}
+
+function Get-SettingInt {
+    param($Settings, [string]$Name, [int]$Default = 0, [int]$Min = [int]::MinValue, [int]$Max = [int]::MaxValue)
+    $value = Get-PropertyValue $Settings $Name $Default
+    try {
+        $i = [int]$value
+        if ($i -lt $Min) { return $Min }
+        if ($i -gt $Max) { return $Max }
+        return $i
+    } catch {
+        return $Default
+    }
+}
+
+function Get-SettingString {
+    param($Settings, [string]$Name, [string]$Default = "")
+    $value = Get-PropertyValue $Settings $Name $Default
+    if ($null -eq $value) { return $Default }
+    return [string]$value
+}
+
 function Write-AtomicTextFile {
     param(
         [Parameter(Mandatory = $true)]

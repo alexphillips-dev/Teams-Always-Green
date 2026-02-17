@@ -14,14 +14,16 @@ function Get-UpdateNetworkPolicy([switch]$Manual) {
             if ($candidateTimeout -ge 3 -and $candidateTimeout -le 60) { $timeoutSec = $candidateTimeout }
         }
     } catch {
-    }
+                $null = $_
+            }
     try {
         if (Get-Variable -Name UpdateNetworkMaxAttempts -Scope Script -ErrorAction SilentlyContinue) {
             $candidateAttempts = [int]$script:UpdateNetworkMaxAttempts
             if ($candidateAttempts -ge 1 -and $candidateAttempts -le 5) { $maxAttempts = $candidateAttempts }
         }
     } catch {
-    }
+                $null = $_
+            }
     return [pscustomobject]@{
         TimeoutSec  = $timeoutSec
         MaxAttempts = $maxAttempts
@@ -77,7 +79,8 @@ function Get-LatestReleaseInfo([string]$owner, [string]$repo) {
     try {
         [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
     } catch {
-    }
+                $null = $_
+            }
     $policy = Get-UpdateNetworkPolicy
     return Invoke-UpdateRestRequest -uri $uri -headers $headers -timeoutSec $policy.TimeoutSec -maxAttempts $policy.MaxAttempts -context "Update check"
 }
@@ -191,15 +194,16 @@ function Get-ReleaseAssetHash([object]$release, [string]$assetName) {
             return $hash.ToUpperInvariant()
         }
     } catch {
-    } finally {
-        try { if (Test-Path $tempHash) { Remove-Item -Path $tempHash -Force } } catch { }
+                $null = $_
+            } finally {
+        try { if (Test-Path $tempHash) { Remove-Item -Path $tempHash -Force } } catch { $null = $_ }
     }
     return $null
 }
 
 function Get-UpdatePublicKeyXml {
     if ($script:UpdatePublicKeyPath -and (Test-Path $script:UpdatePublicKeyPath)) {
-        try { return (Get-Content -Path $script:UpdatePublicKeyPath -Raw).Trim() } catch { }
+        try { return (Get-Content -Path $script:UpdatePublicKeyPath -Raw).Trim() } catch { $null = $_ }
     }
     return $null
 }
@@ -226,7 +230,7 @@ function Get-ReleaseAssetSignatureBytes([object]$release, [string]$assetName) {
     } catch {
         return $null
     } finally {
-        try { if (Test-Path $tempSig) { Remove-Item -Path $tempSig -Force } } catch { }
+        try { if (Test-Path $tempSig) { Remove-Item -Path $tempSig -Force } } catch { $null = $_ }
     }
 }
 
@@ -442,10 +446,12 @@ function Invoke-UpdateCheck {
                     $published = [DateTime]::Parse($release.published_at)
                     (Get-Item -Path $versionPathLocal).LastWriteTime = $published
                 } catch {
-                }
+                            $null = $_
+                        }
             }
         } catch {
-        }
+                    $null = $_
+                }
         Write-Log "Update applied; restarting." "INFO" $null "Update"
         Set-ShutdownMarker "clean"
         if (Get-Command -Name Flush-LogBuffer -ErrorAction SilentlyContinue) { Flush-LogBuffer }
@@ -454,13 +460,14 @@ function Invoke-UpdateCheck {
         Start-Process -FilePath "powershell.exe" -WindowStyle Hidden -WorkingDirectory $script:AppRoot -ArgumentList "-NoProfile -ExecutionPolicy RemoteSigned -File `"$scriptPath`""
         [System.Windows.Forms.Application]::Exit()
     } catch {
-        try { if (Test-Path $tempPath) { Remove-Item -Path $tempPath -Force } } catch { }
+        try { if (Test-Path $tempPath) { Remove-Item -Path $tempPath -Force } } catch { $null = $_ }
         try {
             if ($backupPath -and (Test-Path $backupPath)) {
                 Copy-Item -Path $backupPath -Destination $scriptPath -Force
             }
         } catch {
-        }
+                    $null = $_
+                }
         Write-Log "Update failed: $($_.Exception.Message)" "ERROR" $_.Exception "Update"
         if (Get-Command Write-SecurityAuditEvent -ErrorAction SilentlyContinue) { Write-SecurityAuditEvent "UpdateApplyFailed" ([string]$_.Exception.Message) "ERROR" "Update" }
         [System.Windows.Forms.MessageBox]::Show(

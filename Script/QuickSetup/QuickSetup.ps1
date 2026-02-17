@@ -1,10 +1,10 @@
-# QuickSetup.ps1 - Download and install Teams Always Green into a chosen folder
+﻿# QuickSetup.ps1 - Download and install Teams Always Green into a chosen folder
 # Creates Desktop, Start Menu, and Startup shortcuts (no VBS needed).
 
 Add-Type -AssemblyName System.Windows.Forms
 $ErrorActionPreference = 'Stop'
 trap {
-    Write-Host ("QuickSetup error at line {0}: {1}" -f $_.InvocationInfo.ScriptLineNumber, $_.Exception.Message)
+    Write-Error ("QuickSetup error at line {0}: {1}" -f $_.InvocationInfo.ScriptLineNumber, $_.Exception.Message)
     throw
 }
 
@@ -18,7 +18,7 @@ function Get-LastInstallBase {
             $text = Get-Content -Path $script:QuickSetupLastPathFile -ErrorAction Stop | Select-Object -First 1
             if (-not [string]::IsNullOrWhiteSpace($text)) { return $text.Trim() }
         }
-    } catch { }
+    } catch { $null = $_ }
     return [Environment]::GetFolderPath("MyDocuments")
 }
 
@@ -29,7 +29,7 @@ function Set-LastInstallBase([string]$path) {
             New-Item -ItemType Directory -Path $script:QuickSetupStateDir -Force | Out-Null
         }
         Set-Content -Path $script:QuickSetupLastPathFile -Value $path -Encoding ASCII
-    } catch { }
+    } catch { $null = $_ }
 }
 
 function Get-QuickSetupSourceRoot {
@@ -44,15 +44,15 @@ function Get-QuickSetupSourceRoot {
         $probe0 = $seed
         $probe1 = $null
         $probe2 = $null
-        try { $probe1 = Split-Path -Path $probe0 -Parent } catch { }
+        try { $probe1 = Split-Path -Path $probe0 -Parent } catch { $null = $_ }
         if (-not [string]::IsNullOrWhiteSpace($probe1)) {
-            try { $probe2 = Split-Path -Path $probe1 -Parent } catch { }
+            try { $probe2 = Split-Path -Path $probe1 -Parent } catch { $null = $_ }
         }
 
         foreach ($probe in @($probe0, $probe1, $probe2)) {
             if ([string]::IsNullOrWhiteSpace($probe)) { continue }
             $probeFull = $probe
-            try { $probeFull = [System.IO.Path]::GetFullPath($probe) } catch { }
+            try { $probeFull = [System.IO.Path]::GetFullPath($probe) } catch { $null = $_ }
             if ($seen.ContainsKey($probeFull)) { continue }
             $seen[$probeFull] = $true
             if (Test-Path (Join-Path $probeFull "Script\Teams Always Green.ps1")) {
@@ -83,7 +83,8 @@ function Write-SetupLog([string]$message) {
         $line = "[{0}] {1}" -f (Get-Date).ToString("yyyy-MM-dd HH:mm:ss"), $message
         Add-Content -Path $logPath -Value $line
     } catch {
-    }
+                $null = $_
+            }
 }
 
 function Cleanup-SetupTempFiles {
@@ -96,21 +97,23 @@ function Cleanup-SetupTempFiles {
     $paths += (Join-Path $tempRoot "TeamsAlwaysGreen-QuickSetup.log")
     foreach ($path in ($paths | Select-Object -Unique)) {
         if ($path -and (Test-Path $path)) {
-            try { Remove-Item -Path $path -Force -ErrorAction Stop } catch { }
+            try { Remove-Item -Path $path -Force -ErrorAction Stop } catch { $null = $_ }
         }
     }
     try {
         Get-ChildItem -Path $tempRoot -Filter "TeamsAlwaysGreen-QuickSetup*.ps1" -ErrorAction SilentlyContinue | ForEach-Object {
-            try { Remove-Item -Path $_.FullName -Force -ErrorAction Stop } catch { }
+            try { Remove-Item -Path $_.FullName -Force -ErrorAction Stop } catch { $null = $_ }
         }
     } catch {
-    }
+                $null = $_
+            }
     try {
         Get-ChildItem -Path $tempRoot -Filter "teams-always-green-run.*" -ErrorAction SilentlyContinue | ForEach-Object {
-            try { Remove-Item -Path $_.FullName -Force -ErrorAction Stop } catch { }
+            try { Remove-Item -Path $_.FullName -Force -ErrorAction Stop } catch { $null = $_ }
         }
     } catch {
-    }
+                $null = $_
+            }
 
     # Schedule a delayed cleanup to handle files still locked by the shell/editor.
     try {
@@ -127,7 +130,8 @@ function Cleanup-SetupTempFiles {
         Set-Content -Path $cleanupScript -Value ($lines -join "`r`n") -Encoding ASCII
         Start-Process "$env:WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe" -ArgumentList "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$cleanupScript`"" -WindowStyle Hidden
     } catch {
-    }
+                $null = $_
+            }
 }
 
 function Show-SetupError([string]$message) {
@@ -385,7 +389,7 @@ function Update-Progress($ui, $current, $total, [string]$message) {
             }
             $ui.Meta.Text = ("Files: {0}/{1} | Rate: {2} | ETA: {3}" -f $current, $total, $rate, $etaText)
         } catch {
-            try { $ui.Meta.Text = ("Files: {0}/{1}" -f $current, $total) } catch { }
+            try { $ui.Meta.Text = ("Files: {0}/{1}" -f $current, $total) } catch { $null = $_ }
         }
     }
     [System.Windows.Forms.Application]::DoEvents()
@@ -408,7 +412,7 @@ function Wait-For-ProgressNext($ui) {
         [System.Windows.Forms.Application]::DoEvents()
         Start-Sleep -Milliseconds 50
     }
-    try { $ui.Form.Close() } catch { }
+    try { $ui.Form.Close() } catch { $null = $_ }
 }
 
 function Show-Welcome {
@@ -441,11 +445,11 @@ function Show-Welcome {
     }
     $welcomeIcon = $null
     if ($iconPath -and (Test-Path $iconPath)) {
-        try { $welcomeIcon = New-Object System.Drawing.Icon($iconPath) } catch { }
+        try { $welcomeIcon = New-Object System.Drawing.Icon($iconPath) } catch { $null = $_ }
     }
     if (-not $welcomeIcon) {
         try {
-            try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 } catch { }
+            try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 } catch { $null = $_ }
             $remoteIconUrl = "https://raw.githubusercontent.com/alexphillips-dev/Teams-Always-Green/main/Meta/Icons/Tray_Icon.ico"
             $remoteIconPath = Join-Path $env:TEMP "TeamsAlwaysGreen-Welcome.ico"
             $wc = New-Object System.Net.WebClient
@@ -453,14 +457,15 @@ function Show-Welcome {
             if (Test-Path $remoteIconPath) { $welcomeIcon = New-Object System.Drawing.Icon($remoteIconPath) }
             $script:WelcomeTempIconPath = $remoteIconPath
         } catch {
-        }
+                    $null = $_
+                }
     }
     if ($welcomeIcon) {
         $iconBox.Image = $welcomeIcon.ToBitmap()
-        try { $form.Icon = $welcomeIcon } catch { }
+        try { $form.Icon = $welcomeIcon } catch { $null = $_ }
     } else {
         $iconBox.Image = [System.Drawing.SystemIcons]::Information.ToBitmap()
-        try { $form.Icon = [System.Drawing.SystemIcons]::Information } catch { }
+        try { $form.Icon = [System.Drawing.SystemIcons]::Information } catch { $null = $_ }
     }
 
     $title = New-Object System.Windows.Forms.Label
@@ -577,7 +582,7 @@ function Show-SetupSummary {
             $form.Icon = [System.Drawing.SystemIcons]::Application
         }
     } catch {
-        try { $form.Icon = [System.Drawing.SystemIcons]::Application } catch { }
+        try { $form.Icon = [System.Drawing.SystemIcons]::Application } catch { $null = $_ }
     }
 
     $header = New-Object System.Windows.Forms.Panel
@@ -597,7 +602,7 @@ function Show-SetupSummary {
             $iconBox.Image = [System.Drawing.SystemIcons]::Information.ToBitmap()
         }
     } catch {
-        try { $iconBox.Image = [System.Drawing.SystemIcons]::Information.ToBitmap() } catch { }
+        try { $iconBox.Image = [System.Drawing.SystemIcons]::Information.ToBitmap() } catch { $null = $_ }
     }
 
     $headerTitle = New-Object System.Windows.Forms.Label
@@ -691,7 +696,7 @@ function Show-SetupSummary {
     $valueLog.LinkBehavior = [System.Windows.Forms.LinkBehavior]::HoverUnderline
     $toolTip.SetToolTip($valueLog, $logPath)
     $valueLog.Add_LinkClicked({
-        try { Start-Process "notepad.exe" $logPath } catch { }
+        try { Start-Process "notepad.exe" $logPath } catch { $null = $_ }
     })
 
     & $addSummaryRow "Install Path:" $valueInstall
@@ -762,7 +767,7 @@ $setupOwner = New-SetupOwner
 $welcome = Show-Welcome -owner $setupOwner
 if (-not $welcome.Proceed) {
     Write-SetupLog "Install canceled at welcome screen."
-    Write-Host "Install canceled."
+    Write-Output "Install canceled."
     if ($setupOwner -and -not $setupOwner.IsDisposed) { $setupOwner.Close() }
     Cleanup-SetupTempFiles -success $true
     exit 1
@@ -776,7 +781,7 @@ if (-not $welcome.CreateShortcuts) {
 $step1 = Show-SetupPrompt -message "Step 1 of 4: Choose the install folder location." -title "Install Location" -buttons ([System.Windows.Forms.MessageBoxButtons]::OKCancel) -icon ([System.Windows.Forms.MessageBoxIcon]::Information) -owner $setupOwner
 if ($step1 -ne [System.Windows.Forms.DialogResult]::OK) {
     Write-SetupLog "Install canceled at install location step."
-    Write-Host "Install canceled."
+    Write-Output "Install canceled."
     if ($setupOwner -and -not $setupOwner.IsDisposed) { $setupOwner.Close() }
     exit 1
 }
@@ -789,7 +794,7 @@ $dialog.Description = "Select the parent folder (we will create a Teams Always G
 $dialog.SelectedPath = $defaultPath
 
 if ($dialog.ShowDialog($setupOwner) -ne [System.Windows.Forms.DialogResult]::OK) {
-    Write-Host "Install canceled."
+    Write-Output "Install canceled."
     if ($setupOwner -and -not $setupOwner.IsDisposed) { $setupOwner.Close() }
     exit 1
 }
@@ -808,13 +813,13 @@ $detectedScript = Join-Path $installPath "Script\Teams Always Green.ps1"
 if (Test-Path $detectedScript) {
     $choice = Show-SetupPrompt -message "An existing install was detected at:`n$installPath`n`nUpgrade/repair this install?" -title "Existing Install" -buttons ([System.Windows.Forms.MessageBoxButtons]::YesNoCancel) -icon ([System.Windows.Forms.MessageBoxIcon]::Question) -owner $setupOwner
     if ($choice -eq [System.Windows.Forms.DialogResult]::Cancel) {
-        Write-Host "Install canceled."
+        Write-Output "Install canceled."
         if ($setupOwner -and -not $setupOwner.IsDisposed) { $setupOwner.Close() }
         exit 1
     }
     if ($choice -eq [System.Windows.Forms.DialogResult]::No) {
         if ($dialog.ShowDialog($setupOwner) -ne [System.Windows.Forms.DialogResult]::OK) {
-            Write-Host "Install canceled."
+            Write-Output "Install canceled."
             if ($setupOwner -and -not $setupOwner.IsDisposed) { $setupOwner.Close() }
             exit 1
         }
@@ -861,9 +866,10 @@ if ($portableMode) {
         Set-Content -Path $portableMarker -Value ("PortableMode=1`nSetOn={0}" -f (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")) -Encoding ASCII
         Write-SetupLog "Portable mode enabled."
     } catch {
-    }
+                $null = $_
+            }
 } else {
-    try { if (Test-Path $portableMarker) { Remove-Item -Path $portableMarker -Force -ErrorAction SilentlyContinue } } catch { }
+    try { if (Test-Path $portableMarker) { Remove-Item -Path $portableMarker -Force -ErrorAction SilentlyContinue } } catch { $null = $_ }
 }
 
 $metaDir = Join-Path $installPath "Meta"
@@ -873,7 +879,7 @@ foreach ($legacyLocator in @(
     (Join-Path $installPath "Teams-Always-Green.settings.path.txt"),
     (Join-Path $installPath "Teams-Always-Green.log.path.txt")
 )) {
-    try { if (Test-Path $legacyLocator) { Remove-Item -Path $legacyLocator -Force -ErrorAction SilentlyContinue } } catch { }
+    try { if (Test-Path $legacyLocator) { Remove-Item -Path $legacyLocator -Force -ErrorAction SilentlyContinue } } catch { $null = $_ }
 }
 
 $rawBase = "https://raw.githubusercontent.com/alexphillips-dev/Teams-Always-Green/main"
@@ -903,7 +909,8 @@ $targetScript = Join-Path $installPath "Script\Teams Always Green.ps1"
 try {
     [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 } catch {
-}
+            $null = $_
+        }
 
 $ui = New-ProgressForm
 Update-Progress $ui 0 1 "Step 2 of 4: Preparing download..."
@@ -975,7 +982,8 @@ foreach ($file in $filesToDownload) {
             $ui.BytesDownloaded += (Get-Item $targetPath).Length
             Update-Progress $ui $index $total $status
         } catch {
-        }
+                    $null = $_
+                }
         [void]$downloadedFiles.Add($targetPath)
     }
 
@@ -1017,7 +1025,7 @@ foreach ($file in $filesToDownload) {
 
 if ($ui -and $ui.Form) {
     if ($ui.Cancelled) {
-        try { $ui.Form.Close() } catch { }
+        try { $ui.Form.Close() } catch { $null = $_ }
     } else {
         Write-SetupLog "Download completed."
         Update-Progress $ui $total $total "Step 2 of 4: Download complete. Click Next to continue."
@@ -1027,7 +1035,7 @@ if ($ui -and $ui.Form) {
 
 if ($ui.Cancelled) {
     foreach ($path in $downloadedFiles) {
-        try { Remove-Item -Path $path -Force -ErrorAction Stop } catch { }
+        try { Remove-Item -Path $path -Force -ErrorAction Stop } catch { $null = $_ }
     }
     Show-SetupError "Install canceled during download. Partial files were removed."
     exit 1
@@ -1212,7 +1220,7 @@ function Show-SetupWizard {
     $stepper.Font = New-Object System.Drawing.Font("Segoe UI", 8.5, [System.Drawing.FontStyle]::Regular)
     $stepper.ForeColor = [System.Drawing.Color]::FromArgb(90, 90, 90)
     $stepper.Location = New-Object System.Drawing.Point(120, 14)
-    $stepper.Text = "Step 1 of 4 · Welcome"
+    $stepper.Text = "Step 1 of 4 Ã‚Â· Welcome"
 
     $panelWelcome = New-Object System.Windows.Forms.Panel
     $panelWelcome.Location = New-Object System.Drawing.Point(16, 44)
@@ -1234,11 +1242,11 @@ function Show-SetupWizard {
     $localRoot = Get-QuickSetupSourceRoot
     if ($localRoot) { $iconPath = Join-Path $localRoot "Meta\Icons\Tray_Icon.ico" }
     if ($iconPath -and (Test-Path $iconPath)) {
-        try { $welcomeIcon = New-Object System.Drawing.Icon($iconPath) } catch { }
+        try { $welcomeIcon = New-Object System.Drawing.Icon($iconPath) } catch { $null = $_ }
     }
     if (-not $welcomeIcon) {
         try {
-            try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 } catch { }
+            try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 } catch { $null = $_ }
             $remoteIconUrl = "https://raw.githubusercontent.com/alexphillips-dev/Teams-Always-Green/main/Meta/Icons/Tray_Icon.ico"
             $remoteIconPath = Join-Path $env:TEMP "TeamsAlwaysGreen-Welcome.ico"
             $wc = New-Object System.Net.WebClient
@@ -1246,11 +1254,12 @@ function Show-SetupWizard {
             if (Test-Path $remoteIconPath) { $welcomeIcon = New-Object System.Drawing.Icon($remoteIconPath) }
             $script:WelcomeTempIconPath = $remoteIconPath
         } catch {
-        }
+                    $null = $_
+                }
     }
     if ($welcomeIcon) {
         $welcomeIconBox.Image = $welcomeIcon.ToBitmap()
-        try { $form.Icon = $welcomeIcon } catch { }
+        try { $form.Icon = $welcomeIcon } catch { $null = $_ }
     } else {
         $welcomeIconBox.Image = [System.Drawing.SystemIcons]::Information.ToBitmap()
     }
@@ -1567,7 +1576,7 @@ function Show-SetupWizard {
     $copyLog.Text = "Copy log path"
     $copyLog.Width = 110
     $copyLog.Location = New-Object System.Drawing.Point(0, 280)
-    $copyLog.Add_Click({ try { [System.Windows.Forms.Clipboard]::SetText($logPath) } catch { } })
+    $copyLog.Add_Click({ try { [System.Windows.Forms.Clipboard]::SetText($logPath) } catch { $null = $_ } })
 
     $openAfter = New-Object System.Windows.Forms.CheckBox
     $openAfter.Text = "Open install folder after finish"
@@ -1643,10 +1652,10 @@ function Show-SetupWizard {
         $panelDownload.Visible = ($index -eq 2)
         $panelSummary.Visible = ($index -eq 3)
         switch ($index) {
-            0 { $stepper.Text = "Step 1 of 4 · Welcome" }
-            1 { $stepper.Text = "Step 1 of 4 · Location" }
-            2 { $stepper.Text = "Step 2 of 4 · Download" }
-            3 { $stepper.Text = "Step 4 of 4 · Summary" }
+            0 { $stepper.Text = "Step 1 of 4 Ã‚Â· Welcome" }
+            1 { $stepper.Text = "Step 1 of 4 Ã‚Â· Location" }
+            2 { $stepper.Text = "Step 2 of 4 Ã‚Â· Download" }
+            3 { $stepper.Text = "Step 4 of 4 Ã‚Â· Summary" }
         }
         if ($index -eq 3) {
             $form.Height = $summaryFormHeight
@@ -1684,7 +1693,6 @@ function Show-SetupWizard {
                 Show-SetupInfo "Download is still running. Please wait until it finishes."
                 return
             }
-            $allowSummary = $true
             $sumInstall.Text = $state.InstallPath
             $sumMode.Text = if ($state.PortableMode) { "Portable (no shortcuts)" } else { "Standard" }
             $sumIntegrity.Text = $state.IntegrityStatus
@@ -1715,7 +1723,7 @@ function Show-SetupWizard {
                     Show-SetupInfo "Not enough free space in the selected drive (need at least 200 MB)."
                     return
                 }
-            } catch { }
+            } catch { $null = $_ }
             try {
                 $probePath = Join-Path $selectedBase ("write-test-{0}.tmp" -f [Guid]::NewGuid().ToString("N"))
                 Set-Content -Path $probePath -Value "ok" -Encoding ASCII
@@ -1761,9 +1769,10 @@ function Show-SetupWizard {
                     Set-Content -Path $portableMarker -Value ("PortableMode=1`nSetOn={0}" -f (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")) -Encoding ASCII
                     Write-SetupLog "Portable mode enabled."
                 } catch {
-                }
+                            $null = $_
+                        }
             } else {
-                try { if (Test-Path $portableMarker) { Remove-Item -Path $portableMarker -Force -ErrorAction SilentlyContinue } } catch { }
+                try { if (Test-Path $portableMarker) { Remove-Item -Path $portableMarker -Force -ErrorAction SilentlyContinue } } catch { $null = $_ }
             }
             foreach ($legacyLocator in @(
                 (Join-Path $metaDir "Teams-Always-Green.settings.path.txt"),
@@ -1771,7 +1780,7 @@ function Show-SetupWizard {
                 (Join-Path $state.InstallPath "Teams-Always-Green.settings.path.txt"),
                 (Join-Path $state.InstallPath "Teams-Always-Green.log.path.txt")
             )) {
-                try { if (Test-Path $legacyLocator) { Remove-Item -Path $legacyLocator -Force -ErrorAction SilentlyContinue } } catch { }
+                try { if (Test-Path $legacyLocator) { Remove-Item -Path $legacyLocator -Force -ErrorAction SilentlyContinue } } catch { $null = $_ }
             }
 
             $localRoot = Get-QuickSetupSourceRoot
@@ -1895,7 +1904,7 @@ function Show-SetupWizard {
 
             if ($downloadUi.Cancelled -or $state.Cancelled) {
                 foreach ($path in $downloaded) {
-                    try { Remove-Item -Path $path -Force -ErrorAction Stop } catch { }
+                    try { Remove-Item -Path $path -Force -ErrorAction Stop } catch { $null = $_ }
                 }
                 $state.Cancelled = $true
                 $form.Close()
@@ -1946,7 +1955,8 @@ $script:QuickSetupFiles = @(
 try {
     [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 } catch {
-}
+            $null = $_
+        }
 
 Write-SetupLog "Quick setup started."
 $setupOwner = New-SetupOwner
@@ -2007,7 +2017,8 @@ if ($wizard.OpenAfterFinish -and $wizard.Action -ne "Folder") {
     try {
         Start-Process "explorer.exe" $installPath
     } catch {
-    }
+                $null = $_
+            }
 }
 
 Cleanup-SetupTempFiles -success $true
@@ -2113,14 +2124,14 @@ if (-not $portableMode) {
             $shortcutsCreated += "Uninstall"
         }
     } catch {
-        Write-Host "Failed to create shortcuts: $($_.Exception.Message)"
+        Write-Warning ("Failed to create shortcuts: {0}" -f $_.Exception.Message)
     }
 } else {
     Write-SetupLog "Portable mode: shortcuts not created."
 }
 
-Write-Host "Installed Teams Always Green to: $installPath"
-Write-Host "Setup log: $logPath"
+Write-Output "Installed Teams Always Green to: $installPath"
+Write-Output "Setup log: $logPath"
 if (-not $portableMode) {
     $pinMessage = @"
 Teams Always Green runs in the system tray.

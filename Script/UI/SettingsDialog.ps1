@@ -13,7 +13,7 @@ function Show-SettingsDialog {
             try {
                 $settingsIconPath = Join-Path $script:SettingsIconRoot "Meta\\Icons\\Settings_Icon.ico"
                 if (Test-Path $settingsIconPath) {
-                    try { $script:SettingsForm.Icon = New-Object System.Drawing.Icon($settingsIconPath) } catch { }
+                    try { $script:SettingsForm.Icon = New-Object System.Drawing.Icon($settingsIconPath) } catch { $null = $_ }
                 } elseif ($notifyIcon -and $notifyIcon.Icon) {
                     try { $script:SettingsForm.Icon = New-Object System.Drawing.Icon($notifyIcon.Icon, 32, 32) } catch { $script:SettingsForm.Icon = [System.Drawing.SystemIcons]::Application }
                 }
@@ -31,7 +31,7 @@ function Show-SettingsDialog {
                 Write-Log "UI: Settings open failed while reusing existing form." "ERROR" $_.Exception "Settings-Dialog"
                 try {
                     $script:SettingsForm.Dispose()
-                } catch { }
+                } catch { $null = $_ }
                 $script:SettingsForm = $null
                 $reuseOk = $false
             }
@@ -93,9 +93,10 @@ function Show-SettingsDialog {
     }
     Set-FormTaskbarIcon $form $settingsIconPath
     $form.Add_Shown({
-        param($sender, $e)
+        param($uiSender, $uiEvent)
+        $null = $uiEvent
         $shownIconPath = Join-Path $script:SettingsIconRoot "Meta\\Icons\\Settings_Icon.ico"
-        Set-FormTaskbarIcon $sender $shownIconPath
+        Set-FormTaskbarIcon $uiSender $shownIconPath
     })
 
     $mainPanel = New-Object System.Windows.Forms.Panel
@@ -962,13 +963,13 @@ function Show-SettingsDialog {
             $state.LastCrash = $null
             $state.OverrideMinimalMode = $true
             Save-CrashState $state
-        } catch { }
+        } catch { $null = $_ }
         $script:MinimalModeActive = $false
         $script:MinimalModeReason = $null
         $script:SettingsAutoCorrected = $false
         $script:SettingsAutoCorrectedMessage = $null
         if (Get-Command -Name Sync-MinimalModeState -ErrorAction SilentlyContinue) {
-            try { Sync-MinimalModeState "SettingsBannerRestoreDefaults" } catch { }
+            try { Sync-MinimalModeState "SettingsBannerRestoreDefaults" } catch { $null = $_ }
         }
         if ($script:UpdateSettingsBanner) { & $script:UpdateSettingsBanner }
         Write-Log "Settings restored from banner (defaults applied)." "WARN" $null "Settings"
@@ -992,12 +993,12 @@ function Show-SettingsDialog {
             $state.LastCrash = $null
             $state.OverrideMinimalMode = $true
             Save-CrashState $state
-        } catch { }
+        } catch { $null = $_ }
         $script:OverrideMinimalMode = $true
         $script:MinimalModeActive = $false
         $script:MinimalModeReason = $null
         if (Get-Command -Name Sync-MinimalModeState -ErrorAction SilentlyContinue) {
-            try { Sync-MinimalModeState "SettingsBannerExitMinimalMode" } catch { }
+            try { Sync-MinimalModeState "SettingsBannerExitMinimalMode" } catch { $null = $_ }
         }
         if ($script:UpdateSettingsBanner) { & $script:UpdateSettingsBanner }
         Write-Log "Minimal mode cleared by user." "WARN" $null "Settings"
@@ -1023,7 +1024,7 @@ function Show-SettingsDialog {
         $script:MinimalModeActive = $false
         $script:MinimalModeReason = $null
         if (Get-Command -Name Sync-MinimalModeState -ErrorAction SilentlyContinue) {
-            try { Sync-MinimalModeState "SettingsBannerResetCrashState" } catch { }
+            try { Sync-MinimalModeState "SettingsBannerResetCrashState" } catch { $null = $_ }
         }
         if ($script:UpdateSettingsBanner) { & $script:UpdateSettingsBanner }
         if (Get-Command -Name Show-ActionToast -ErrorAction SilentlyContinue) { Show-ActionToast "Crash state reset" }
@@ -1077,7 +1078,8 @@ function Show-SettingsDialog {
                         }
                     }
                 } catch {
-                }
+                            $null = $_
+                        }
             }
         }
         if ($script:SettingsAutoCorrected) {
@@ -1131,7 +1133,7 @@ function Show-SettingsDialog {
                 Save-SettingsImmediate $settings
                 $script:SettingsAutoCorrected = $false
                 $script:SettingsAutoCorrectedMessage = $null
-            } catch { }
+            } catch { $null = $_ }
         }
         if ($tamperVisible -and $settings -and ($settings.PSObject.Properties.Name -contains "SettingsTamperNoticeSeen")) {
             try {
@@ -1140,7 +1142,7 @@ function Show-SettingsDialog {
                 Save-SettingsImmediate $settings
                 $script:SettingsTampered = $false
                 $script:SettingsTamperMessage = $null
-            } catch { }
+            } catch { $null = $_ }
         }
     }
 
@@ -1356,7 +1358,8 @@ function Show-SettingsDialog {
                 $headerPanel.Controls.Add($iconBox, $columnIndex, 0)
                 $columnIndex++
             } catch {
-            }
+                        $null = $_
+                    }
         }
 
         $headerLabel = New-Object System.Windows.Forms.Label
@@ -1481,11 +1484,11 @@ function Show-SettingsDialog {
         $items = @(
             [pscustomobject]@{ Code = "auto"; Label = (L "Auto (System)") }
             [pscustomobject]@{ Code = "en"; Label = (L "English") }
-            [pscustomobject]@{ Code = "es"; Label = (L "Español") }
-            [pscustomobject]@{ Code = "fr"; Label = (L "Français") }
+            [pscustomobject]@{ Code = "es"; Label = (L "EspaÃ±ol") }
+            [pscustomobject]@{ Code = "fr"; Label = (L "FranÃ§ais") }
             [pscustomobject]@{ Code = "de"; Label = (L "Deutsch") }
             [pscustomobject]@{ Code = "it"; Label = (L "Italiano") }
-            [pscustomobject]@{ Code = "pt"; Label = (L "Português") }
+            [pscustomobject]@{ Code = "pt"; Label = (L "PortuguÃªs") }
             [pscustomobject]@{ Code = "nl"; Label = (L "Nederlands") }
             [pscustomobject]@{ Code = "pl"; Label = (L "Polski") }
         )
@@ -1567,7 +1570,8 @@ function Show-SettingsDialog {
                     $script:SettingsForm.PerformLayout()
                     $script:SettingsForm.Refresh()
                 } catch {
-                }
+                            $null = $_
+                        }
             }
             if ($script:TrayMenu) { Localize-MenuItems $script:TrayMenu.Items }
             if (Get-Command Update-TrayLabels -ErrorAction SilentlyContinue) { Update-TrayLabels }
@@ -2654,7 +2658,7 @@ $clearLogButton = New-Object System.Windows.Forms.Button
             }
             return $translated
         }
-        if ($script:SettingsDirtyBaseText -ne $null) { $script:SettingsDirtyBaseText = (L "Unsaved changes" "Unsaved changes") }
+        if ($null -ne $script:SettingsDirtyBaseText) { $script:SettingsDirtyBaseText = (L "Unsaved changes" "Unsaved changes") }
         if ($script:SettingsSearchLabel) { $script:SettingsSearchLabel.Text = (L "Search settings:" "Search settings:") }
         if ($script:SettingsStatusLabel) { $script:SettingsStatusLabel.Text = (L "Status") }
         if ($script:SettingsNextLabel) { $script:SettingsNextLabel.Text = (L "Next Toggle") }
@@ -2978,7 +2982,7 @@ $clearLogButton = New-Object System.Windows.Forms.Button
             }
             $lines | Set-Content -Path $dialog.FileName -Encoding UTF8
             $exportSize = 0
-            try { $exportSize = (Get-Item -Path $dialog.FileName).Length } catch { }
+            try { $exportSize = (Get-Item -Path $dialog.FileName).Length } catch { $null = $_ }
             Write-Log "Exported diagnostics to $($dialog.FileName) ($exportSize bytes)." "INFO" $null "Export-Diagnostics"
             if ($script:ShowDiagnosticsExportFollowup) { & $script:ShowDiagnosticsExportFollowup $dialog.FileName ([bool]$settings.ScrubDiagnostics) }
             if (Get-Command -Name Show-ActionToast -ErrorAction SilentlyContinue) { Show-ActionToast "Diagnostics exported" }
@@ -3121,7 +3125,7 @@ $clearLogButton = New-Object System.Windows.Forms.Button
             }
             $lines | Set-Content -Path $dialog.FileName -Encoding UTF8
             $reportSize = 0
-            try { $reportSize = (Get-Item -Path $dialog.FileName).Length } catch { }
+            try { $reportSize = (Get-Item -Path $dialog.FileName).Length } catch { $null = $_ }
             Write-Log "Exported issue report to $($dialog.FileName) ($reportSize bytes)." "INFO" $null "Diagnostics"
             if (Get-Command -Name Show-ActionToast -ErrorAction SilentlyContinue) { Show-ActionToast "Issue report exported" }
         }
@@ -3631,7 +3635,8 @@ $clearLogButton = New-Object System.Windows.Forms.Button
             $aboutTitleIconBox.Image = $aboutTitleIcon.ToBitmap()
             $aboutTitlePanel.Controls.Add($aboutTitleIconBox) | Out-Null
         } catch {
-        }
+                    $null = $_
+                }
     }
 
     $aboutTitleLabel = New-Object System.Windows.Forms.Label
@@ -3784,23 +3789,22 @@ $clearLogButton = New-Object System.Windows.Forms.Button
             }
             $script:AboutUpdateJobTimeoutSec = $jobTimeoutSec
             if ($script:AboutUpdatePollTimer) {
-                try { $script:AboutUpdatePollTimer.Stop() } catch { }
-                try { $script:AboutUpdatePollTimer.Dispose() } catch { }
+                try { $script:AboutUpdatePollTimer.Stop() } catch { $null = $_ }
+                try { $script:AboutUpdatePollTimer.Dispose() } catch { $null = $_ }
                 $script:AboutUpdatePollTimer = $null
             }
             if ($script:AboutUpdateJob) {
-                try { Remove-Job -Job $script:AboutUpdateJob -Force -ErrorAction SilentlyContinue } catch { }
+                try { Remove-Job -Job $script:AboutUpdateJob -Force -ErrorAction SilentlyContinue } catch { $null = $_ }
                 $script:AboutUpdateJob = $null
             }
             $script:AboutUpdateJobStartedUtc = [DateTime]::UtcNow
 
             $script:AboutUpdateJob = Start-Job -ScriptBlock {
-                param([string]$owner, [string]$repo, [int]$timeoutSec, [int]$maxAttempts)
-                try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 } catch { }
-                $uri = "https://api.github.com/repos/$owner/$repo/releases/latest"
+                try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 } catch { $null = $_ }
+                $uri = "https://api.github.com/repos/$using:owner/$using:repo/releases/latest"
                 $headers = @{ "User-Agent" = "TeamsAlwaysGreen" }
-                $attempts = [Math]::Max(1, $maxAttempts)
-                $timeout = [Math]::Max(3, $timeoutSec)
+                $attempts = [Math]::Max(1, [int]$using:maxAttempts)
+                $timeout = [Math]::Max(3, [int]$using:timeoutSec)
                 $lastError = ""
                 for ($attempt = 1; $attempt -le $attempts; $attempt++) {
                     try {
@@ -3849,8 +3853,8 @@ $clearLogButton = New-Object System.Windows.Forms.Button
                         }
                         $elapsedSeconds = ([DateTime]::UtcNow - $script:AboutUpdateJobStartedUtc).TotalSeconds
                         if ($elapsedSeconds -ge $effectiveJobTimeoutSec) {
-                            try { Stop-Job -Job $script:AboutUpdateJob -ErrorAction SilentlyContinue } catch { }
-                            try { Remove-Job -Job $script:AboutUpdateJob -Force -ErrorAction SilentlyContinue } catch { }
+                            try { Stop-Job -Job $script:AboutUpdateJob -ErrorAction SilentlyContinue } catch { $null = $_ }
+                            try { Remove-Job -Job $script:AboutUpdateJob -Force -ErrorAction SilentlyContinue } catch { $null = $_ }
                             $script:AboutUpdateJob = $null
                             $script:AboutUpdateJobStartedUtc = $null
                             if ($script:AboutUpdatePollTimer) {
@@ -3875,8 +3879,8 @@ $clearLogButton = New-Object System.Windows.Forms.Button
                             $script:AboutUpdatePollTimer = $null
                         }
                         $result = $null
-                        try { $result = Receive-Job -Job $script:AboutUpdateJob -ErrorAction SilentlyContinue | Select-Object -First 1 } catch { }
-                        try { Remove-Job -Job $script:AboutUpdateJob -Force -ErrorAction SilentlyContinue } catch { }
+                        try { $result = Receive-Job -Job $script:AboutUpdateJob -ErrorAction SilentlyContinue | Select-Object -First 1 } catch { $null = $_ }
+                        try { Remove-Job -Job $script:AboutUpdateJob -Force -ErrorAction SilentlyContinue } catch { $null = $_ }
                         $script:AboutUpdateJob = $null
                         $script:AboutUpdateJobStartedUtc = $null
 
@@ -4489,11 +4493,11 @@ $clearLogButton = New-Object System.Windows.Forms.Button
             $script:profileBox.SelectedIndex = 0
         }
         if ($script:profileReadOnlyBox) {
-            $profile = $null
+            $profileSnapshot = $null
             if (-not [string]::IsNullOrWhiteSpace($selected) -and (Get-ObjectKeys $settings.Profiles) -contains $selected) {
-                $profile = $settings.Profiles[$selected]
+                $profileSnapshot = $settings.Profiles[$selected]
             }
-            $script:profileReadOnlyBox.Checked = (Get-ProfileReadOnly $profile)
+            $script:profileReadOnlyBox.Checked = (Get-ProfileReadOnly $profileSnapshot)
         }
         $script:SettingsIsApplying = $false
         if ($script:UpdateRestoreDeletedProfileButtonState) { & $script:UpdateRestoreDeletedProfileButtonState }
@@ -4509,7 +4513,7 @@ $clearLogButton = New-Object System.Windows.Forms.Button
 
     $script:profileBox.Add_SelectedIndexChanged({
         if ($script:SettingsIsApplying) { return }
-        if ($script:profileBox.SelectedItem -eq $null) { return }
+        if ($null -eq $script:profileBox.SelectedItem) { return }
         $newName = [string]$script:profileBox.SelectedItem
         if (-not ((Get-ObjectKeys $settings.Profiles) -contains $newName)) { return }
         if ($settings.ActiveProfile -eq $newName) { return }
@@ -4542,42 +4546,42 @@ $clearLogButton = New-Object System.Windows.Forms.Button
     })
 
     $script:getProfileFromControls = {
-        $profile = [ordered]@{}
-        $profile["IntervalSeconds"] = [int]$script:intervalBox.Value
-        $profile["RememberChoice"] = [bool]$script:rememberChoiceBox.Checked
-        $profile["StartOnLaunch"] = [bool]$script:startOnLaunchBox.Checked
-        $profile["RunOnceOnLaunch"] = [bool]$script:runOnceOnLaunchBox.Checked
-        $profile["QuietMode"] = [bool]$script:quietModeBox.Checked
+        $profileSnapshot = [ordered]@{}
+        $profileSnapshot["IntervalSeconds"] = [int]$script:intervalBox.Value
+        $profileSnapshot["RememberChoice"] = [bool]$script:rememberChoiceBox.Checked
+        $profileSnapshot["StartOnLaunch"] = [bool]$script:startOnLaunchBox.Checked
+        $profileSnapshot["RunOnceOnLaunch"] = [bool]$script:runOnceOnLaunchBox.Checked
+        $profileSnapshot["QuietMode"] = [bool]$script:quietModeBox.Checked
         $selectedTooltip = $script:tooltipStyleBox.SelectedItem
         if ($selectedTooltip -and $selectedTooltip.PSObject.Properties.Name -contains "Code") {
-            $profile["TooltipStyle"] = [string]$selectedTooltip.Code
+            $profileSnapshot["TooltipStyle"] = [string]$selectedTooltip.Code
         } else {
-            $profile["TooltipStyle"] = [string]$selectedTooltip
+            $profileSnapshot["TooltipStyle"] = [string]$selectedTooltip
         }
-        $profile["MinimalTrayTooltip"] = ([string]$profile["TooltipStyle"] -eq "Minimal")
-        $profile["FontSize"] = [int]$script:fontSizeBox.Value
-        $profile["SettingsFontSize"] = [int]$script:settingsFontSizeBox.Value
-        $profile["StatusColorRunning"] = Convert-ColorToString $script:statusRunningColorPanel.BackColor
-        $profile["StatusColorPaused"] = Convert-ColorToString $script:statusPausedColorPanel.BackColor
-        $profile["StatusColorStopped"] = Convert-ColorToString $script:statusStoppedColorPanel.BackColor
-        $profile["CompactMode"] = [bool]$script:compactModeBox.Checked
-        $profile["DisableBalloonTips"] = [bool]$script:disableBalloonBox.Checked
-        $profile["PauseDurationsMinutes"] = [string]$script:pauseDurationsBox.Text
-        $profile["ScheduleOverrideEnabled"] = [bool]$script:scheduleOverrideBox.Checked
-        $profile["ScheduleEnabled"] = [bool]$script:scheduleEnabledBox.Checked
-        $profile["ScheduleStart"] = $script:scheduleStartBox.Value.ToString("HH:mm")
-        $profile["ScheduleEnd"] = $script:scheduleEndBox.Value.ToString("HH:mm")
-        $profile["ScheduleWeekdays"] = [string]$script:scheduleWeekdaysBox.Text
-        $profile["ScheduleSuspendUntil"] = if ($script:scheduleSuspendUntilBox.Checked) { $script:scheduleSuspendUntilBox.Value.ToString("o") } else { $null }
-        $profile["SafeModeEnabled"] = [bool]$script:SafeModeEnabledBox.Checked
-        $profile["SafeModeFailureThreshold"] = [int]$script:safeModeThresholdBox.Value
-        $profile["HotkeyToggle"] = [string]$script:hotkeyToggleBox.Text
-        $profile["HotkeyStartStop"] = [string]$script:hotkeyStartStopBox.Text
-        $profile["HotkeyPauseResume"] = [string]$script:hotkeyPauseResumeBox.Text
-        $profile["LogMaxBytes"] = [int]($script:logMaxBox.Value * 1024)
-        $profile["ProfileSchemaVersion"] = $script:ProfileSchemaVersion
-        $profile["ReadOnly"] = if ($script:profileReadOnlyBox) { [bool]$script:profileReadOnlyBox.Checked } else { $false }
-        return $profile
+        $profileSnapshot["MinimalTrayTooltip"] = ([string]$profileSnapshot["TooltipStyle"] -eq "Minimal")
+        $profileSnapshot["FontSize"] = [int]$script:fontSizeBox.Value
+        $profileSnapshot["SettingsFontSize"] = [int]$script:settingsFontSizeBox.Value
+        $profileSnapshot["StatusColorRunning"] = Convert-ColorToString $script:statusRunningColorPanel.BackColor
+        $profileSnapshot["StatusColorPaused"] = Convert-ColorToString $script:statusPausedColorPanel.BackColor
+        $profileSnapshot["StatusColorStopped"] = Convert-ColorToString $script:statusStoppedColorPanel.BackColor
+        $profileSnapshot["CompactMode"] = [bool]$script:compactModeBox.Checked
+        $profileSnapshot["DisableBalloonTips"] = [bool]$script:disableBalloonBox.Checked
+        $profileSnapshot["PauseDurationsMinutes"] = [string]$script:pauseDurationsBox.Text
+        $profileSnapshot["ScheduleOverrideEnabled"] = [bool]$script:scheduleOverrideBox.Checked
+        $profileSnapshot["ScheduleEnabled"] = [bool]$script:scheduleEnabledBox.Checked
+        $profileSnapshot["ScheduleStart"] = $script:scheduleStartBox.Value.ToString("HH:mm")
+        $profileSnapshot["ScheduleEnd"] = $script:scheduleEndBox.Value.ToString("HH:mm")
+        $profileSnapshot["ScheduleWeekdays"] = [string]$script:scheduleWeekdaysBox.Text
+        $profileSnapshot["ScheduleSuspendUntil"] = if ($script:scheduleSuspendUntilBox.Checked) { $script:scheduleSuspendUntilBox.Value.ToString("o") } else { $null }
+        $profileSnapshot["SafeModeEnabled"] = [bool]$script:SafeModeEnabledBox.Checked
+        $profileSnapshot["SafeModeFailureThreshold"] = [int]$script:safeModeThresholdBox.Value
+        $profileSnapshot["HotkeyToggle"] = [string]$script:hotkeyToggleBox.Text
+        $profileSnapshot["HotkeyStartStop"] = [string]$script:hotkeyStartStopBox.Text
+        $profileSnapshot["HotkeyPauseResume"] = [string]$script:hotkeyPauseResumeBox.Text
+        $profileSnapshot["LogMaxBytes"] = [int]($script:logMaxBox.Value * 1024)
+        $profileSnapshot["ProfileSchemaVersion"] = $script:ProfileSchemaVersion
+        $profileSnapshot["ReadOnly"] = if ($script:profileReadOnlyBox) { [bool]$script:profileReadOnlyBox.Checked } else { $false }
+        return $profileSnapshot
     }
 
     $script:EnsureProfilesHashtable = {
@@ -4672,7 +4676,7 @@ $clearLogButton = New-Object System.Windows.Forms.Button
     $saveProfileButton.Add_Click({
         try {
             if ($script:EnsureProfilesHashtable) { & $script:EnsureProfilesHashtable }
-            if ($script:profileBox.SelectedItem -eq $null) { return }
+            if ($null -eq $script:profileBox.SelectedItem) { return }
             $sw = [System.Diagnostics.Stopwatch]::StartNew()
             $name = [string]$script:profileBox.SelectedItem
             if (-not (& $script:ConfirmProfileWritable $name "Save")) { return }
@@ -4750,7 +4754,7 @@ $clearLogButton = New-Object System.Windows.Forms.Button
 
     $duplicateProfileButton.Add_Click({
         if ($script:EnsureProfilesHashtable) { & $script:EnsureProfilesHashtable }
-        if ($script:profileBox.SelectedItem -eq $null) { return }
+        if ($null -eq $script:profileBox.SelectedItem) { return }
         $sw = [System.Diagnostics.Stopwatch]::StartNew()
         $sourceName = [string]$script:profileBox.SelectedItem
         $defaultName = "$sourceName Copy"
@@ -4781,7 +4785,7 @@ $clearLogButton = New-Object System.Windows.Forms.Button
 
     $loadProfileButton.Add_Click({
         if ($script:EnsureProfilesHashtable) { & $script:EnsureProfilesHashtable }
-        if ($script:profileBox.SelectedItem -eq $null) { return }
+        if ($null -eq $script:profileBox.SelectedItem) { return }
         $sw = [System.Diagnostics.Stopwatch]::StartNew()
         $name = [string]$script:profileBox.SelectedItem
         if (-not ((Get-ObjectKeys $settings.Profiles) -contains $name)) { return }
@@ -4830,7 +4834,7 @@ $clearLogButton = New-Object System.Windows.Forms.Button
 
     $renameProfileButton.Add_Click({
         if ($script:EnsureProfilesHashtable) { & $script:EnsureProfilesHashtable }
-        if ($script:profileBox.SelectedItem -eq $null) { return }
+        if ($null -eq $script:profileBox.SelectedItem) { return }
         $sw = [System.Diagnostics.Stopwatch]::StartNew()
         $oldName = [string]$script:profileBox.SelectedItem
         if (-not (& $script:ConfirmProfileWritable $oldName "Rename")) { return }
@@ -4865,7 +4869,7 @@ $clearLogButton = New-Object System.Windows.Forms.Button
 
     $deleteProfileButton.Add_Click({
         if ($script:EnsureProfilesHashtable) { & $script:EnsureProfilesHashtable }
-        if ($script:profileBox.SelectedItem -eq $null) { return }
+        if ($null -eq $script:profileBox.SelectedItem) { return }
         $sw = [System.Diagnostics.Stopwatch]::StartNew()
         $name = [string]$script:profileBox.SelectedItem
         if (-not (& $script:ConfirmProfileWritable $name "Delete")) { return }
@@ -5095,7 +5099,7 @@ $clearLogButton = New-Object System.Windows.Forms.Button
 
     $exportProfileButton.Add_Click({
         if ($script:EnsureProfilesHashtable) { & $script:EnsureProfilesHashtable }
-        if ($script:profileBox.SelectedItem -eq $null) { return }
+        if ($null -eq $script:profileBox.SelectedItem) { return }
         $name = [string]$script:profileBox.SelectedItem
         if (-not ((Get-ObjectKeys $settings.Profiles) -contains $name)) { return }
         $dialog = New-Object System.Windows.Forms.SaveFileDialog
@@ -5690,7 +5694,7 @@ $clearLogButton = New-Object System.Windows.Forms.Button
                     }
                     if ($node.Height -lt 28) { $node.Height = 28 }
                 }
-            } catch { }
+            } catch { $null = $_ }
             foreach ($child in $node.Controls) {
                 & $walk $child
             }
@@ -5718,7 +5722,7 @@ $clearLogButton = New-Object System.Windows.Forms.Button
             try {
                 $script:LastSavedLabel.Text = "Last saved: $(Format-DateTime (Get-Item -Path $settingsPath).LastWriteTime)$suffix"
                 return
-            } catch { }
+            } catch { $null = $_ }
         }
         $script:LastSavedLabel.Text = "Last saved: Never$suffix"
     }
@@ -5730,7 +5734,8 @@ $clearLogButton = New-Object System.Windows.Forms.Button
             [System.Windows.Forms.Application]::UseWaitCursor = $isBusy
             [System.Windows.Forms.Application]::DoEvents()
         } catch {
-        }
+                    $null = $_
+                }
     }
     $script:GetPendingSettingsDiffKeys = {
         if (-not $script:CollectSettingsFromControls -or (($script:CollectSettingsFromControls) -isnot [scriptblock])) { return @() }
@@ -6599,7 +6604,7 @@ $clearLogButton = New-Object System.Windows.Forms.Button
                 if ($script:ApplyAccessibilityDefaults) { & $script:ApplyAccessibilityDefaults $form }
                 Set-SettingsDirty $false
                 if ($script:ClearProfileDirtyIndicator) { & $script:ClearProfileDirtyIndicator }
-            } catch { }
+            } catch { $null = $_ }
         })
     }
 
@@ -6794,7 +6799,6 @@ $clearLogButton = New-Object System.Windows.Forms.Button
         $pauseDurations = $null
         $scheduleStart = $null
         $scheduleEnd = $null
-        $scheduleWeekdays = $null
         $scheduleSuspendUntil = $null
         $safeModeThreshold = $null
         $hotkeyToggle = $null
@@ -6848,7 +6852,6 @@ $clearLogButton = New-Object System.Windows.Forms.Button
             if (-not (Try-ParseTime $script:scheduleEndBox.Text ([ref]$scheduleEnd))) {
                 $errors += (Set-SettingsFieldError "Schedule End" "Schedule End must be a valid time (HH:mm).")
             }
-            $scheduleWeekdays = [string]$script:scheduleWeekdaysBox.Text
         }
         if ($script:scheduleSuspendUntilBox.Checked) {
             $scheduleSuspendUntil = $script:scheduleSuspendUntilBox.Value
@@ -7086,14 +7089,16 @@ $clearLogButton = New-Object System.Windows.Forms.Button
                 }
             }
         } catch {
-        }
+                    $null = $_
+                }
         try {
             $prop = $source.PSObject.Properties[$key]
             if ($prop) {
                 return [pscustomobject]@{ Exists = $true; Value = $prop.Value }
             }
         } catch {
-        }
+                    $null = $_
+                }
         return [pscustomobject]@{ Exists = $false; Value = $null }
     }
 
@@ -7146,7 +7151,8 @@ $clearLogButton = New-Object System.Windows.Forms.Button
                 }
             }
         } catch {
-        }
+                    $null = $_
+                }
 
         if ($key -like "Schedule*" -or $key -like "Pause*") { return "Scheduling" }
         if ($key -like "Hotkey*") { return "Hotkeys" }
@@ -7220,19 +7226,20 @@ $clearLogButton = New-Object System.Windows.Forms.Button
         $dialog.AcceptButton = $okButton
         $dialog.CancelButton = $okButton
         $dialog.Add_Shown({
-            try { $detailsBox.Select(0, 0) } catch { }
-            try { $okButton.Focus() } catch { }
+            try { $detailsBox.Select(0, 0) } catch { $null = $_ }
+            try { $okButton.Focus() } catch { $null = $_ }
         })
 
         if ($iconPath -and (Test-Path $iconPath)) {
-            try { $dialog.Icon = New-Object System.Drawing.Icon($iconPath) } catch { }
+            try { $dialog.Icon = New-Object System.Drawing.Icon($iconPath) } catch { $null = $_ }
         }
         try {
             if (Get-Command -Name Apply-ThemeToControl -ErrorAction SilentlyContinue) {
                 Apply-ThemeToControl $dialog $script:ThemePalette $script:UseDarkTheme
             }
         } catch {
-        }
+                    $null = $_
+                }
 
         [void]$dialog.ShowDialog($script:SettingsForm)
     }
@@ -7337,7 +7344,6 @@ $clearLogButton = New-Object System.Windows.Forms.Button
         $pendingSettings = $collectResult.Settings
         $lastToggleTime = $collectResult.LastToggleTime
         $pauseUntil = $collectResult.PauseUntil
-        $scheduleSuspendUntil = $collectResult.ScheduleSuspendUntil
 
         $settings = $pendingSettings
         if ($script:EnsureProfilesHashtable) { & $script:EnsureProfilesHashtable }
@@ -7370,16 +7376,6 @@ $clearLogButton = New-Object System.Windows.Forms.Button
         $desiredLogDir = Resolve-DirectoryOrDefault ([string]$settings.LogDirectory) $defaultLogDir "Logs"
         if ($desiredLogDir -ne $script:LogDirectory) {
             Set-LogDirectory $desiredLogDir
-        }
-        if ($script:LastSettingsSnapshot) {
-            $pendingSnapshot = Get-SettingsSnapshot $pendingSettings
-            $pendingHash = Get-SettingsSnapshotHash $pendingSnapshot
-            if ($script:LastSettingsSnapshotHash -and $pendingHash -eq $script:LastSettingsSnapshotHash) {
-                $pendingDiffs = @()
-            } else {
-                $pendingDiffs = @(Get-SettingsDiff $script:LastSettingsSnapshot $pendingSnapshot)
-            }
-            # Confirm Save prompt removed per request.
         }
 
         Write-Log "UI: ---------- Settings Save ----------" "DEBUG" $null "Settings-Dialog"
@@ -7810,7 +7806,7 @@ $clearLogButton = New-Object System.Windows.Forms.Button
 
                     $baseStatsColor = [System.Drawing.SystemColors]::ControlText
                     if ($funDailyControl) {
-                        try { $baseStatsColor = $funDailyControl.ForeColor } catch { }
+                        try { $baseStatsColor = $funDailyControl.ForeColor } catch { $null = $_ }
                     }
                     $milestoneText = ("Next: 100 ({0} left)" -f [Math]::Max(0, (100 - $lifetimeToggleCount)))
                     $currentBadgeText = "None yet"
@@ -7950,7 +7946,7 @@ $clearLogButton = New-Object System.Windows.Forms.Button
                         if ($points -lt 0) { $points = 0 }
                         if ($points -eq 0 -and $scopeEntries.Count -gt 0) {
                             foreach ($entry in $scopeEntries) {
-                                try { $points += [Math]::Max(0, [int]$entry["Points"]) } catch { }
+                                try { $points += [Math]::Max(0, [int]$entry["Points"]) } catch { $null = $_ }
                             }
                         }
                         $levelInfo = $null
@@ -8013,7 +8009,7 @@ $clearLogButton = New-Object System.Windows.Forms.Button
                     }
                     $baseStatsBackColor = [System.Drawing.SystemColors]::Control
                     if ($funDailyControl) {
-                        try { $baseStatsBackColor = $funDailyControl.BackColor } catch { }
+                        try { $baseStatsBackColor = $funDailyControl.BackColor } catch { $null = $_ }
                     }
                     $getRarityStyle = {
                         param([string]$rarity, [System.Drawing.Color]$fallbackForeColor, [System.Drawing.Color]$fallbackBackColor)
@@ -8097,10 +8093,11 @@ $clearLogButton = New-Object System.Windows.Forms.Button
                             $oldFont = $control.Font
                             $control.Font = $newFont
                             if ($oldFont -and -not [object]::ReferenceEquals($oldFont, $baseFont)) {
-                                try { $oldFont.Dispose() } catch { }
+                                try { $oldFont.Dispose() } catch { $null = $_ }
                             }
                         } catch {
-                        }
+                                    $null = $_
+                                }
                     }
                     $funMilestoneControl = & $getSettingsControl 'SettingsFunMilestoneValue'
                     if ($funMilestoneControl) {
@@ -8167,7 +8164,8 @@ $clearLogButton = New-Object System.Windows.Forms.Button
                             if ($tierProgressValueScaled -gt $tierProgressControl.Maximum) { $tierProgressValueScaled = $tierProgressControl.Maximum }
                             if ($tierProgressControl.Value -ne $tierProgressValueScaled) { $tierProgressControl.Value = $tierProgressValueScaled }
                         } catch {
-                        }
+                                    $null = $_
+                                }
                     }
                     $tierProgressLabelControl = & $getSettingsControl 'SettingsFunTierProgressValue'
                     if ($tierProgressLabelControl) {
@@ -8197,7 +8195,8 @@ $clearLogButton = New-Object System.Windows.Forms.Button
                     }
                 } catch {
                     # ignore transient UI updates
-                }
+                            $null = $_
+                        }
                 $safeModeStatusControl = & $getSettingsControl 'SettingsSafeModeStatusValue'
                 try {
                     if ($safeModeStatusControl -and ($script:SettingsSetText -is [scriptblock])) {
@@ -8206,7 +8205,8 @@ $clearLogButton = New-Object System.Windows.Forms.Button
                     }
                 } catch {
                     # ignore transient UI updates
-                }
+                            $null = $_
+                        }
                 $step = "StatusTab-Keyboard"
                 $caps = [System.Windows.Forms.Control]::IsKeyLocked([System.Windows.Forms.Keys]::CapsLock)
                 $num = [System.Windows.Forms.Control]::IsKeyLocked([System.Windows.Forms.Keys]::NumLock)
@@ -8314,7 +8314,8 @@ $clearLogButton = New-Object System.Windows.Forms.Button
                     }
                 } catch {
                     # swallow to avoid UI spam on diagnostics refresh
-                }
+                            $null = $_
+                        }
             }
 
             $step = "ResetConfirm"
@@ -8398,7 +8399,7 @@ $clearLogButton = New-Object System.Windows.Forms.Button
                     try {
                         Set-SettingsDirty $false
                         if ($script:ClearProfileDirtyIndicator) { & $script:ClearProfileDirtyIndicator }
-                    } catch { }
+                    } catch { $null = $_ }
                 }) | Out-Null
             }
         }
@@ -8414,9 +8415,9 @@ $clearLogButton = New-Object System.Windows.Forms.Button
     })
 
     $form.Add_FormClosing({
-        param($sender, $e)
+        param($uiSender, $uiEvent)
         $isUserClose = $false
-        try { $isUserClose = ($e.CloseReason -eq [System.Windows.Forms.CloseReason]::UserClosing) } catch { $isUserClose = $false }
+        try { $isUserClose = ($uiEvent.CloseReason -eq [System.Windows.Forms.CloseReason]::UserClosing) } catch { $isUserClose = $false }
         if ($isUserClose -and -not $script:isShuttingDown -and -not $script:CleanupDone) {
             try {
                 if ($script:openSettingsLastTabBox) {
@@ -8426,20 +8427,20 @@ $clearLogButton = New-Object System.Windows.Forms.Button
                     $settings.LastSettingsTab = if ($script:GetSettingsTabKey) { & $script:GetSettingsTabKey $script:SettingsTabControl.SelectedTab } else { [string]$script:SettingsTabControl.SelectedTab.Text }
                     Save-Settings $settings
                 }
-            } catch { }
-            try { $e.Cancel = $true } catch { }
+            } catch { $null = $_ }
+            try { $uiEvent.Cancel = $true } catch { $null = $_ }
             try {
-                if ($sender -and -not $sender.IsDisposed) { $sender.Hide() }
-            } catch { }
+                if ($uiSender -and -not $uiSender.IsDisposed) { $uiSender.Hide() }
+            } catch { $null = $_ }
             try {
                 if ($script:SettingsStatusTimer) { $script:SettingsStatusTimer.Stop() }
                 if ($script:SettingsSearchTimer) { $script:SettingsSearchTimer.Stop() }
-            } catch { }
+            } catch { $null = $_ }
             try {
                 Set-SettingsDirty $false
                 if ($script:ClearProfileDirtyIndicator) { & $script:ClearProfileDirtyIndicator }
                 if ($script:UpdateSettingsBanner) { & $script:UpdateSettingsBanner }
-            } catch { }
+            } catch { $null = $_ }
             Write-Log "UI: Settings dialog hidden (reuse enabled)." "DEBUG" $null "Settings-Dialog"
             return
         }
@@ -8461,12 +8462,12 @@ $clearLogButton = New-Object System.Windows.Forms.Button
             $script:SettingsSearchTimer = $null
         }
         if ($script:AboutUpdatePollTimer) {
-            try { $script:AboutUpdatePollTimer.Stop() } catch { }
-            try { $script:AboutUpdatePollTimer.Dispose() } catch { }
+            try { $script:AboutUpdatePollTimer.Stop() } catch { $null = $_ }
+            try { $script:AboutUpdatePollTimer.Dispose() } catch { $null = $_ }
             $script:AboutUpdatePollTimer = $null
         }
         if ($script:AboutUpdateJob) {
-            try { Remove-Job -Job $script:AboutUpdateJob -Force -ErrorAction SilentlyContinue } catch { }
+            try { Remove-Job -Job $script:AboutUpdateJob -Force -ErrorAction SilentlyContinue } catch { $null = $_ }
             $script:AboutUpdateJob = $null
         }
         $script:AboutUpdateJobStartedUtc = $null
@@ -8515,10 +8516,11 @@ $clearLogButton = New-Object System.Windows.Forms.Button
     })
 
     $form.Add_FormClosed({
-        param($sender, $e)
+        param($uiSender, $uiEvent)
+        $null = $uiEvent
         $durationSeconds = [Math]::Round(((Get-Date) - $script:SettingsDialogStart).TotalSeconds, 2)
         $result = $null
-        if ($sender -is [System.Windows.Forms.Form]) { $result = $sender.DialogResult }
+        if ($uiSender -is [System.Windows.Forms.Form]) { $result = $uiSender.DialogResult }
         Write-Log "UI: Settings dialog closed. Result=$result Dirty=$script:SettingsDirty DurationSeconds=$durationSeconds" "DEBUG" $null "Settings-Dialog"
     })
         if ($tabControl) { $tabControl.ResumeLayout($false) }
@@ -8611,11 +8613,12 @@ function Show-SettingsFallbackDialog {
     $closeButton.Text = "Close"
     $closeButton.Width = 100
     $closeButton.Add_Click({
-        param($sender, $e)
+        param($uiSender, $uiEvent)
+        $null = $uiEvent
         try {
-            $parentForm = $sender.FindForm()
+            $parentForm = $uiSender.FindForm()
             if ($parentForm) { $parentForm.Close() }
-        } catch { }
+        } catch { $null = $_ }
     })
 
     $openSettingsFolderButton = New-Object System.Windows.Forms.Button
@@ -8656,7 +8659,7 @@ function Show-SettingsFallbackDialog {
     $form.Controls.Add($layout)
 
     if ($iconPath -and (Test-Path $iconPath)) {
-        try { $form.Icon = New-Object System.Drawing.Icon($iconPath) } catch { }
+        try { $form.Icon = New-Object System.Drawing.Icon($iconPath) } catch { $null = $_ }
     }
 
     Write-Log "UI: Settings fallback dialog shown." "WARN" $null "Settings-Recovery"

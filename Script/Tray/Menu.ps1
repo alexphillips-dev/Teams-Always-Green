@@ -23,7 +23,7 @@ if ($script:TrayUseCustomTooltips) {
             $pos = [System.Windows.Forms.Cursor]::Position
             $pt = $contextMenu.PointToClient($pos)
             $script:TrayMenuToolTip.Show($script:TrayTooltipPendingText, $contextMenu, $pt)
-        } catch { }
+        } catch { $null = $_ }
     })
 }
 
@@ -43,7 +43,7 @@ if (-not $script:Settings) {
 }
 try {
     Set-Variable -Name settings -Scope Script -Value $script:Settings -Force
-} catch { }
+} catch { $null = $_ }
 
 function Get-TrayModuleVersion {
     return "1.0.0"
@@ -54,16 +54,17 @@ function Set-MenuTooltip([System.Windows.Forms.ToolStripItem]$item, [string]$tex
     $item.ToolTipText = $text
     if (-not $script:TrayUseCustomTooltips) { return }
     $item.Add_MouseEnter({
-        param($sender, $e)
-        if ([string]::IsNullOrWhiteSpace($sender.ToolTipText)) { return }
-        $script:TrayTooltipPendingText = $sender.ToolTipText
+        param($uiSender, $uiEvent)
+        $null = $uiEvent
+        if ([string]::IsNullOrWhiteSpace($uiSender.ToolTipText)) { return }
+        $script:TrayTooltipPendingText = $uiSender.ToolTipText
         $script:TrayTooltipTimer.Stop()
         $script:TrayTooltipTimer.Start()
     })
     $item.Add_MouseLeave({
         $script:TrayTooltipTimer.Stop()
         $script:TrayTooltipPendingText = $null
-        try { $script:TrayMenuToolTip.Hide($contextMenu) } catch { }
+        try { $script:TrayMenuToolTip.Hide($contextMenu) } catch { $null = $_ }
     })
 }
 
@@ -208,10 +209,11 @@ function New-IntervalItem([string]$label, [int]$seconds) {
     $item.Tag = $seconds
     $item.CheckOnClick = $true
     $item.Add_Click({
-        param($sender, $e)
+        param($uiSender, $uiEvent)
+        $null = $uiEvent
         foreach ($i in $intervalMenu.DropDownItems | Where-Object { $_ -is [System.Windows.Forms.ToolStripMenuItem] }) { $i.Checked = $false }
-        $sender.Checked = $true
-        Invoke-TrayAction "Interval" { Set-Interval ([int]$sender.Tag) }
+        $uiSender.Checked = $true
+        Invoke-TrayAction "Interval" { Set-Interval ([int]$uiSender.Tag) }
     })
     if ($script:Settings.IntervalSeconds -eq $seconds) { $item.Checked = $true }
     return $item
@@ -318,8 +320,10 @@ function Rebuild-PauseMenu {
         $item = New-Object System.Windows.Forms.ToolStripMenuItem("$mins minutes")
         $item.Tag = $mins
         $item.Add_Click({
-            param($sender, $e)
-            Invoke-TrayAction "Pause" { Pause-Toggling ([int]$sender.Tag) }
+            param($uiSender, $uiEvent)
+            $null = $uiEvent
+            $minutes = [int]$uiSender.Tag
+            Invoke-TrayAction "Pause" { Pause-Toggling $minutes }
         })
         $pauseMenu.DropDownItems.Add($item) | Out-Null
     }
@@ -366,8 +370,9 @@ foreach ($level in $logLevelItems) {
     $levelItem = New-Object System.Windows.Forms.ToolStripMenuItem($level)
     $levelItem.CheckOnClick = $true
     $levelItem.Add_Click({
-        param($sender, $e)
-        Set-LogLevel $sender.Text "tray"
+        param($uiSender, $uiEvent)
+        $null = $uiEvent
+        Set-LogLevel $uiSender.Text "tray"
     })
     $logLevelMenu.DropDownItems.Add($levelItem) | Out-Null
 }
@@ -561,21 +566,21 @@ Set-MenuTooltip $profilesMenu (L "Switch between profiles.")
 function Switch-ToProfile([string]$name) {
     if (-not ((Get-ObjectKeys $script:Settings.Profiles) -contains $name)) { return }
     if (-not (Confirm-ProfileSwitch $name $script:Settings.Profiles[$name])) { return }
-    $profile = Migrate-ProfileSnapshot $script:Settings.Profiles[$name]
-    $validation = Test-ProfileSnapshot $profile
+    $profileSnapshot = Migrate-ProfileSnapshot $script:Settings.Profiles[$name]
+    $validation = Test-ProfileSnapshot $profileSnapshot
     if (-not $validation.Ok) {
         $lastGood = Get-ProfileLastGood $name
         if ($null -ne $lastGood) {
             Write-Log "Profile '$name' invalid; using last known good snapshot." "WARN" $null "Profiles"
-            $profile = Migrate-ProfileSnapshot $lastGood
+            $profileSnapshot = Migrate-ProfileSnapshot $lastGood
         } else {
             Write-Log ("Profile switch aborted: {0}" -f $validation.Message) "WARN" $null "Profiles"
             return
         }
     }
     $script:Settings.ActiveProfile = $name
-    $script:Settings = Apply-ProfileSnapshot $script:Settings $profile
-    Update-ProfileLastGood $name $profile
+    $script:Settings = Apply-ProfileSnapshot $script:Settings $profileSnapshot
+    Update-ProfileLastGood $name $profileSnapshot
     Save-Settings $script:Settings
     Apply-SettingsRuntime
     if ($updateProfilesMenu) { & $updateProfilesMenu }
@@ -591,8 +596,9 @@ $updateProfilesMenu = {
         $item.CheckOnClick = $true
         $item.Checked = ($script:Settings.ActiveProfile -eq $name)
         $item.Add_Click({
-            param($sender, $e)
-            Switch-ToProfile $sender.Text
+            param($uiSender, $uiEvent)
+            $null = $uiEvent
+            Switch-ToProfile $uiSender.Text
         })
         $profilesMenu.DropDownItems.Add($item) | Out-Null
     }

@@ -1,4 +1,4 @@
-﻿function Get-HistoryUiModuleVersion {
+function Get-HistoryUiModuleVersion {
     return "1.0.0"
 }
 function Show-HistoryDialog {
@@ -255,14 +255,15 @@ function Show-HistoryDialog {
     $columnsMenu = New-Object System.Windows.Forms.ContextMenuStrip
     $addColumnToggle = {
         param([string]$name, [int]$index)
+        $colIndex = $index
         $item = New-Object System.Windows.Forms.ToolStripMenuItem((L $name))
         $item.CheckOnClick = $true
         $item.Checked = $true
         $item.Add_Click({
             if ($item.Checked) {
-                $list.Columns[$index].Width = $columnWidths[$name]
+                $list.Columns[$colIndex].Width = $columnWidths[$name]
             } else {
-                $list.Columns[$index].Width = 0
+                $list.Columns[$colIndex].Width = 0
             }
         })
         $columnsMenu.Items.Add($item) | Out-Null
@@ -301,7 +302,7 @@ function Show-HistoryDialog {
                 $form.Location = New-Object System.Drawing.Point($x, $y)
                 $form.Size = New-Object System.Drawing.Size($w, $h)
             }
-        } catch { }
+        } catch { $null = $_ }
     }
     if ($historyWindowState -eq "Maximized") { $form.WindowState = "Maximized" }
 
@@ -491,7 +492,7 @@ function Show-HistoryDialog {
         foreach ($chip in @($chipAll, $chipSucceeded, $chipFailed)) {
             $chip.BackColor = [System.Drawing.Color]::DimGray
         }
-        switch ($value) {
+        switch ($currentFilter) {
             "Succeeded" { $chipSucceeded.BackColor = [System.Drawing.Color]::SeaGreen }
             "Failed" { $chipFailed.BackColor = [System.Drawing.Color]::Firebrick }
             default { $chipAll.BackColor = [System.Drawing.Color]::SteelBlue }
@@ -512,6 +513,7 @@ function Show-HistoryDialog {
 
     $relativeTimeBox.Add_CheckedChanged({
         $useRelativeTime = [bool]$relativeTimeBox.Checked
+        $null = $useRelativeTime
         & $applyFilter
     })
 
@@ -561,6 +563,7 @@ function Show-HistoryDialog {
         $newLimit = 0
         if ([int]::TryParse([string]$rowLimitBox.SelectedItem, [ref]$newLimit)) {
             $maxRows = $newLimit
+            $null = $maxRows
             & $loadHistory
         }
     })
@@ -580,11 +583,12 @@ function Show-HistoryDialog {
     })
 
     $list.Add_ColumnClick({
-        param($sender, $e)
-        if ($sortColumn -eq $e.Column) {
+        param($uiSender, $uiEvent)
+        $null = $uiSender
+        if ($sortColumn -eq $uiEvent.Column) {
             $sortAsc = -not $sortAsc
         } else {
-            $sortColumn = $e.Column
+            $sortColumn = $uiEvent.Column
             $sortAsc = $true
         }
         & $applyFilter
@@ -611,19 +615,19 @@ function Show-HistoryDialog {
         $item = $list.SelectedItems[0]
         $cols = @($item.Text)
         for ($i = 1; $i -lt $item.SubItems.Count; $i++) { $cols += $item.SubItems[$i].Text }
-        try { Set-Clipboard -Value ($cols -join "`t") } catch { }
+        try { Set-Clipboard -Value ($cols -join "`t") } catch { $null = $_ }
     })
 
     $ctxCopyMessage.Add_Click({
         if ($list.SelectedItems.Count -eq 0) { return }
         $item = $list.SelectedItems[0]
         if ($item.SubItems.Count -ge 4) {
-            try { Set-Clipboard -Value $item.SubItems[3].Text } catch { }
+            try { Set-Clipboard -Value $item.SubItems[3].Text } catch { $null = $_ }
         }
     })
 
     $ctxOpenLogs.Add_Click({
-        try { Start-Process $script:LogDirectory } catch { }
+        try { Start-Process $script:LogDirectory } catch { $null = $_ }
     })
 
     $searchBox.Text = [string]$historyView.Search
@@ -647,7 +651,7 @@ function Show-HistoryDialog {
                 try {
                     $info = Get-Item -Path $logPath -ErrorAction SilentlyContinue
                     if ($info) {
-                        if ($script:HistoryLastLogWrite -and $script:HistoryLastLogSize -ne $null) {
+                        if ($script:HistoryLastLogWrite -and $null -ne $script:HistoryLastLogSize) {
                             if ($info.LastWriteTime -eq $script:HistoryLastLogWrite -and $info.Length -eq $script:HistoryLastLogSize) {
                                 return
                             }
@@ -656,7 +660,8 @@ function Show-HistoryDialog {
                         $script:HistoryLastLogSize = $info.Length
                     }
                 } catch {
-                }
+                            $null = $_
+                        }
             }
             $lines = Get-Content -Path $logPath -Tail 2000
             $take = if ($maxRows -gt 0) { $maxRows } else { 200 }
@@ -702,7 +707,7 @@ function Show-HistoryDialog {
             }
             $lines += ($cols -join "`t")
         }
-        try { Set-Clipboard -Value ($lines -join "`r`n") } catch { }
+        try { Set-Clipboard -Value ($lines -join "`r`n") } catch { $null = $_ }
     })
 
     $exportButton.Add_Click({
@@ -744,7 +749,7 @@ function Show-HistoryDialog {
                 $lines += ($cols -join "`t")
             }
         }
-        try { Set-Content -Path $dialog.FileName -Value $lines -Encoding UTF8 } catch { }
+        try { Set-Content -Path $dialog.FileName -Value $lines -Encoding UTF8 } catch { $null = $_ }
     })
 
     $clearButton.Add_Click({
@@ -769,7 +774,8 @@ function Show-HistoryDialog {
             }
             Start-Process -FilePath explorer.exe -ArgumentList ("`"{0}`"" -f $script:LogDirectory)
         } catch {
-        }
+                    $null = $_
+                }
     })
 
     $searchBox.Add_TextChanged({ & $applyFilter })
@@ -784,7 +790,7 @@ function Show-HistoryDialog {
         }
     })
     $form.Add_FormClosing({
-        try { $refreshTimer.Stop() } catch { }
+        try { $refreshTimer.Stop() } catch { $null = $_ }
         try {
             $historyView["Filter"] = $currentFilter
             $historyView["Search"] = $searchBox.Text
@@ -817,7 +823,7 @@ function Show-HistoryDialog {
             if ($visibleColumns.Count -gt 0) { $historyView["Columns"] = $visibleColumns }
             Set-SettingsPropertyValue $settings "HistoryView" $historyView
             Save-Settings $settings -Immediate
-        } catch { }
+        } catch { $null = $_ }
     })
     $refreshTimer.Start()
 
@@ -838,7 +844,7 @@ function Show-HistoryDialog {
             $liveBadge.BackColor = [System.Drawing.Color]::Transparent
             $liveBadge.ForeColor = [System.Drawing.Color]::ForestGreen
         }
-    } catch { }
+    } catch { $null = $_ }
 
     [void]$form.ShowDialog()
 }

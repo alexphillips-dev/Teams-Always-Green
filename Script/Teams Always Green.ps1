@@ -1,4 +1,4 @@
-
+﻿
 # Teams Always Green
 # PSScriptAnalyzerSettings -DisableRuleName PSUseApprovedVerbs
 # Main entry script for the app. This file owns startup, tray menu, timers,
@@ -19,7 +19,7 @@
 #
 # Settings and state:
 # - Settings JSON is validated and migrated on load.
-# - Profile snapshots are cached as â€œlast known goodâ€ for safe rollback.
+# - Profile snapshots are cached as ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œlast known goodÃƒÂ¢Ã¢â€šÂ¬Ã‚Â for safe rollback.
 # - Runtime counters and status are persisted separately from user settings.
 #
 # Logging:
@@ -282,7 +282,8 @@ function Write-PathWarningNow([string]$message) {
     try {
         if ([bool]$script:SuppressPathWarnings) { return }
     } catch {
-    }
+                $null = $_
+            }
     if (Get-Command -Name Write-Log -ErrorAction SilentlyContinue) {
         Write-Log $message "WARN" $null "Paths"
     } else {
@@ -349,7 +350,8 @@ function Test-UnsafeReparseItem($item) {
             $linkType = [string]$item.LinkType
         }
     } catch {
-    }
+                $null = $_
+            }
     if (-not [string]::IsNullOrWhiteSpace($linkType)) {
         return $true
     }
@@ -370,7 +372,8 @@ function Test-UnsafeReparseItem($item) {
             )
         }
     } catch {
-    }
+                $null = $_
+            }
     if ($targets.Count -gt 0) {
         return $true
     }
@@ -397,14 +400,16 @@ function Test-PathHasReparsePoint([string]$path, [string]$StopAtPath = $null, [s
                     return $true
                 }
             } catch {
-            }
+                        $null = $_
+                    }
             if ($isStopPath) { break }
             $parent = Split-Path -Path $current -Parent
             if ([string]::IsNullOrWhiteSpace($parent) -or $parent -eq $current) { break }
             $current = $parent
         }
     } catch {
-    }
+                $null = $_
+            }
     return $false
 }
 
@@ -426,7 +431,8 @@ function Convert-ToRelativePathIfUnderRoot([string]$path) {
             return $full.Substring($root.Length).TrimStart('\')
         }
     } catch {
-    }
+                $null = $_
+            }
     return $path
 }
 
@@ -452,7 +458,8 @@ function Get-PathRelativeToRoot([string]$path, [string]$root) {
             return $full.Substring($rootFull.Length).TrimStart('\')
         }
     } catch {
-    }
+                $null = $_
+            }
     return ""
 }
 
@@ -549,7 +556,8 @@ function Import-RuntimeModule([string]$path, [string]$tag = "Runtime-Module") {
                         $sameFile = $fnFile.Equals($modulePath, [System.StringComparison]::OrdinalIgnoreCase)
                     }
                 } catch {
-                }
+                            $null = $_
+                        }
                 if ($isNewName -or $sameFile) {
                     [void]$selected.Add($fn)
                 }
@@ -643,7 +651,8 @@ function Test-ImportExportFilePath([string]$path, [string]$label, [string[]]$all
             $parent = Split-Path -Path $resolved -Parent
             if (-not [string]::IsNullOrWhiteSpace($parent)) { $reparseScanPath = $parent }
         } catch {
-        }
+                    $null = $_
+                }
     }
     if (Test-PathHasReparsePoint -Path $reparseScanPath) {
         Write-SecurityMessage ("{0}: blocked reparse-linked path for {1}: {2}" -f $Context, $label, $resolved) "WARN" $Context
@@ -697,7 +706,7 @@ function Sanitize-DirectorySetting([string]$value, [string]$defaultName, [string
 function Test-DirectoryWritable([string]$path, [switch]$ForceRefresh) {
     if ([string]::IsNullOrWhiteSpace($path)) { return $false }
     $cacheKey = $path
-    try { $cacheKey = [System.IO.Path]::GetFullPath($path).ToLowerInvariant() } catch { }
+    try { $cacheKey = [System.IO.Path]::GetFullPath($path).ToLowerInvariant() } catch { $null = $_ }
 
     if (-not $ForceRefresh -and $script:DirectoryWritableCache -and $script:DirectoryWritableCache.ContainsKey($cacheKey)) {
         try {
@@ -711,7 +720,8 @@ function Test-DirectoryWritable([string]$path, [switch]$ForceRefresh) {
                 }
             }
         } catch {
-        }
+                    $null = $_
+                }
     }
 
     $isWritable = $false
@@ -734,7 +744,8 @@ function Test-DirectoryWritable([string]$path, [switch]$ForceRefresh) {
             CheckedAtUtc = [DateTime]::UtcNow
         }
     } catch {
-    }
+                $null = $_
+            }
 
     return $isWritable
 }
@@ -801,7 +812,7 @@ function Harden-AppPermissions {
     foreach ($path in $paths) {
         try {
             $acl = Get-Acl -Path $path
-            try { $acl.SetAccessRuleProtection($true, $true) } catch { }
+            try { $acl.SetAccessRuleProtection($true, $true) } catch { $null = $_ }
             $rules = @($acl.Access) | Where-Object {
                 $_.AccessControlType -eq "Allow" -and
                 ($_.IdentityReference -match "Everyone|Users|Authenticated Users") -and
@@ -860,7 +871,8 @@ function Redact-Paths([string]$message) {
             $result = $result -replace [regex]::Escape($userProfile), "%USERPROFILE%"
         }
     } catch {
-    }
+                $null = $_
+            }
     return $result
 }
 
@@ -881,7 +893,8 @@ function Redact-SensitiveText([string]$message) {
         $result = [regex]::Replace($result, '(?i)\bgh[pousr]_[A-Za-z0-9]{20,}\b', '[REDACTED_TOKEN]')
         $result = [regex]::Replace($result, '(?i)\bxox[baprs]-[A-Za-z0-9-]{10,}\b', '[REDACTED_TOKEN]')
     } catch {
-    }
+                $null = $_
+            }
     return $result
 }
 
@@ -952,7 +965,7 @@ function Verify-IntegrityManifest {
 }
 
 $script:MetaDir = Join-Path $script:DataRoot $script:FolderNames.Meta
-try { Ensure-Directory $script:MetaDir "Meta" | Out-Null } catch { }
+try { Ensure-Directory $script:MetaDir "Meta" | Out-Null } catch { $null = $_ }
 $script:SettingsLocatorPath = Join-Path $script:MetaDir "Teams-Always-Green.settings.path.txt"
 $script:LogLocatorPath = Join-Path $script:MetaDir "Teams-Always-Green.log.path.txt"
 $script:CommandFilePath = Join-Path $script:MetaDir "Teams-Always-Green.commands.txt"
@@ -997,10 +1010,10 @@ $script:ActionToastLastByMessage = @{}
 $oldSettingsLocator = Join-Path $script:AppRoot "Teams-Always-Green.settings.path.txt"
 $oldLogLocator = Join-Path $script:AppRoot "Teams-Always-Green.log.path.txt"
 if ((Test-Path $oldSettingsLocator) -and -not (Test-Path $script:SettingsLocatorPath)) {
-    try { Move-Item -Path $oldSettingsLocator -Destination $script:SettingsLocatorPath -Force } catch { }
+    try { Move-Item -Path $oldSettingsLocator -Destination $script:SettingsLocatorPath -Force } catch { $null = $_ }
 }
 if ((Test-Path $oldLogLocator) -and -not (Test-Path $script:LogLocatorPath)) {
-    try { Move-Item -Path $oldLogLocator -Destination $script:LogLocatorPath -Force } catch { }
+    try { Move-Item -Path $oldLogLocator -Destination $script:LogLocatorPath -Force } catch { $null = $_ }
 }
 $defaultSettingsDir = Join-Path $script:DataRoot $script:FolderNames.Settings
 $defaultLogDir = Join-Path $script:DataRoot $script:FolderNames.Logs
@@ -1012,14 +1025,16 @@ if (Test-Path $script:SettingsLocatorPath) {
         $locatorValue = (Get-Content -Path $script:SettingsLocatorPath -Raw).Trim()
         $script:SettingsDirectory = Resolve-DirectoryOrDefault $locatorValue $defaultSettingsDir "Settings"
     } catch {
-    }
+                $null = $_
+            }
 }
 if (Test-Path $script:LogLocatorPath) {
     try {
         $logLocatorValue = (Get-Content -Path $script:LogLocatorPath -Raw).Trim()
         $script:LogDirectory = Resolve-DirectoryOrDefault $logLocatorValue $defaultLogDir "Logs"
     } catch {
-    }
+                $null = $_
+            }
 }
 if (-not [string]::IsNullOrWhiteSpace($script:SettingsDirectory)) {
     $script:StatePath = Join-Path $script:SettingsDirectory "Teams-Always-Green.state.json"
@@ -1035,7 +1050,8 @@ if ((Test-Path $bootstrapLogRoot) -and ($bootstrapLogRoot -ne $bootstrapLogTarge
         }
         Move-Item -Path $bootstrapLogRoot -Destination $bootstrapLogTarget -Force
     } catch {
-    }
+                $null = $_
+            }
 }
 $script:BootstrapLogPath = Join-Path $script:LogDirectory "Teams-Always-Green.bootstrap.log"
 $script:ShutdownMarkerPath = Join-Path $script:MetaDir "Teams-Always-Green.shutdown.state.txt"
@@ -1060,7 +1076,8 @@ function Get-CrashState {
             $state.OverrideMinimalModeLogged = [bool]$loaded.OverrideMinimalModeLogged
         }
     } catch {
-    }
+                $null = $_
+            }
     return $state
 }
 
@@ -1075,7 +1092,8 @@ function Save-CrashState($state) {
         }
         $payload | ConvertTo-Json -Depth 3 | Set-Content -Path $script:CrashStatePath -Encoding UTF8
     } catch {
-    }
+                $null = $_
+            }
 }
 
 function Get-MinimalModeState {
@@ -1088,24 +1106,24 @@ function Get-MinimalModeState {
         IntegrityFailed = $false
     }
 
-    try { $result.Active = [bool]$script:MinimalModeActive } catch { }
-    try { $result.Reason = [string]$script:MinimalModeReason } catch { }
-    try { $result.Override = [bool]$script:OverrideMinimalMode } catch { }
-    try { $result.IntegrityFailed = [bool]$script:IntegrityFailed } catch { }
+    try { $result.Active = [bool]$script:MinimalModeActive } catch { $null = $_ }
+    try { $result.Reason = [string]$script:MinimalModeReason } catch { $null = $_ }
+    try { $result.Override = [bool]$script:OverrideMinimalMode } catch { $null = $_ }
+    try { $result.IntegrityFailed = [bool]$script:IntegrityFailed } catch { $null = $_ }
 
     $crashState = $null
-    try { $crashState = Get-CrashState } catch { }
+    try { $crashState = Get-CrashState } catch { $null = $_ }
     if ($crashState) {
         if ($crashState.PSObject.Properties.Name -contains "Count") {
-            try { $result.CrashCount = [Math]::Max(0, [int]$crashState.Count) } catch { }
+            try { $result.CrashCount = [Math]::Max(0, [int]$crashState.Count) } catch { $null = $_ }
         }
         if ($crashState.PSObject.Properties.Name -contains "OverrideMinimalMode") {
-            try { $result.Override = [bool]$crashState.OverrideMinimalMode } catch { }
+            try { $result.Override = [bool]$crashState.OverrideMinimalMode } catch { $null = $_ }
         }
     }
 
     if ($result.CrashCount -gt 0) {
-        try { $result.RecoveryTier = [int](Get-CrashRecoveryTier $result.CrashCount) } catch { }
+        try { $result.RecoveryTier = [int](Get-CrashRecoveryTier $result.CrashCount) } catch { $null = $_ }
     }
 
     if ($result.Override) {
@@ -1140,7 +1158,8 @@ function Save-MinimalModeState {
     try {
         Ensure-Directory $script:MetaDir "Meta" | Out-Null
     } catch {
-    }
+                $null = $_
+            }
     try {
         $payload = [pscustomobject]@{
             Active = [bool]$Active
@@ -1152,7 +1171,8 @@ function Save-MinimalModeState {
         $json = $payload | ConvertTo-Json -Depth 3
         Write-AtomicTextFile -Path $script:MinimalModeStatePath -Content $json -Encoding UTF8 -VerifyJson
     } catch {
-    }
+                $null = $_
+            }
 }
 
 function Get-SavedMinimalModeState {
@@ -1181,7 +1201,8 @@ function Sync-MinimalModeState {
             Save-MinimalModeState -Active ([bool]$state.Active) -Reason ([string]$state.Reason) -Override $overrideValue -Source $Source
         }
     } catch {
-    }
+                $null = $_
+            }
 }
 
 function Save-StartupSnapshot {
@@ -1199,7 +1220,8 @@ function Save-StartupSnapshot {
         }
         $payload | ConvertTo-Json -Depth 4 | Set-Content -Path $script:StartupSnapshotPath -Encoding UTF8
     } catch {
-    }
+                $null = $_
+            }
 }
 
 function Repair-FromStartupSnapshot($defaultSettings) {
@@ -1209,7 +1231,8 @@ function Repair-FromStartupSnapshot($defaultSettings) {
             $raw = Get-Content -Path $script:StartupSnapshotPath -Raw
             if (-not [string]::IsNullOrWhiteSpace($raw)) { $snapshot = $raw | ConvertFrom-Json }
         } catch {
-        }
+                    $null = $_
+                }
     }
 
     $targetSettingsDir = if ($snapshot -and $snapshot.PSObject.Properties.Name -contains "SettingsDirectory") { Convert-FromRelativePath $snapshot.SettingsDirectory } else { $script:SettingsDirectory }
@@ -1217,9 +1240,9 @@ function Repair-FromStartupSnapshot($defaultSettings) {
     $targetStatePath = if ($snapshot -and $snapshot.PSObject.Properties.Name -contains "StatePath") { Convert-FromRelativePath $snapshot.StatePath } else { $script:StatePath }
     $targetSettingsPath = if ($snapshot -and $snapshot.PSObject.Properties.Name -contains "SettingsPath") { Convert-FromRelativePath $snapshot.SettingsPath } else { $settingsPath }
 
-    try { Ensure-Directory $targetSettingsDir "Settings" | Out-Null } catch { }
-    try { Ensure-Directory $targetLogDir "Logs" | Out-Null } catch { }
-    try { Ensure-Directory (Split-Path -Path $targetStatePath -Parent) "Settings" | Out-Null } catch { }
+    try { Ensure-Directory $targetSettingsDir "Settings" | Out-Null } catch { $null = $_ }
+    try { Ensure-Directory $targetLogDir "Logs" | Out-Null } catch { $null = $_ }
+    try { Ensure-Directory (Split-Path -Path $targetStatePath -Parent) "Settings" | Out-Null } catch { $null = $_ }
 
     $settingsOk = $false
     if (Test-Path $targetSettingsPath) {
@@ -1243,7 +1266,8 @@ function Repair-FromStartupSnapshot($defaultSettings) {
                 Write-Log "Startup repair: settings file missing or invalid; defaults restored." "WARN" $null "Startup-Repair"
             }
         } catch {
-        }
+                    $null = $_
+                }
     }
 }
 # --- Date/time formatting helpers (presets + locale) ---
@@ -1303,7 +1327,7 @@ function Get-EnvironmentSummary {
         $dpi = $null
         try {
             $dpi = [System.Windows.Forms.Screen]::PrimaryScreen.DeviceDpi
-        } catch { }
+        } catch { $null = $_ }
         $dpiText = if ($dpi) { $dpi } else { "Unknown" }
         return ("Environment summary: Culture={0} UICulture={1} DPI={2} 64Bit={3}" -f $culture, $uiCulture, $dpiText, $is64)
     } catch {
@@ -1317,7 +1341,7 @@ function Write-BootstrapLog([string]$message, [string]$level = "INFO") {
         $timestamp = (Get-Date).ToString($script:DateTimeFormatDefault)
         $line = "[${timestamp}] [$level] [Bootstrap] $message"
         Add-Content -Path $script:BootstrapLogPath -Value $line
-    } catch { }
+    } catch { $null = $_ }
 }
 
 Write-BootstrapLog ("Paths resolved: DataRoot={0} Logs={1} Settings={2}" -f $script:DataRoot, $script:LogDirectory, $script:SettingsDirectory) "INFO"
@@ -1328,7 +1352,8 @@ function Save-LastGoodSettingsRaw([string]$rawJson) {
         Ensure-Directory $script:MetaDir "Meta" | Out-Null
         Write-AtomicTextFile -Path $script:SettingsLastGoodPath -Content $rawJson -Encoding UTF8
     } catch {
-    }
+                $null = $_
+            }
 }
 
 function Save-CorruptSettingsCopy([string]$rawJson) {
@@ -1343,7 +1368,8 @@ function Save-CorruptSettingsCopy([string]$rawJson) {
         }
         Write-BootstrapLog "Corrupt settings saved to $target" "WARN"
     } catch {
-    }
+                $null = $_
+            }
 }
 
 function Load-LastGoodSettings {
@@ -1358,7 +1384,8 @@ function Load-LastGoodSettings {
             }
         }
     } catch {
-    }
+                $null = $_
+            }
     return $null
 }
 
@@ -1385,7 +1412,7 @@ function Get-ShutdownMarker {
         if (Test-Path $script:ShutdownMarkerPath) {
             return (Get-Content -Path $script:ShutdownMarkerPath -Raw).Trim()
         }
-    } catch { }
+    } catch { $null = $_ }
     return $null
 }
 
@@ -1411,7 +1438,8 @@ function Consume-RestartRequestMarker([int]$maxAgeSeconds = 180) {
     try {
         Remove-Item -LiteralPath $script:RestartRequestMarkerPath -Force -ErrorAction SilentlyContinue
     } catch {
-    }
+                $null = $_
+            }
     if ([string]::IsNullOrWhiteSpace($raw)) { return $true }
     try {
         $stampUtc = [DateTime]::Parse($raw).ToUniversalTime()
@@ -1469,14 +1497,14 @@ function Get-ErrorFingerprint([string]$context, [string]$message, [Exception]$ex
     $parts += ([string]$context).Trim().ToLowerInvariant()
     $parts += ([string]$message).Trim().ToLowerInvariant()
     if ($exception) {
-        try { $parts += [string]$exception.GetType().FullName } catch { }
-        try { $parts += [string]$exception.Message } catch { }
+        try { $parts += [string]$exception.GetType().FullName } catch { $null = $_ }
+        try { $parts += [string]$exception.Message } catch { $null = $_ }
         try {
             if ($exception.StackTrace) {
                 $firstLine = ([string]$exception.StackTrace -split "`r?`n" | Select-Object -First 1)
                 if (-not [string]::IsNullOrWhiteSpace($firstLine)) { $parts += $firstLine.Trim() }
             }
-        } catch { }
+        } catch { $null = $_ }
     }
     $raw = ($parts -join "|")
     if ([string]::IsNullOrWhiteSpace($raw)) { return "" }
@@ -1530,7 +1558,7 @@ function Invoke-ResilientAction {
             Write-LogExceptionDeduped $msg $logLevel $_.Exception $Context 30
             if ($isLast) {
                 if ($OnFailure) {
-                    try { & $OnFailure $_.Exception } catch { }
+                    try { & $OnFailure $_.Exception } catch { $null = $_ }
                 }
                 return $false
             }
@@ -1571,7 +1599,8 @@ function Write-BootStage([string]$label) {
             }
         }
     } catch {
-    }
+                $null = $_
+            }
 }
 
 function Start-DeferredMaintenanceTasks {
@@ -1581,15 +1610,16 @@ function Start-DeferredMaintenanceTasks {
     $script:DeferredMaintenanceTimer.Add_Tick({
         Invoke-SafeTimerAction "DeferredMaintenanceTimer" {
             if ($script:DeferredMaintenanceTimer) {
-                try { $script:DeferredMaintenanceTimer.Stop() } catch { }
-                try { $script:DeferredMaintenanceTimer.Dispose() } catch { }
+                try { $script:DeferredMaintenanceTimer.Stop() } catch { $null = $_ }
+                try { $script:DeferredMaintenanceTimer.Dispose() } catch { $null = $_ }
                 $script:DeferredMaintenanceTimer = $null
             }
             if ($script:PendingSignaturePolicyCheck) {
                 try {
                     Invoke-ScriptSignaturePolicyCheck
                 } catch {
-                } finally {
+                            $null = $_
+                        } finally {
                     $script:PendingSignaturePolicyCheck = $false
                 }
             }
@@ -1597,13 +1627,13 @@ function Start-DeferredMaintenanceTasks {
                 if (Get-Command -Name Ensure-SettingsUiLoaded -ErrorAction SilentlyContinue) {
                     [void](Ensure-SettingsUiLoaded)
                 }
-            } catch { }
-            try { Purge-OldLogs } catch { }
-            try { Save-StartupSnapshot } catch { }
+            } catch { $null = $_ }
+            try { Purge-OldLogs } catch { $null = $_ }
+            try { Save-StartupSnapshot } catch { $null = $_ }
             if ($script:DeferredStartupSkipUpdate) {
                 Write-Log "Deferred startup update check skipped by crash-recovery policy." "WARN" $null "Startup"
             } else {
-                try { Invoke-UpdateCheck } catch { }
+                try { Invoke-UpdateCheck } catch { $null = $_ }
             }
             try {
                 if (Get-Command -Name Get-EnvironmentSummary -ErrorAction SilentlyContinue) {
@@ -1612,7 +1642,7 @@ function Start-DeferredMaintenanceTasks {
                         Write-Log $envSummary "DEBUG" $null "Init"
                     }
                 }
-            } catch { }
+            } catch { $null = $_ }
         }
     })
     $script:DeferredMaintenanceTimer.Start()
@@ -1628,18 +1658,18 @@ function Invoke-DeferredStartupTasks {
         $script:FolderCheckTimer.Interval = 500
         $script:FolderCheckTimer.Add_Tick({
             Invoke-SafeTimerAction "FolderCheckTimer" {
-                try { $script:FolderCheckTimer.Stop() } catch { }
-                try { $script:FolderCheckTimer.Dispose() } catch { }
+                try { $script:FolderCheckTimer.Stop() } catch { $null = $_ }
+                try { $script:FolderCheckTimer.Dispose() } catch { $null = $_ }
                 $script:FolderCheckTimer = $null
-                try { Validate-RequiredFiles } catch { }
-                try { Log-FolderHealthOnce } catch { }
+                try { Validate-RequiredFiles } catch { $null = $_ }
+                try { Log-FolderHealthOnce } catch { $null = $_ }
                 Write-BootStage "Folder check done"
             }
         })
         $script:FolderCheckTimer.Start()
     }
-    try { if (Get-Command -Name Start-LogSummaryTimer -ErrorAction SilentlyContinue) { Start-LogSummaryTimer } } catch { }
-    try { Start-DeferredMaintenanceTasks } catch { }
+    try { if (Get-Command -Name Start-LogSummaryTimer -ErrorAction SilentlyContinue) { Start-LogSummaryTimer } } catch { $null = $_ }
+    try { Start-DeferredMaintenanceTasks } catch { $null = $_ }
     Set-StartupLoadingIndicator $false
     Write-BootStage "Deferred startup done"
 }
@@ -1661,7 +1691,8 @@ function Invoke-SafeTimerAction([string]$name, [ScriptBlock]$action) {
             try {
                 Request-TimerSelfHeal -TimerName $name -Reason $_.Exception.Message | Out-Null
             } catch {
-            }
+                        $null = $_
+                    }
         }
     } finally {
         $script:TimerGuards[$name] = $false
@@ -1679,7 +1710,7 @@ function Invoke-UiSafeAction {
     )
     if (-not $Action) { return $false }
     if ([string]::IsNullOrWhiteSpace($Name)) { $Name = "UI Action" }
-    try { Set-LastUserAction $Name $Context } catch { }
+    try { Set-LastUserAction $Name $Context } catch { $null = $_ }
     $actionStart = Get-Date
     try {
         $settingsVar = Get-Variable -Name settings -Scope Script -ErrorAction SilentlyContinue
@@ -1723,14 +1754,16 @@ function Clear-StaleRuntimeState([string]$reason) {
                     Remove-Item -Path $path -Force -ErrorAction SilentlyContinue
                 }
             } catch {
-            }
+                        $null = $_
+                    }
         }
         $script:SettingsForm = $null
         $script:SettingsFormIcon = $null
         $note = if ([string]::IsNullOrWhiteSpace($reason)) { "Cleared stale runtime state." } else { "Cleared stale runtime state ($reason)." }
         Write-BootstrapLog $note "WARN"
     } catch {
-    }
+                $null = $_
+            }
 }
 
 function Get-PathHealthSummary {
@@ -2126,7 +2159,8 @@ function Apply-RuntimeOverridesToState($state, $runtime) {
                     $changed = $true
                 }
             } catch {
-            }
+                        $null = $_
+                    }
             try {
                 $incomingUnlocked = Convert-ToHashtable $incomingStats["BadgeUnlocked"]
                 $currentUnlocked = Convert-ToHashtable $currentStats["BadgeUnlocked"]
@@ -2142,7 +2176,8 @@ function Apply-RuntimeOverridesToState($state, $runtime) {
                     $changed = $true
                 }
             } catch {
-            }
+                        $null = $_
+                    }
             try {
                 $incomingHistory = @($incomingStats["BadgeHistory"])
                 $currentHistory = @($currentStats["BadgeHistory"])
@@ -2174,7 +2209,8 @@ function Apply-RuntimeOverridesToState($state, $runtime) {
                     }
                 }
             } catch {
-            }
+                        $null = $_
+                    }
             try {
                 $incomingProfileMap = Convert-ToHashtable $incomingStats["ProfileLifetimeToggles"]
                 $currentProfileMap = Convert-ToHashtable $currentStats["ProfileLifetimeToggles"]
@@ -2196,7 +2232,8 @@ function Apply-RuntimeOverridesToState($state, $runtime) {
                     $changed = $true
                 }
             } catch {
-            }
+                        $null = $_
+                    }
             try {
                 $incomingProfileHigh = Convert-ToHashtable $incomingStats["ProfileLifetimeHighWater"]
                 $currentProfileHigh = Convert-ToHashtable $currentStats["ProfileLifetimeHighWater"]
@@ -2218,7 +2255,8 @@ function Apply-RuntimeOverridesToState($state, $runtime) {
                     $changed = $true
                 }
             } catch {
-            }
+                        $null = $_
+                    }
             if ($changed) {
                 $state.Stats = $currentStats
             }
@@ -2484,7 +2522,7 @@ $script:DebugModeTimer.Add_Tick({
         $debugStatus = Get-DebugModeStatusText
         if ($script:DebugModeStatus) { $script:DebugModeStatus.Text = $debugStatus }
         if ($script:SettingsDebugModeStatus) { $script:SettingsDebugModeStatus.Text = $debugStatus }
-        try { Request-StatusUpdate } catch { }
+        try { Request-StatusUpdate } catch { $null = $_ }
         if ($script:DebugModeUntil -and (Get-Date) -ge $script:DebugModeUntil) {
             $script:DebugModeTimer.Stop()
             Disable-DebugMode
@@ -2509,7 +2547,8 @@ if (Test-Path $versionPath) {
             $appLastUpdated = $versionInfo.LastWriteTime.ToString("yyyy-MM-dd")
         }
     } catch {
-    }
+                $null = $_
+            }
 }
 $integrityResult = Verify-IntegrityManifest
 if ($integrityResult.Missing) {
@@ -2553,7 +2592,8 @@ function Get-StartupSource {
             }
         }
     } catch {
-    }
+                $null = $_
+            }
     return "Unknown"
 }
 
@@ -2573,6 +2613,8 @@ if (-not (Import-RuntimeModule $updateModulePath "Update-Module")) {
                 [object]$Release,
                 [switch]$SilentNoUpdate
             )
+            $null = $Release
+            $null = $SilentNoUpdate
             Write-SecurityMessage "Update check requested, but update module is unavailable." "WARN" "Update-Module"
             if ($Force) {
                 [System.Windows.Forms.MessageBox]::Show(
@@ -2594,6 +2636,8 @@ if (-not (Import-RuntimeModule $updateModulePath "Update-Module")) {
                 [object]$Release,
                 [switch]$SilentNoUpdate
             )
+            $null = $Release
+            $null = $SilentNoUpdate
             Write-SecurityMessage "Update check requested, but update module version contract failed." "WARN" "Update-Module"
             if ($Force) {
                 [System.Windows.Forms.MessageBox]::Show(
@@ -2652,21 +2696,22 @@ try {
         New-Item -ItemType Directory -Path $script:SettingsDirectory -Force | Out-Null
     }
 } catch {
-}
+            $null = $_
+        }
 # Move root log/settings files into their folders if they were created in the script directory
 $rootLogPath = Join-Path $script:AppRoot "Teams-Always-Green.log"
 if ((Test-Path $rootLogPath) -and ($script:LogDirectory -ne $script:AppRoot)) {
-    try { Move-Item -Path $rootLogPath -Destination $script:logPath -Force } catch { }
+    try { Move-Item -Path $rootLogPath -Destination $script:logPath -Force } catch { $null = $_ }
 }
 $rootSettingsPath = Join-Path $script:AppRoot "Teams-Always-Green.settings.json"
 if ((Test-Path $rootSettingsPath) -and ($script:SettingsDirectory -ne $script:AppRoot)) {
-    try { Move-Item -Path $rootSettingsPath -Destination $script:settingsPath -Force } catch { }
+    try { Move-Item -Path $rootSettingsPath -Destination $script:settingsPath -Force } catch { $null = $_ }
 }
 foreach ($i in 1..3) {
     $rootBak = Join-Path $script:AppRoot ("Teams-Always-Green.settings.json.bak{0}" -f $i)
     $destBak = Join-Path $script:SettingsDirectory ("Teams-Always-Green.settings.json.bak{0}" -f $i)
     if ((Test-Path $rootBak) -and ($script:SettingsDirectory -ne $script:AppRoot)) {
-        try { Move-Item -Path $rootBak -Destination $destBak -Force } catch { }
+        try { Move-Item -Path $rootBak -Destination $destBak -Force } catch { $null = $_ }
     }
 }
 # --- Logging configuration defaults (levels/limits) ---
@@ -2786,7 +2831,8 @@ function Update-PeakWorkingSet {
             $script:PeakWorkingSetMB = $mb
         }
     } catch {
-    }
+                $null = $_
+            }
 }
 
 function Get-ToggleRatePerMinute([double]$uptimeMinutes) {
@@ -2825,7 +2871,8 @@ function Unregister-SystemSessionEndingHandler {
     try {
         [Microsoft.Win32.SystemEvents]::remove_SessionEnding($script:SessionEndingHandler)
     } catch {
-    } finally {
+                $null = $_
+            } finally {
         $script:SessionEndingSubscribed = $false
         $script:SessionEndingHandler = $null
     }
@@ -2835,17 +2882,19 @@ function Register-SystemSessionEndingHandler {
     if ($script:SessionEndingSubscribed) { return }
     try {
         $script:SessionEndingHandler = [Microsoft.Win32.SessionEndingEventHandler]{
-            param($sender, $eventArgs)
+            param($src, $e)
+            $null = $src
             if ($script:CleanupDone -or $script:isShuttingDown) { return }
             $reason = "WindowsSessionEnding"
             try {
-                if ($eventArgs -and $eventArgs.Reason -eq [Microsoft.Win32.SessionEndReasons]::Logoff) {
+                if ($e -and $e.Reason -eq [Microsoft.Win32.SessionEndReasons]::Logoff) {
                     $reason = "WindowsLogoff"
-                } elseif ($eventArgs -and $eventArgs.Reason -eq [Microsoft.Win32.SessionEndReasons]::SystemShutdown) {
+                } elseif ($e -and $e.Reason -eq [Microsoft.Win32.SessionEndReasons]::SystemShutdown) {
                     $reason = "WindowsShutdown"
                 }
             } catch {
-            }
+                        $null = $_
+                    }
             Write-Log ("System session ending detected. Reason={0}" -f $reason) "INFO" $null "Shutdown"
             Invoke-AppShutdownCleanup -Reason $reason
         }
@@ -2871,32 +2920,34 @@ function Invoke-AppShutdownCleanup {
     try {
         Log-ShutdownSummary $Reason
     } catch {
-    }
-    try { Set-ShutdownMarker "clean" } catch { }
-    try { Flush-SettingsSave } catch { }
-    try { Flush-LogBuffer } catch { }
+                $null = $_
+            }
+    try { Set-ShutdownMarker "clean" } catch { $null = $_ }
+    try { Flush-SettingsSave } catch { $null = $_ }
+    try { Flush-LogBuffer } catch { $null = $_ }
 
     try {
         if (Get-Command -Name Set-StatusUpdateTimerEnabled -ErrorAction SilentlyContinue) {
             Set-StatusUpdateTimerEnabled $false
         }
     } catch {
-    }
+                $null = $_
+            }
 
     $stopTimer = {
         param([string]$name)
         $var = Get-Variable -Name $name -Scope Script -ErrorAction SilentlyContinue
         if (-not $var -or -not $var.Value) { return }
         $obj = $var.Value
-        try { if ($obj.PSObject.Methods.Name -contains "Stop") { $obj.Stop() } } catch { }
+        try { if ($obj.PSObject.Methods.Name -contains "Stop") { $obj.Stop() } } catch { $null = $_ }
     }
     $disposeTimer = {
         param([string]$name, [switch]$clearValue)
         $var = Get-Variable -Name $name -Scope Script -ErrorAction SilentlyContinue
         if (-not $var -or -not $var.Value) { return }
         $obj = $var.Value
-        try { if ($obj.PSObject.Methods.Name -contains "Dispose") { $obj.Dispose() } } catch { }
-        if ($clearValue) { try { Set-Variable -Name $name -Scope Script -Value $null -Force } catch { } }
+        try { if ($obj.PSObject.Methods.Name -contains "Dispose") { $obj.Dispose() } } catch { $null = $_ }
+        if ($clearValue) { try { Set-Variable -Name $name -Scope Script -Value $null -Force } catch { $null = $_ } }
     }
 
     $timerNames = @(
@@ -2919,28 +2970,29 @@ function Invoke-AppShutdownCleanup {
         & $stopTimer $timerName
     }
 
-    try { Unregister-Hotkeys } catch { }
-    try { Stop-Toggling } catch { }
+    try { Unregister-Hotkeys } catch { $null = $_ }
+    try { Stop-Toggling } catch { $null = $_ }
     foreach ($timerName in $timerNames) {
         & $disposeTimer $timerName -clearValue
     }
-    try { Stop-SelfHealQueueTimer } catch { }
-    try { if ($script:OverlayIcon) { $script:OverlayIcon.Dispose(); $script:OverlayIcon = $null } } catch { }
+    try { Stop-SelfHealQueueTimer } catch { $null = $_ }
+    try { if ($script:OverlayIcon) { $script:OverlayIcon.Dispose(); $script:OverlayIcon = $null } } catch { $null = $_ }
     try {
         if ($notifyIcon) {
-            try { $notifyIcon.Visible = $false } catch { }
-            try { $notifyIcon.Dispose() } catch { }
+            try { $notifyIcon.Visible = $false } catch { $null = $_ }
+            try { $notifyIcon.Dispose() } catch { $null = $_ }
             $notifyIcon = $null
         }
     } catch {
-    }
+                $null = $_
+            }
 
-    try { Unregister-SystemSessionEndingHandler } catch { }
-    try { Release-MutexOnce } catch { }
-    try { Flush-LogBuffer } catch { }
+    try { Unregister-SystemSessionEndingHandler } catch { $null = $_ }
+    try { Release-MutexOnce } catch { $null = $_ }
+    try { Flush-LogBuffer } catch { $null = $_ }
     $script:CleanupDone = $true
     if (-not $SkipAppExit) {
-        try { [System.Windows.Forms.Application]::Exit() } catch { }
+        try { [System.Windows.Forms.Application]::Exit() } catch { $null = $_ }
     }
 }
 
@@ -2955,7 +3007,8 @@ function Load-AuditChainState {
             }
         }
     } catch {
-    }
+                $null = $_
+            }
 }
 
 function Save-AuditChainState {
@@ -2972,10 +3025,11 @@ function Save-AuditChainState {
             Move-Item -Path $tmp -Destination $script:AuditChainPath -Force
         } catch {
             Copy-Item -Path $tmp -Destination $script:AuditChainPath -Force
-            try { Remove-Item -Path $tmp -Force -ErrorAction SilentlyContinue } catch { }
+            try { Remove-Item -Path $tmp -Force -ErrorAction SilentlyContinue } catch { $null = $_ }
         }
     } catch {
-    }
+                $null = $_
+            }
 }
 
 function Load-SecurityAuditChainState {
@@ -2989,7 +3043,8 @@ function Load-SecurityAuditChainState {
             }
         }
     } catch {
-    }
+                $null = $_
+            }
 }
 
 function Save-SecurityAuditChainState {
@@ -3006,10 +3061,11 @@ function Save-SecurityAuditChainState {
             Move-Item -Path $tmp -Destination $script:SecurityAuditChainPath -Force
         } catch {
             Copy-Item -Path $tmp -Destination $script:SecurityAuditChainPath -Force
-            try { Remove-Item -Path $tmp -Force -ErrorAction SilentlyContinue } catch { }
+            try { Remove-Item -Path $tmp -Force -ErrorAction SilentlyContinue } catch { $null = $_ }
         }
     } catch {
-    }
+                $null = $_
+            }
 }
 
 function Test-SecurityAuditLogChain([int]$tailLines = 300) {
@@ -3082,7 +3138,8 @@ function Load-RollbackState {
             $state.UpdatedUtc = [string]$loaded.UpdatedUtc
         }
     } catch {
-    }
+                $null = $_
+            }
     return $state
 }
 
@@ -3099,7 +3156,8 @@ function Save-RollbackState($state) {
         $json = $payload | ConvertTo-Json -Depth 4
         Write-AtomicTextFile -Path $script:RollbackStatePath -Content $json -Encoding UTF8 -VerifyJson
     } catch {
-    }
+                $null = $_
+            }
 }
 
 function Get-SettingsSequenceValue($settings, [int]$default = 0) {
@@ -3157,7 +3215,8 @@ function Update-RollbackStateFromSettings($settings) {
         $state.LastSettingsHash = Get-SettingsSnapshotHash $snapshot
         $updated = $true
     } catch {
-    }
+                $null = $_
+            }
     if ($updated) {
         Save-RollbackState $state
         $script:RollbackState = $state
@@ -3189,7 +3248,8 @@ function Write-AuditLog([string]$action, [string]$context = $null, [string]$acti
         $script:AuditChainLastHash = $entryHash
         Save-AuditChainState
     } catch {
-    }
+                $null = $_
+            }
 }
 
 function Write-SecurityAuditEvent([string]$eventName, [string]$detail = $null, [string]$level = "WARN", [string]$context = "Security") {
@@ -3232,11 +3292,13 @@ function Write-SecurityAuditEvent([string]$eventName, [string]$detail = $null, [
             }
         }
     } catch {
-    }
+                $null = $_
+            }
     try {
         Write-AuditLog ("Security:{0}" -f $eventName) $context $script:LastUserActionId $detail
     } catch {
-    }
+                $null = $_
+            }
 }
 
 function Set-LastUserAction([string]$name, [string]$context = $null) {
@@ -3371,8 +3433,8 @@ function Start-SelfHealQueueTimer {
 
 function Stop-SelfHealQueueTimer {
     if (-not $script:SelfHealActionTimer) { return }
-    try { $script:SelfHealActionTimer.Stop() } catch { }
-    try { $script:SelfHealActionTimer.Dispose() } catch { }
+    try { $script:SelfHealActionTimer.Stop() } catch { $null = $_ }
+    try { $script:SelfHealActionTimer.Dispose() } catch { $null = $_ }
     $script:SelfHealActionTimer = $null
 }
 
@@ -3501,7 +3563,7 @@ function Invoke-TimerSelfHeal([string]$TimerName) {
     $timer = $timerVar.Value
     if (-not ($timer -is [System.Windows.Forms.Timer])) { return $false }
     try {
-        try { $timer.Stop() } catch { }
+        try { $timer.Stop() } catch { $null = $_ }
         $timer.Start()
         $script:ComponentHeartbeat[$TimerName] = Get-Date
         $script:SelfHealStats.HeartbeatRecoveries = [int]$script:SelfHealStats.HeartbeatRecoveries + 1
@@ -3563,23 +3625,23 @@ function Invoke-RepairAll([string]$Source = "manual") {
     Add-SelfHealRecentAction "RepairAll" "Started" ("Source={0}" -f $Source)
     $completed = @()
     try {
-        try { Flush-SettingsSave; $completed += "Flushed pending settings save" } catch { }
-        try { Validate-RequiredFiles; $completed += "Validated required files" } catch { }
-        try { Start-RepairMode; $completed += "Applied repair mode snapshot recovery" } catch { }
-        try { [void](Ensure-SettingsUiLoaded); $completed += "Validated Settings UI module" } catch { }
-        try { [void](Ensure-HistoryUiLoaded); $completed += "Validated History UI module" } catch { }
+        try { Flush-SettingsSave; $completed += "Flushed pending settings save" } catch { $null = $_ }
+        try { Validate-RequiredFiles; $completed += "Validated required files" } catch { $null = $_ }
+        try { Start-RepairMode; $completed += "Applied repair mode snapshot recovery" } catch { $null = $_ }
+        try { [void](Ensure-SettingsUiLoaded); $completed += "Validated Settings UI module" } catch { $null = $_ }
+        try { [void](Ensure-HistoryUiLoaded); $completed += "Validated History UI module" } catch { $null = $_ }
         foreach ($component in @("WatchdogTimer", "PauseTimer", "HealthMonitorTimer", "LogFlushTimer", "StatusUpdateDebounceTimer")) {
             try {
                 if (Invoke-TimerSelfHeal -TimerName $component) {
                     $completed += ("Restarted {0}" -f $component)
                 }
-            } catch { }
+            } catch { $null = $_ }
         }
-        try { Invoke-HeartbeatWatchdog -Force } catch { }
-        try { Invoke-SelfHealQueue -Force } catch { }
-        try { Request-StatusUpdate } catch { }
-        try { Update-StatusText } catch { }
-        try { if (Get-Command Update-TrayLabels -ErrorAction SilentlyContinue) { Update-TrayLabels } } catch { }
+        try { Invoke-HeartbeatWatchdog -Force } catch { $null = $_ }
+        try { Invoke-SelfHealQueue -Force } catch { $null = $_ }
+        try { Request-StatusUpdate } catch { $null = $_ }
+        try { Update-StatusText } catch { $null = $_ }
+        try { if (Get-Command Update-TrayLabels -ErrorAction SilentlyContinue) { Update-TrayLabels } } catch { $null = $_ }
 
         $summary = if ($completed.Count -gt 0) { ($completed -join "; ") } else { "No repair actions were required." }
         Add-SelfHealRecentAction "RepairAll" "Completed" $summary
@@ -3587,7 +3649,8 @@ function Invoke-RepairAll([string]$Source = "manual") {
         try {
             Show-Balloon "Teams Always Green" "Repair all completed." ([System.Windows.Forms.ToolTipIcon]::Info)
         } catch {
-        }
+                    $null = $_
+                }
         return $true
     } catch {
         Add-SelfHealRecentAction "RepairAll" "Failed" $_.Exception.Message
@@ -3668,8 +3731,8 @@ function Write-LogEx([string]$message, [string]$level = "ERROR", [Exception]$exc
     $hresult = $null
     $win32 = $null
     if ($exception) {
-        try { $hresult = $exception.HResult } catch { }
-        try { $win32 = [Runtime.InteropServices.Marshal]::GetLastWin32Error() } catch { }
+        try { $hresult = $exception.HResult } catch { $null = $_ }
+        try { $win32 = [Runtime.InteropServices.Marshal]::GetLastWin32Error() } catch { $null = $_ }
     }
     $parts = @()
     if ($null -ne $hresult) { $parts += ("HResult=0x{0:X8}" -f $hresult) }
@@ -3721,7 +3784,8 @@ function Rotate-LogIfNeeded([int]$maxBytes = 1048576) {
         Purge-OldLogs
     } catch {
         # Swallow log rotation errors to avoid breaking startup.
-    }
+                $null = $_
+            }
 }
 
 function Purge-OldLogs {
@@ -3737,7 +3801,7 @@ function Purge-OldLogs {
                 try {
                     Remove-Item -Path $_.FullName -Force
                     $removed++
-                } catch { }
+                } catch { $null = $_ }
             }
         }
         if ($removed -gt 0 -and $script:LogLevel -eq "DEBUG") {
@@ -3764,7 +3828,7 @@ function Purge-OldLogs {
                 $total -= $file.Length
                 Remove-Item -Path $file.FullName -Force
                 $removedTotal++
-            } catch { }
+            } catch { $null = $_ }
         }
         if ($removedTotal -gt 0 -and $script:LogLevel -eq "DEBUG") {
             Write-Log ("Log size purge removed {0} file(s) to stay under {1} bytes." -f $removedTotal, $maxTotal) "DEBUG" $null "Logging"
@@ -3790,11 +3854,12 @@ function Flush-LogBuffer {
             }
         }
         if (-not $written) {
-            try { Add-Content -Path $script:FallbackLogPath -Value $lines } catch { }
+            try { Add-Content -Path $script:FallbackLogPath -Value $lines } catch { $null = $_ }
         }
     } catch {
         # Ignore flush errors.
-    } finally {
+                $null = $_
+            } finally {
         $script:IsFlushingLog = $false
     }
 }
@@ -3862,7 +3927,7 @@ function Dump-RecentLogs([string]$reason) {
                 Add-Content -Path $script:FallbackLogPath -Value $line
             }
             Add-Content -Path $script:FallbackLogPath -Value $footer
-        } catch { }
+        } catch { $null = $_ }
     }
 }
 
@@ -3887,7 +3952,7 @@ function Write-FirstErrorSnapshot([string]$reason) {
                 Add-Content -Path $script:FallbackLogPath -Value $line
             }
             Add-Content -Path $script:FallbackLogPath -Value $footer
-        } catch { }
+        } catch { $null = $_ }
     }
 }
 
@@ -4058,7 +4123,7 @@ function Export-SupportBundle([string]$outputPath) {
         Write-Log ("Support bundle export failed: {0}" -f $_.Exception.Message) "ERROR" $_.Exception "Diagnostics"
         return $null
     } finally {
-        try { if (Test-Path $tempRoot) { Remove-Item -Path $tempRoot -Recurse -Force -ErrorAction SilentlyContinue } } catch { }
+        try { if (Test-Path $tempRoot) { Remove-Item -Path $tempRoot -Recurse -Force -ErrorAction SilentlyContinue } } catch { $null = $_ }
     }
 }
 
@@ -4105,7 +4170,8 @@ function Ensure-LogDirectoryWritable {
         $locatorValue = Convert-ToRelativePathIfUnderRoot $script:LogDirectory
         Set-Content -Path $script:LogLocatorPath -Value $locatorValue -Encoding ASCII
     } catch {
-    }
+                $null = $_
+            }
 }
 
 function Write-Log([string]$message, [string]$level = "INFO", [Exception]$exception = $null, [string]$context = $null, [switch]$Force) {
@@ -4304,7 +4370,8 @@ function Set-LogDirectory([string]$directory, [switch]$SkipLog) {
             $allowExternal = [bool]$script:settings.AllowExternalPaths
         }
     } catch {
-    }
+                $null = $_
+            }
     $resolved = Resolve-DirectoryOrDefault $directory $defaultLogDir "Logs" $allowExternal
     if (-not $SkipLog -and -not [string]::IsNullOrWhiteSpace($desired)) {
         $desiredNormalized = Normalize-PathText $desired
@@ -4356,7 +4423,8 @@ function Set-SettingsDirectory([string]$directory, [switch]$SkipLog) {
             $allowExternal = [bool]$script:settings.AllowExternalPaths
         }
     } catch {
-    }
+                $null = $_
+            }
     $resolved = Resolve-DirectoryOrDefault $directory $defaultSettingsDir "Settings" $allowExternal
     if (-not $SkipLog -and -not [string]::IsNullOrWhiteSpace($desired)) {
         $desiredNormalized = Normalize-PathText $desired
@@ -4500,7 +4568,8 @@ function Load-Settings {
             $rawFallback = if (Test-Path $settingsPath) { Get-Content -Path $settingsPath -Raw } else { "" }
             Save-CorruptSettingsCopy $rawFallback
         } catch {
-        }
+                    $null = $_
+                }
         $lastGood = Load-LastGoodSettings
         if ($lastGood) {
             $strictSchema = $false
@@ -4540,7 +4609,8 @@ function Rotate-SettingsBackups {
             }
         }
     } catch {
-    }
+                $null = $_
+            }
 }
 
 function Purge-SettingsBackups {
@@ -4554,7 +4624,8 @@ function Purge-SettingsBackups {
             $deleted++
         }
     } catch {
-    }
+                $null = $_
+            }
     if ($deleted -gt 0) {
         Write-Log ("Purged {0} old settings backups." -f $deleted) "DEBUG" $null "Settings"
     }
@@ -4573,7 +4644,7 @@ function Save-SettingsVersionSnapshot([string]$settingsJson, [int]$sequence) {
         $files = @(Get-ChildItem -Path $script:SettingsVersionsDir -Filter "Teams-Always-Green.settings.v*.json" -File -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending)
         if ($files.Count -gt $keep) {
             foreach ($old in @($files | Select-Object -Skip $keep)) {
-                try { Remove-Item -Path $old.FullName -Force -ErrorAction SilentlyContinue } catch { }
+                try { Remove-Item -Path $old.FullName -Force -ErrorAction SilentlyContinue } catch { $null = $_ }
             }
         }
     } catch {
@@ -4636,8 +4707,8 @@ function Restore-SettingsFromVersionSnapshot([string]$path = $null) {
         Sync-SettingsReference $settings
         Apply-SettingsRuntime
         Save-SettingsImmediate $settings
-        try { Refresh-TrayMenu } catch { }
-        try { Request-StatusUpdate } catch { }
+        try { Refresh-TrayMenu } catch { $null = $_ }
+        try { Request-StatusUpdate } catch { $null = $_ }
 
         Write-Log ("Restored settings from snapshot: {0}" -f $targetPath) "INFO" $null "Settings-Version"
         return [pscustomobject]@{ Success = $true; Message = "Settings restored from snapshot."; Path = $targetPath }
@@ -4652,7 +4723,8 @@ function Save-LastGoodStateRaw([string]$rawJson) {
     try {
         Write-AtomicTextFile -Path $script:StateLastGoodPath -Content $rawJson -Encoding UTF8
     } catch {
-    }
+                $null = $_
+            }
 }
 
 function Save-CorruptStateCopy([string]$rawJson) {
@@ -4663,7 +4735,8 @@ function Save-CorruptStateCopy([string]$rawJson) {
         $target = Join-Path $script:StateCorruptDir ("Teams-Always-Green.state.corrupt.{0}.json" -f $stamp)
         Write-AtomicTextFile -Path $target -Content $rawJson -Encoding UTF8
     } catch {
-    }
+                $null = $_
+            }
 }
 
 function Load-LastGoodState {
@@ -4675,7 +4748,8 @@ function Load-LastGoodState {
             }
         }
     } catch {
-    }
+                $null = $_
+            }
     return $null
 }
 
@@ -4756,7 +4830,8 @@ function Load-State {
             $rawFallback = if (Test-Path $script:StatePath) { Get-Content -Path $script:StatePath -Raw } else { "" }
             Save-CorruptStateCopy $rawFallback
         } catch {
-        }
+                    $null = $_
+                }
         $lastGood = Load-LastGoodState
         if ($lastGood) {
             Write-Log "Recovered state from last known good snapshot." "WARN" $null "Load-State"
@@ -4841,7 +4916,8 @@ function Sync-StateFromSettings($settings) {
                     $baseStats = Convert-ToHashtable $stateFromDisk.Stats
                 }
             } catch {
-            }
+                        $null = $_
+                    }
         }
 
         if ($baseStats.Count -gt 0) {
@@ -4962,7 +5038,8 @@ function Sync-SettingsReference($settings) {
     try {
         Set-Variable -Name settings -Scope Script -Value $settings -Force
     } catch {
-    }
+                $null = $_
+            }
 }
 
 function Copy-SettingsValue($value) {
@@ -5082,7 +5159,7 @@ function Show-ActionToast([string]$message, [string]$title = "Teams-Always-Green
         if ($settingsFormVar -and $settingsFormVar.Value -and -not $settingsFormVar.Value.IsDisposed) {
             $settingsFormVisible = [bool]$settingsFormVar.Value.Visible
         }
-    } catch { }
+    } catch { $null = $_ }
     if (-not $ForceBalloon -and $settingsFormVisible -and $script:SettingsSaveLabel) {
         Show-SettingsSaveToast $message
         return
@@ -5092,16 +5169,16 @@ function Show-ActionToast([string]$message, [string]$title = "Teams-Always-Green
     if ($ForceBalloon) {
         try {
             $notifyIcon.ShowBalloonTip(1400, $title, $message, [System.Windows.Forms.ToolTipIcon]::Info)
-        } catch { }
+        } catch { $null = $_ }
         return
     }
     if (Get-Command -Name Show-Balloon -ErrorAction SilentlyContinue) {
-        try { Show-Balloon $title $message ([System.Windows.Forms.ToolTipIcon]::Info) } catch { }
+        try { Show-Balloon $title $message ([System.Windows.Forms.ToolTipIcon]::Info) } catch { $null = $_ }
         return
     }
     try {
         $notifyIcon.ShowBalloonTip(1400, $title, $message, [System.Windows.Forms.ToolTipIcon]::Info)
-    } catch { }
+    } catch { $null = $_ }
 }
 
 function Set-StartupLoadingIndicator([bool]$enabled, [string]$stage = "Starting") {
@@ -5120,7 +5197,7 @@ function Set-StartupLoadingIndicator([bool]$enabled, [string]$stage = "Starting"
                 $notifyIcon.Text = "Teams-Always-Green"
             }
         }
-    } catch { }
+    } catch { $null = $_ }
 }
 
 function Clear-SettingsFieldErrors {
@@ -5608,7 +5685,8 @@ function Save-SettingsImmediate($settings) {
                 $sequenceFloor = [Math]::Max(0, [int]$script:RollbackState.HighestSettingsSequence)
             }
         } catch {
-        }
+                    $null = $_
+                }
         $currentSequence = Get-SettingsSequenceValue $settings 0
         $nextSequence = [Math]::Max($currentSequence + 1, $sequenceFloor + 1)
         Set-SettingsPropertyValue $settings "SettingsSequence" $nextSequence
@@ -5655,7 +5733,7 @@ function Save-SettingsImmediate($settings) {
                 $script:SelfHealStats.SettingsRepairCount = [int]$script:SelfHealStats.SettingsRepairCount + 1
                 $fallbackBackup = Join-Path $script:SettingsDirectory "Teams-Always-Green.settings.json.bak1"
                 if (Test-Path $fallbackBackup) {
-                    try { Copy-Item -Path $fallbackBackup -Destination $settingsPath -Force } catch { }
+                    try { Copy-Item -Path $fallbackBackup -Destination $settingsPath -Force } catch { $null = $_ }
                 }
                 Write-AtomicTextFile -Path $settingsPath -Content $settingsJson -Encoding UTF8 -VerifyJson
                 $saveVerifyRetry = Test-SavedSettingsFile -path $settingsPath -expectedSequence $nextSequence
@@ -5668,7 +5746,7 @@ function Save-SettingsImmediate($settings) {
         } catch {
             $fallbackBackup = Join-Path $script:SettingsDirectory "Teams-Always-Green.settings.json.bak1"
             if (Test-Path $fallbackBackup) {
-                try { Copy-Item -Path $fallbackBackup -Destination $settingsPath -Force } catch { }
+                try { Copy-Item -Path $fallbackBackup -Destination $settingsPath -Force } catch { $null = $_ }
             }
             Add-SelfHealRecentAction "SettingsSaveVerify" "Failed" $_.Exception.Message
             throw
@@ -5717,14 +5795,14 @@ function Save-SettingsImmediate($settings) {
         $script:LastSettingsSnapshotHash = $newHash
         $script:LastSettingsSaveOk = $true
         $script:LastSettingsSaveMessage = ""
-        try { Purge-SettingsBackups } catch { }
+        try { Purge-SettingsBackups } catch { $null = $_ }
         try {
             $savedHash = Get-SettingsFileHash
             if ($savedHash) {
                 if (-not $script:AppState) { $script:AppState = [pscustomobject]@{} }
                 $script:AppState.SettingsHash = $savedHash
             }
-        } catch { }
+        } catch { $null = $_ }
         Sync-SettingsReference $settings
         $script:BadgeTrackingModeLastApplied = [string](Get-SettingsPropertyValue $settings "BadgeTrackingMode" "Global")
         Save-StateImmediate $script:AppState
@@ -5785,7 +5863,8 @@ function Convert-SettingsSnapshotValueToStableString($value, [int]$depth = 0) {
         try {
             $value = Convert-ToHashtable $value
         } catch {
-        }
+                    $null = $_
+                }
     }
     if ($value -is [System.Collections.IDictionary]) {
         $parts = @()
@@ -5928,7 +6007,7 @@ function Save-ProfilesLastGood {
             Move-Item -Path $tmp -Destination $script:ProfilesLastGoodPath -Force
         } catch {
             Copy-Item -Path $tmp -Destination $script:ProfilesLastGoodPath -Force
-            try { Remove-Item -Path $tmp -Force -ErrorAction SilentlyContinue } catch { }
+            try { Remove-Item -Path $tmp -Force -ErrorAction SilentlyContinue } catch { $null = $_ }
         }
     } catch {
         Write-Log "Failed to save profile last-good file." "WARN" $_.Exception "Profiles"
@@ -5940,7 +6019,8 @@ function Copy-ObjectDeep($obj) {
     try {
         if ($obj -is [string] -or $obj.GetType().IsValueType) { return $obj }
     } catch {
-    }
+                $null = $_
+            }
     try {
         $json = $obj | ConvertTo-Json -Depth 20 -Compress
         if ([string]::IsNullOrWhiteSpace($json)) { return $null }
@@ -5982,7 +6062,7 @@ function Save-ProfileVersionSnapshot([string]$name, $snapshot) {
         $files = @(Get-ChildItem -Path $profileDir -Filter "$safeName.v*.json" -File -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending)
         if ($files.Count -gt $keep) {
             foreach ($old in @($files | Select-Object -Skip $keep)) {
-                try { Remove-Item -Path $old.FullName -Force -ErrorAction SilentlyContinue } catch { }
+                try { Remove-Item -Path $old.FullName -Force -ErrorAction SilentlyContinue } catch { $null = $_ }
             }
         }
     } catch {
@@ -6106,7 +6186,7 @@ function Get-ProfileSnapshotHashFromSettings($source) {
                 $pairs += ("ReadOnly={0}" -f (Get-ProfileReadOnly $source.Profiles[$activeName]))
             }
         }
-    } catch { }
+    } catch { $null = $_ }
     return ($pairs -join "|")
 }
 
@@ -6389,7 +6469,7 @@ function Get-ProfileSnapshot($source) {
                 $readOnly = Get-ProfileReadOnly $source.Profiles[$activeName]
             }
         }
-    } catch { }
+    } catch { $null = $_ }
     $snapshot = [pscustomobject]@{
         ProfileSchemaVersion = $script:ProfileSchemaVersion
         ReadOnly = $readOnly
@@ -6416,7 +6496,8 @@ function Apply-ProfileSnapshot($target, $profileSnapshot) {
         if ($settings -and ($settings.PSObject.Properties.Name -contains "SecurityModeEnabled") -and [bool]$settings.SecurityModeEnabled) { $strictProfileValidation = $true }
         if ($settings -and ($settings.PSObject.Properties.Name -contains "StrictProfileImport") -and [bool]$settings.StrictProfileImport) { $strictProfileValidation = $true }
     } catch {
-    }
+                $null = $_
+            }
     $validation = Test-ProfileSnapshot $profileSnapshot -Strict:$strictProfileValidation
     if (-not $validation.IsValid) {
         $msg = "Profile is invalid: " + (($validation.Issues | Select-Object -First 4) -join ", ")
@@ -6747,7 +6828,7 @@ if (-not $settings) {
         Write-Log "Safe Mode forced due to settings recovery failure." "WARN" $null "Load-Settings"
     }
 } else {
-    try { Purge-SettingsBackups } catch { }
+    try { Purge-SettingsBackups } catch { $null = $_ }
     $settings = Migrate-Settings $settings
     foreach ($prop in $defaultSettings.PSObject.Properties.Name) {
         if (-not ($settings.PSObject.Properties.Name -contains $prop)) {
@@ -6968,7 +7049,7 @@ if ($pathSettingsChanged) {
 
 if ($settings.PSObject.Properties.Name -contains "HardenPermissions") {
     if ([bool]$settings.HardenPermissions) {
-        try { Harden-AppPermissions } catch { }
+        try { Harden-AppPermissions } catch { $null = $_ }
     }
 }
 
@@ -7141,7 +7222,7 @@ trap {
                 $fallback = Join-Path $script:LogDirectory "Teams-Always-Green.fallback.log"
                 $msg = "[{0}] [FATAL] [Trap] Unhandled exception: {1}" -f (Format-DateTime (Get-Date)), $_.Exception.Message
                 Add-Content -Path $fallback -Value $msg
-            } catch { }
+            } catch { $null = $_ }
         }
         if ($_.InvocationInfo -and $_.InvocationInfo.PositionMessage) {
             $positionLine = "Position: " + $_.InvocationInfo.PositionMessage.Trim()
@@ -7151,7 +7232,7 @@ trap {
                 Write-BootstrapLog $positionLine "ERROR"
             }
         }
-        try { Flush-LogBuffer } catch { }
+        try { Flush-LogBuffer } catch { $null = $_ }
         $errorIdValue = "N/A"
         $lastErrorVar = Get-Variable -Name LastErrorId -Scope Script -ErrorAction SilentlyContinue
         if ($lastErrorVar -and $lastErrorVar.Value) { $errorIdValue = $lastErrorVar.Value }
@@ -7233,7 +7314,8 @@ if (-not $overrideMinimal -and $savedMinimalState -and ($savedMinimalState.PSObj
             Save-CrashState $crashState
         }
     } catch {
-    }
+                $null = $_
+            }
     Write-Log "Startup: minimal mode override restored from persisted state." "INFO" $null "Startup"
 }
 $script:OverrideMinimalMode = $overrideMinimal
@@ -7241,7 +7323,7 @@ if ($previousShutdown -and $previousShutdown -ne "clean") {
     Write-Log "Crash detected: previous session did not exit cleanly." "WARN" $null "Startup"
     $recoveryTier = 0
     try {
-        try { Mark-FunStatsCrashEvent } catch { }
+        try { Mark-FunStatsCrashEvent } catch { $null = $_ }
         $crashState.Count = [int]$crashState.Count + 1
         $crashState.LastCrash = (Get-Date).ToString("o")
         Save-CrashState $crashState
@@ -7252,7 +7334,8 @@ if ($previousShutdown -and $previousShutdown -ne "clean") {
             Write-Log ("Minimal mode enabled: {0}" -f $script:MinimalModeReason) "WARN" $null "Startup"
         }
     } catch {
-    }
+                $null = $_
+            }
     Clear-StaleRuntimeState "unclean shutdown"
     try {
         $lastGood = Load-LastGoodSettings
@@ -7279,7 +7362,8 @@ if ($previousShutdown -and $previousShutdown -ne "clean") {
             }
         }
     } catch {
-    }
+                $null = $_
+            }
 } else {
     $script:CrashRecoveryTier = 0
     $script:DeferredStartupSkipUpdate = $false
@@ -7298,7 +7382,7 @@ if ($script:OverrideMinimalMode) {
     $script:MinimalModeActive = $false
     $script:MinimalModeReason = $null
 }
-try { Sync-MinimalModeState "Startup" } catch { }
+try { Sync-MinimalModeState "Startup" } catch { $null = $_ }
 Write-BootStage "Crash state handled"
 Set-ShutdownMarker "started"
 Write-Log "" "INFO" $null "Init"
@@ -7552,7 +7636,8 @@ function Set-FormTaskbarIcon($form, [string]$iconPath) {
             [FormIconNative]::SendMessage($form.Handle, 0x80, [IntPtr]0, $icon.Handle) | Out-Null
         }
     } catch {
-    }
+                $null = $_
+            }
 }
 
 # --- App state (running/paused flags) ---
@@ -7641,7 +7726,8 @@ function Get-LifetimeCountFromStatsObject($stats, [int64]$fallback = 0) {
             return [int64][Math]::Max(0, [int64]$stats.LifetimeToggleCount)
         }
     } catch {
-    }
+                $null = $_
+            }
     return $safeFallback
 }
 
@@ -7676,7 +7762,8 @@ function Get-PersistentLifetimeToggleCount {
             }
             if ($candidate -gt $maxLifetime) { $maxLifetime = $candidate }
         } catch {
-        }
+                    $null = $_
+                }
     }
 
     try {
@@ -7685,7 +7772,8 @@ function Get-PersistentLifetimeToggleCount {
             if ($pendingLifetime -gt $maxLifetime) { $maxLifetime = $pendingLifetime }
         }
     } catch {
-    }
+                $null = $_
+            }
 
     if ($maxLifetime -lt 0) { $maxLifetime = 0L }
     $script:LifetimeToggleHighWater = [int64]$maxLifetime
@@ -7900,7 +7988,7 @@ function Get-ProfileLifetimeToggleCount($stats, [string]$profileName, [int64]$fa
     $safeProfile = if ([string]::IsNullOrWhiteSpace($profileName)) { "Default" } else { $profileName }
     $profileMap = Convert-ToHashtable $stats["ProfileLifetimeToggles"]
     if ($profileMap.ContainsKey($safeProfile)) {
-        try { return [int64][Math]::Max(0, [int64]$profileMap[$safeProfile]) } catch { }
+        try { return [int64][Math]::Max(0, [int64]$profileMap[$safeProfile]) } catch { $null = $_ }
     }
     return [int64][Math]::Max(0, [int64]$fallback)
 }
@@ -7988,7 +8076,7 @@ function Ensure-BadgeStats($stats, $settingsRef = $null) {
         $icon = "[C]"
         $points = 0
         $unlockedAt = (Get-Date).ToString("o")
-        $profile = ""
+        $profileName = ""
         try {
             $id = [string]$entry.Id
             $name = [string]$entry.Name
@@ -7999,9 +8087,10 @@ function Ensure-BadgeStats($stats, $settingsRef = $null) {
             if ($entry.PSObject.Properties.Match("Icon").Count -gt 0) { $icon = [string]$entry.Icon }
             if ($entry.PSObject.Properties.Match("Points").Count -gt 0) { $points = [int]$entry.Points }
             if ($entry.PSObject.Properties.Match("UnlockedAt").Count -gt 0) { $unlockedAt = [string]$entry.UnlockedAt }
-            if ($entry.PSObject.Properties.Match("Profile").Count -gt 0) { $profile = [string]$entry.Profile }
+            if ($entry.PSObject.Properties.Match("Profile").Count -gt 0) { $profileName = [string]$entry.Profile }
         } catch {
-        }
+                    $null = $_
+                }
         if ([string]::IsNullOrWhiteSpace($id)) { continue }
         if ([string]::IsNullOrWhiteSpace($name)) { $name = $id }
         if ([string]::IsNullOrWhiteSpace($scope)) { $scope = "global" }
@@ -8017,7 +8106,7 @@ function Ensure-BadgeStats($stats, $settingsRef = $null) {
             Icon = $icon
             Points = $points
             UnlockedAt = $unlockedAt
-            Profile = $profile
+            Profile = $profileName
         }
         $historyList += $normalized
         if (-not $unlockedMap.ContainsKey($id)) {
@@ -8031,7 +8120,7 @@ function Ensure-BadgeStats($stats, $settingsRef = $null) {
                 Icon = $icon
                 Points = $points
                 UnlockedAt = $unlockedAt
-                Profile = $profile
+                Profile = $profileName
             }
         }
     }
@@ -8215,7 +8304,8 @@ function Update-BadgeProgress($stats, $settingsRef, [DateTime]$now = (Get-Date),
         try {
             Write-Log ("Badge unlocked: {0} [{1}] scope={2}" -f [string]$candidate.Name, [string]$candidate.Kind, [string]$candidate.Scope) "INFO" $null "Badges"
         } catch {
-        }
+                    $null = $_
+                }
         [void]$newUnlocks.Add($candidate)
     }
 
@@ -8270,11 +8360,12 @@ function Update-BadgeProgress($stats, $settingsRef, [DateTime]$now = (Get-Date),
             try {
                 Show-ActionToast $toast "Badge Unlocked" -ForceBalloon
             } catch {
-            }
+                        $null = $_
+                    }
         }
         if ($newUnlocks.Count -gt $showCount) {
             $remaining = $newUnlocks.Count - $showCount
-            try { Show-ActionToast ("Badge streak: +{0} more unlocks" -f $remaining) "Badge Unlocked" -ForceBalloon } catch { }
+            try { Show-ActionToast ("Badge streak: +{0} more unlocks" -f $remaining) "Badge Unlocked" -ForceBalloon } catch { $null = $_ }
         }
     }
 
@@ -8400,7 +8491,8 @@ function Get-BadgeSummary($stats, $settingsRef, [DateTime]$now = (Get-Date)) {
                 $stats = Convert-ToHashtable $updateResult.Stats
             }
         } catch {
-        }
+                    $null = $_
+                }
         $activeProfile = [string](Get-SettingsPropertyValue $settingsRef "ActiveProfile" "Default")
         if ([string]::IsNullOrWhiteSpace($activeProfile)) { $activeProfile = "Default" }
         $trackingMode = Get-BadgeTrackingMode $settingsRef
@@ -8415,7 +8507,8 @@ function Get-BadgeSummary($stats, $settingsRef, [DateTime]$now = (Get-Date)) {
             try {
                 if ([int64]$effectiveToggles -ge [int64]$def.Value) { $milestoneUnlockedByProgress++ }
             } catch {
-            }
+                        $null = $_
+                    }
         }
         if ($catalogUnlocked -lt $milestoneUnlockedByProgress) {
             $catalogUnlocked = $milestoneUnlockedByProgress
@@ -8511,7 +8604,8 @@ function Get-BadgeSummary($stats, $settingsRef, [DateTime]$now = (Get-Date)) {
         try {
             Write-LogThrottled "BadgeSummary-SafeFallback" ("Badge summary generation failed; using safe summary fallback: {0}" -f $summaryError) "WARN" 60
         } catch {
-        }
+                    $null = $_
+                }
 
         $safeStats = Convert-ToHashtable $stats
         $trackingMode = "Global"
@@ -8532,13 +8626,11 @@ function Get-BadgeSummary($stats, $settingsRef, [DateTime]$now = (Get-Date)) {
         $nextBadgeText = ("Rookie (100) [Bronze] - {0:N0} left" -f [Math]::Max(0L, (100L - $effectiveToggles)))
         $milestonePctText = "0.0%"
         $currentRarity = "Common"
-        $currentTier = "Bronze"
         $milestoneText = ("Next: Rookie (100) - {0:N0} left" -f [Math]::Max(0L, (100L - $effectiveToggles)))
         try {
             $milestoneInfo = Get-MilestoneInfo $effectiveToggles
             if ($milestoneInfo) {
                 $currentRarity = [string]$milestoneInfo.CurrentRarity
-                $currentTier = [string]$milestoneInfo.CurrentTier
                 $currentBadgeText = if ([int64]$milestoneInfo.CurrentValue -gt 0) {
                     [string]$milestoneInfo.CurrentName
                 } else {
@@ -8557,13 +8649,14 @@ function Get-BadgeSummary($stats, $settingsRef, [DateTime]$now = (Get-Date)) {
                 }
             }
         } catch {
-        }
+                    $null = $_
+                }
 
         $scopeEntries = @()
         try { $scopeEntries = @(Get-BadgeScopeUnlockedEntries $safeStats $settingsRef "") } catch { $scopeEntries = @() }
         $catalogUnlocked = @($scopeEntries).Count
         $catalogTotal = $catalogUnlocked
-        try { $catalogTotal = @(Get-BadgeCatalogDefinitions).Count } catch { }
+        try { $catalogTotal = @(Get-BadgeCatalogDefinitions).Count } catch { $null = $_ }
         if ($catalogTotal -lt $catalogUnlocked) { $catalogTotal = $catalogUnlocked }
         $catalogLocked = [Math]::Max(0, ($catalogTotal - $catalogUnlocked))
 
@@ -8603,7 +8696,8 @@ function Get-BadgeSummary($stats, $settingsRef, [DateTime]$now = (Get-Date)) {
                 }
             }
         } catch {
-        }
+                    $null = $_
+                }
 
         $points = 0
         try { $points = [int]$safeStats["BadgePoints"] } catch { $points = 0 }
@@ -8666,7 +8760,7 @@ function Export-BadgeShareCard($settingsRef = $null, [switch]$OpenFolder) {
     $content = ($lines -join "`r`n")
     Write-AtomicTextFile -Path $path -Content $content -Encoding UTF8
     if ($OpenFolder) {
-        try { Start-Process -FilePath explorer.exe -ArgumentList ("`"{0}`"" -f $script:BadgeShareCardsDir) | Out-Null } catch { }
+        try { Start-Process -FilePath explorer.exe -ArgumentList ("`"{0}`"" -f $script:BadgeShareCardsDir) | Out-Null } catch { $null = $_ }
     }
     return $path
 }
@@ -8856,7 +8950,8 @@ function Get-LifetimeToggleCount($stats, [int]$fallback = 0) {
             return [Math]::Max(0, $count)
         }
     } catch {
-    }
+                $null = $_
+            }
     return $safeFallback
 }
 
@@ -8930,7 +9025,7 @@ function Get-ToggleStreaks($stats) {
     foreach ($key in $daily.Keys) {
         $count = [int]$daily[$key]
         if ($count -gt 0) {
-            try { $dates += [DateTime]::ParseExact($key, "yyyy-MM-dd", $null) } catch { }
+            try { $dates += [DateTime]::ParseExact($key, "yyyy-MM-dd", $null) } catch { $null = $_ }
         }
     }
     if (@($dates).Count -eq 0) { return $result }
@@ -10143,7 +10238,7 @@ function Enable-DebugMode {
     if ($script:SettingsDebugModeStatus) { $script:SettingsDebugModeStatus.Text = $debugStatus }
     Update-LogLevelMenuChecks
     if (Get-Command -Name Start-LogSummaryTimer -ErrorAction SilentlyContinue) { Start-LogSummaryTimer }
-    try { Request-StatusUpdate } catch { }
+    try { Request-StatusUpdate } catch { $null = $_ }
     Write-Log "Debug mode enabled for 10 minutes (all categories forced on)." "INFO" $null "Logging"
 }
 
@@ -10165,7 +10260,7 @@ function Disable-DebugMode {
     if ($script:DebugModeTimer) { $script:DebugModeTimer.Stop() }
     if ($script:DebugModeStatus) { $script:DebugModeStatus.Text = "Off" }
     if ($script:SettingsDebugModeStatus) { $script:SettingsDebugModeStatus.Text = "Off" }
-    try { Request-StatusUpdate } catch { }
+    try { Request-StatusUpdate } catch { $null = $_ }
 }
 
 function Write-LogSnapshot {
@@ -10182,7 +10277,7 @@ function Clear-LogFile {
 function Reset-SafeMode {
     $script:safeModeActive = $false
     $script:toggleFailCount = 0
-    try { Sync-MinimalModeState "ResetSafeMode" } catch { }
+    try { Sync-MinimalModeState "ResetSafeMode" } catch { $null = $_ }
     Request-StatusUpdate
     Write-Log "Safe Mode reset." "INFO" $null "SafeMode"
 }
@@ -10205,7 +10300,7 @@ function Reset-CrashRecoveryState {
     $script:MinimalModeReason = $null
     $script:safeModeActive = $false
     $script:toggleFailCount = 0
-    try { Sync-MinimalModeState "ResetCrashRecoveryState" } catch { }
+    try { Sync-MinimalModeState "ResetCrashRecoveryState" } catch { $null = $_ }
     Request-StatusUpdate
     Write-Log "Crash recovery state reset (crash counters and safe mode cleared)." "INFO" $null "SafeMode"
 }
@@ -10221,14 +10316,15 @@ function Invoke-SettingsShownStep([string]$name, [ScriptBlock]$action) {
 function Recover-Now {
     $script:safeModeActive = $false
     $script:toggleFailCount = 0
-    try { Register-Hotkeys } catch { }
-    try { Update-NextToggleTime } catch { }
+    try { Register-Hotkeys } catch { $null = $_ }
+    try { Update-NextToggleTime } catch { $null = $_ }
     Request-StatusUpdate
     Write-Log "Recovery requested: Safe Mode cleared and hotkeys re-registered." "INFO" $null "SafeMode"
     try {
         Show-Balloon "Teams Always Green" "Recovery complete. Safe Mode cleared and hotkeys re-registered." ([System.Windows.Forms.ToolTipIcon]::Info)
     } catch {
-    }
+                $null = $_
+            }
 }
 
 function Start-RepairMode {
@@ -10237,8 +10333,8 @@ function Start-RepairMode {
     Add-SelfHealRecentAction "RepairMode" "Started" ""
     try {
         Write-Log "Repair mode started." "WARN" $null "Recovery"
-        try { Flush-SettingsSave } catch { }
-        try { Reset-CrashRecoveryState } catch { }
+        try { Flush-SettingsSave } catch { $null = $_ }
+        try { Reset-CrashRecoveryState } catch { $null = $_ }
         try {
             $lastGoodSettings = Load-LastGoodSettings
             if ($lastGoodSettings) {
@@ -10264,12 +10360,12 @@ function Start-RepairMode {
             Write-LogExceptionDeduped "Repair mode failed while restoring runtime state snapshot." "WARN" $_.Exception "Recovery" 20
             Add-SelfHealRecentAction "RepairMode" "Retry" "State snapshot restore failed"
         }
-        try { Apply-SettingsRuntime } catch { }
-        try { Request-StatusUpdate } catch { }
-        try { Update-TrayLabels } catch { }
+        try { Apply-SettingsRuntime } catch { $null = $_ }
+        try { Request-StatusUpdate } catch { $null = $_ }
+        try { Update-TrayLabels } catch { $null = $_ }
         try {
             Show-Balloon "Teams Always Green" "Repair mode completed. Recovery actions were applied." ([System.Windows.Forms.ToolTipIcon]::Info)
-        } catch { }
+        } catch { $null = $_ }
         Write-Log "Repair mode completed." "INFO" $null "Recovery"
         Add-SelfHealRecentAction "RepairMode" "Completed" "Recovery actions applied"
     } finally {
@@ -10304,8 +10400,8 @@ function Start-HealthMonitor {
             if ($script:SelfHealStats.SuppressedErrorCount -gt 0) {
                 Write-LogThrottled "HealthMonitor-SuppressedErrors" ("Health monitor: suppressed repeated errors={0}" -f [int]$script:SelfHealStats.SuppressedErrorCount) "INFO" 300
             }
-            try { Invoke-HeartbeatWatchdog } catch { }
-            try { Invoke-SelfHealQueue } catch { }
+            try { Invoke-HeartbeatWatchdog } catch { $null = $_ }
+            try { Invoke-SelfHealQueue } catch { $null = $_ }
         }
     })
     $script:ComponentHeartbeat["HealthMonitorTimer"] = Get-Date
@@ -10738,7 +10834,7 @@ function Do-Toggle([string]$source) {
             if ($_.InvocationInfo -and $_.InvocationInfo.PositionMessage) {
                 Write-Log ("Toggle failure location: {0}" -f $_.InvocationInfo.PositionMessage.Trim()) "ERROR" $null "Do-Toggle"
             }
-        } catch { }
+        } catch { $null = $_ }
         $script:toggleFailCount++
         $script:LastToggleResult = "Failed"
         $script:LastToggleResultTime = Get-Date
@@ -10823,7 +10919,7 @@ function Start-Toggling {
     Log-StateSummary "Start-Toggling"
     Show-Balloon "Teams-Always-Green" "Started." ([System.Windows.Forms.ToolTipIcon]::Info)
     Update-TrayLabels
-    try { Update-StatusText } catch { }
+    try { Update-StatusText } catch { $null = $_ }
 }
 
 function Stop-Toggling {
@@ -10842,7 +10938,7 @@ function Stop-Toggling {
     Log-StateSummary "Stop-Toggling"
     Show-Balloon "Teams-Always-Green" "Stopped." ([System.Windows.Forms.ToolTipIcon]::Info)
     Update-TrayLabels
-    try { Update-StatusText } catch { }
+    try { Update-StatusText } catch { $null = $_ }
 }
 
 function Pause-Toggling([int]$minutes) {
@@ -10914,22 +11010,22 @@ function Soft-Restart {
     $wasRunning = $script:isRunning
     $wasPaused = $script:isPaused
 
-    try { Flush-SettingsSave } catch { }
-    try { Flush-LogBuffer } catch { }
+    try { Flush-SettingsSave } catch { $null = $_ }
+    try { Flush-LogBuffer } catch { $null = $_ }
 
-    try { $timer.Stop() } catch { }
-    try { $pauseTimer.Stop() } catch { }
-    try { $watchdogTimer.Stop() } catch { }
-    try { $statusUpdateTimer.Stop() } catch { }
-    try { if ($script:DeferredMaintenanceTimer) { $script:DeferredMaintenanceTimer.Stop() } } catch { }
+    try { $timer.Stop() } catch { $null = $_ }
+    try { $pauseTimer.Stop() } catch { $null = $_ }
+    try { $watchdogTimer.Stop() } catch { $null = $_ }
+    try { $statusUpdateTimer.Stop() } catch { $null = $_ }
+    try { if ($script:DeferredMaintenanceTimer) { $script:DeferredMaintenanceTimer.Stop() } } catch { $null = $_ }
 
     Unregister-Hotkeys
     Apply-SettingsRuntime
     Refresh-TrayMenu -SkipHeavyBuild
 
-    try { $pauseTimer.Start() } catch { }
-    try { $watchdogTimer.Start() } catch { }
-    try { $statusUpdateTimer.Start() } catch { }
+    try { $pauseTimer.Start() } catch { $null = $_ }
+    try { $watchdogTimer.Start() } catch { $null = $_ }
+    try { $statusUpdateTimer.Start() } catch { $null = $_ }
 
     if ($wasRunning -and -not $wasPaused) {
         Start-Toggling
@@ -10989,7 +11085,7 @@ if ($script:TrayModuleHealthy -and -not (Test-ModuleVersionContract "Tray-Module
 if (-not $script:TrayModuleHealthy) {
     $script:SelfHealStats.TrayFallbackCount = [int]$script:SelfHealStats.TrayFallbackCount + 1
     Write-Log "Tray-Module: entering self-heal fallback mode (limited tray features)." "WARN" $null "Tray-Module"
-    try { Ensure-TrayModuleFallback } catch { }
+    try { Ensure-TrayModuleFallback } catch { $null = $_ }
 }
 
 $script:SettingsUiLoaded = $false
@@ -11153,12 +11249,14 @@ function Ensure-TrayModuleFallback {
     if (-not (Get-Command Invoke-TrayAction -ErrorAction SilentlyContinue)) {
         Set-Item -Path Function:\script:Invoke-TrayAction -Value {
             param([string]$name, [ScriptBlock]$action)
+            $null = $name
             try { if ($action) { & $action } } catch { Write-LogThrottled "TrayFallback-Action" ("Tray fallback action failed: {0}" -f $_.Exception.Message) "ERROR" 10 }
         } -Force
     }
     if (-not (Get-Command Set-StatusUpdateTimerEnabled -ErrorAction SilentlyContinue)) {
         Set-Item -Path Function:\script:Set-StatusUpdateTimerEnabled -Value {
             param([bool]$enabled)
+            $null = $enabled
         } -Force
     }
 
@@ -11232,7 +11330,7 @@ $restartItem.Add_Click({
     Write-Log "=======================================================================" "INFO" $null "Restart"
     Write-Log "=                             APP RESTART                             =" "INFO" $null "Restart"
     Write-Log "=======================================================================" "INFO" $null "Restart"
-    try { Set-RestartRequestMarker } catch { }
+    try { Set-RestartRequestMarker } catch { $null = $_ }
     Invoke-AppShutdownCleanup -Reason "Restart" -SkipAppExit
     try {
         Write-Log "Restart spawn: launching new instance." "INFO" $null "Restart"
@@ -11282,7 +11380,8 @@ function New-TraySectionHeader([string]$text) {
     try {
         $item.Font = New-Object System.Drawing.Font($contextMenu.Font, ([System.Drawing.FontStyle]::Bold -bor [System.Drawing.FontStyle]::Underline))
     } catch {
-    }
+                $null = $_
+            }
     return $item
 }
 
@@ -11371,7 +11470,8 @@ if (-not $script:TrayStatusSummaryItem) {
     try {
         $script:TrayStatusSummaryItem.Font = New-Object System.Drawing.Font("Consolas", $contextMenu.Font.Size, [System.Drawing.FontStyle]::Regular)
     } catch {
-    }
+                $null = $_
+            }
 }
 
 $recoveryMenu = New-Object System.Windows.Forms.ToolStripMenuItem("Recovery")
@@ -11446,7 +11546,7 @@ $notifyIcon.ContextMenuStrip = $contextMenu
 Write-Log "Tray icon created." "INFO" $null "Tray"
 Write-BootStage "Tray icon created"
 Set-StartupLoadingIndicator $true "Starting"
-try { Refresh-TrayMenu -SkipHeavyBuild } catch { }
+try { Refresh-TrayMenu -SkipHeavyBuild } catch { $null = $_ }
 Update-LogLevelMenuChecks
 
 # Left-click shows status balloon; double-click toggles start/stop
@@ -11500,22 +11600,22 @@ $contextMenu.Add_Opening({
 
 $contextMenu.Add_Closed({
     Set-StatusUpdateTimerEnabled $false
-    try { if ($contextMenu) { $contextMenu.ShowItemToolTips = $true } } catch { }
+    try { if ($contextMenu) { $contextMenu.ShowItemToolTips = $true } } catch { $null = $_ }
 })
 
 function Refresh-TrayMenu([switch]$SkipHeavyBuild) {
-    try { Rebuild-PauseMenu } catch { }
+    try { Rebuild-PauseMenu } catch { $null = $_ }
     if (-not $SkipHeavyBuild) {
-        try { if ($updateQuickSettingsChecks) { & $updateQuickSettingsChecks } } catch { }
-        try { if ($updateProfilesMenu) { & $updateProfilesMenu } } catch { }
+        try { if ($updateQuickSettingsChecks) { & $updateQuickSettingsChecks } } catch { $null = $_ }
+        try { if ($updateProfilesMenu) { & $updateProfilesMenu } } catch { $null = $_ }
     } else {
         $script:TrayMenuNeedsRefresh = $true
     }
-    try { Update-LogLevelMenuChecks } catch { }
-    try { Apply-MenuFontSize ([int]$settings.FontSize) } catch { }
-    try { Update-ThemePreference } catch { }
-    try { Update-StatusText } catch { }
-    try { Ensure-TrayMenuTooltips $contextMenu.Items } catch { }
+    try { Update-LogLevelMenuChecks } catch { $null = $_ }
+    try { Apply-MenuFontSize ([int]$settings.FontSize) } catch { $null = $_ }
+    try { Update-ThemePreference } catch { $null = $_ }
+    try { Update-StatusText } catch { $null = $_ }
+    try { Ensure-TrayMenuTooltips $contextMenu.Items } catch { $null = $_ }
     if (-not $SkipHeavyBuild) {
         $script:TrayMenuHeavyInitialized = $true
         $script:TrayMenuNeedsRefresh = $false
@@ -11541,7 +11641,7 @@ $watchdogTimer.Add_Tick({
     Invoke-SafeTimerAction "WatchdogTimer" {
         if ($script:isShuttingDown -or $script:CleanupDone) { return }
         $script:WatchdogTickCounter = [int]$script:WatchdogTickCounter + 1
-        try { Update-FunStatsRuntimeProgress (Get-Date) } catch { }
+        try { Update-FunStatsRuntimeProgress (Get-Date) } catch { $null = $_ }
         Update-PeakWorkingSet
         Request-StatusUpdate
         if (($script:WatchdogTickCounter % 2) -eq 0) {
@@ -11567,7 +11667,7 @@ $watchdogTimer.Start()
 $notifyIcon.Visible = $true
 Write-Log "Tray icon visible (startup complete)." "INFO" $null "Tray"
 Write-BootStage "Startup complete"
-try { Start-HealthMonitor } catch { }
+try { Start-HealthMonitor } catch { $null = $_ }
 if (-not $script:PostShowStatusTimer) {
     $script:PostShowStatusTimer = New-Object System.Windows.Forms.Timer
     $script:PostShowStatusTimer.Interval = 250
@@ -11655,11 +11755,11 @@ function Show-FirstRunWizard {
     $languageItems = @(
         [pscustomobject]@{ Code = "auto"; Label = "Auto (System)" },
         [pscustomobject]@{ Code = "en"; Label = "English" },
-        [pscustomobject]@{ Code = "es"; Label = "Español" },
-        [pscustomobject]@{ Code = "fr"; Label = "Français" },
+        [pscustomobject]@{ Code = "es"; Label = "EspaÃƒÂ±ol" },
+        [pscustomobject]@{ Code = "fr"; Label = "FranÃƒÂ§ais" },
         [pscustomobject]@{ Code = "de"; Label = "Deutsch" },
         [pscustomobject]@{ Code = "it"; Label = "Italiano" },
-        [pscustomobject]@{ Code = "pt"; Label = "Português" },
+        [pscustomobject]@{ Code = "pt"; Label = "PortuguÃƒÂªs" },
         [pscustomobject]@{ Code = "nl"; Label = "Nederlands" },
         [pscustomobject]@{ Code = "pl"; Label = "Polski" }
     )
@@ -11754,11 +11854,11 @@ function Show-FirstRunWizard {
         try {
             Ensure-Directory $script:MetaDir "Meta" | Out-Null
             Write-AtomicTextFile -Path $script:FirstRunWizardMarkerPath -Content ((Get-Date).ToString("o")) -Encoding ASCII
-        } catch { }
+        } catch { $null = $_ }
         Save-SettingsImmediate $settings
-        try { Apply-SettingsRuntime } catch { }
-        try { if ($script:TrayMenu) { Localize-MenuItems $script:TrayMenu.Items } } catch { }
-        try { Update-TrayLabels } catch { }
+        try { Apply-SettingsRuntime } catch { $null = $_ }
+        try { if ($script:TrayMenu) { Localize-MenuItems $script:TrayMenu.Items } } catch { $null = $_ }
+        try { Update-TrayLabels } catch { $null = $_ }
         if ($result -eq [System.Windows.Forms.DialogResult]::OK) {
             Show-ActionToast "First-run setup saved"
         }
@@ -11768,7 +11868,7 @@ function Show-FirstRunWizard {
 }
 
 try { Show-FirstRunWizard } catch { Write-Log "First-run wizard failed." "WARN" $_.Exception "Startup" }
-try { Show-FirstRunToast } catch { }
+try { Show-FirstRunToast } catch { $null = $_ }
 
 function Show-StartPrompt {
     $form = New-Object System.Windows.Forms.Form
@@ -11827,7 +11927,8 @@ if (-not $overrideAtStartup -and (Test-Path $script:CrashStatePath)) {
             }
         }
     } catch {
-    }
+                $null = $_
+            }
 }
 
 if ($script:MinimalModeActive -and -not $overrideAtStartup) {
@@ -11850,7 +11951,8 @@ if ($script:MinimalModeActive -and -not $overrideAtStartup) {
             $state.OverrideMinimalModeLogged = $true
             Save-CrashState $state
         } catch {
-        }
+                    $null = $_
+                }
     }
 } elseif ($script:isPaused) {
     Request-StatusUpdate
