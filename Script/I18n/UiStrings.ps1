@@ -99,6 +99,7 @@ $script:UiStrings = @{
         "Clear Log..." = "Clear Log..."
         "Browse..." = "Browse..."
         "Start on Launch" = "Start on Launch"
+        "Auto Start on Restart" = "Auto Start on Restart"
         "Run Once on Launch" = "Run Once on Launch"
         "Quiet Mode" = "Quiet Mode"
         "Settings Folder" = "Settings Folder"
@@ -2721,6 +2722,13 @@ function L([string]$key, [string]$fallback = $null) {
         $script:UiCoverageOverrides[$lang].ContainsKey($key)) {
         $result = [string]$script:UiCoverageOverrides[$lang][$key]
     }
+    if ([string]::IsNullOrWhiteSpace([string]$result)) {
+        if (-not [string]::IsNullOrWhiteSpace([string]$fallback)) {
+            $result = [string]$fallback
+        } else {
+            $result = $key
+        }
+    }
     $script:UiStringCache[$cacheKey] = $result
     return $result
 }
@@ -2769,6 +2777,13 @@ function Localize-MenuItems($items) {
     if (-not $items) { return }
     foreach ($item in $items) {
         if ($item -is [System.Windows.Forms.ToolStripItem]) {
+            $itemName = [string]$item.Name
+            if ($itemName -eq "TopStatusSummaryItem" -or
+                $itemName -eq "TopStatusStateItem" -or
+                $itemName -eq "TopStatusNextItem" -or
+                $itemName -eq "TopStatusProfileItem") {
+                continue
+            }
             $tagText = $null
             if ($item.Tag -is [string] -and -not [string]::IsNullOrWhiteSpace($item.Tag)) {
                 $tagText = $item.Tag

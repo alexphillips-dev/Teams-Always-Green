@@ -289,37 +289,37 @@ function Show-SettingsDialog {
     $statusSpacer1 = New-Object System.Windows.Forms.Label
     $statusSpacer1.Text = ""
     $statusSpacer1.AutoSize = $false
-    $statusSpacer1.Height = 8
+    $statusSpacer1.Height = 0
 
     $statusSpacer2 = New-Object System.Windows.Forms.Label
     $statusSpacer2.Text = ""
     $statusSpacer2.AutoSize = $false
-    $statusSpacer2.Height = 8
+    $statusSpacer2.Height = 0
 
     $statusSpacer3 = New-Object System.Windows.Forms.Label
     $statusSpacer3.Text = ""
     $statusSpacer3.AutoSize = $false
-    $statusSpacer3.Height = 8
+    $statusSpacer3.Height = 0
 
     $statusSpacer4 = New-Object System.Windows.Forms.Label
     $statusSpacer4.Text = ""
     $statusSpacer4.AutoSize = $false
-    $statusSpacer4.Height = 8
+    $statusSpacer4.Height = 0
 
     $statusSpacer5 = New-Object System.Windows.Forms.Label
     $statusSpacer5.Text = ""
     $statusSpacer5.AutoSize = $false
-    $statusSpacer5.Height = 8
+    $statusSpacer5.Height = 0
 
     $statusSpacer6 = New-Object System.Windows.Forms.Label
     $statusSpacer6.Text = ""
     $statusSpacer6.AutoSize = $false
-    $statusSpacer6.Height = 8
+    $statusSpacer6.Height = 0
 
     $statusSpacer7 = New-Object System.Windows.Forms.Label
     $statusSpacer7.Text = ""
     $statusSpacer7.AutoSize = $false
-    $statusSpacer7.Height = 8
+    $statusSpacer7.Height = 0
 
     $statusLayout.Controls.Add($statusLabel, 0, 0)
     $statusLayout.Controls.Add($statusValue, 1, 0)
@@ -363,7 +363,7 @@ function Show-SettingsDialog {
 
     $toggleLayout = New-Object System.Windows.Forms.TableLayoutPanel
     $toggleLayout.ColumnCount = 2
-    $toggleLayout.RowCount = 2
+    $toggleLayout.RowCount = 5
     $toggleLayout.AutoSize = $true
     $toggleLayout.Dock = "Top"
     $toggleLayout.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::AutoSize)))
@@ -389,10 +389,65 @@ function Show-SettingsDialog {
     $toggleLifetimeValue.AutoSize = $true
     $toggleLifetimeValue.Anchor = "Left"
 
+    $badgeTrackingModeLabel = New-Object System.Windows.Forms.Label
+    $badgeTrackingModeLabel.Text = "Badge Tracking"
+    $badgeTrackingModeLabel.AutoSize = $true
+    $badgeTrackingModeLabel.Anchor = "Left"
+
+    $badgeTrackingModeBox = New-Object System.Windows.Forms.ComboBox
+    $badgeTrackingModeBox.DropDownStyle = [System.Windows.Forms.ComboBoxStyle]::DropDownList
+    $badgeTrackingModeBox.Width = 140
+    [void]$badgeTrackingModeBox.Items.Add("Global")
+    [void]$badgeTrackingModeBox.Items.Add("Profile")
+    $badgeTrackingModeSelected = [string](Get-SettingsPropertyValue $settings "BadgeTrackingMode" "Global")
+    if ([string]::IsNullOrWhiteSpace($badgeTrackingModeSelected)) { $badgeTrackingModeSelected = "Global" }
+    if ($badgeTrackingModeSelected.ToLowerInvariant() -eq "profile") {
+        $badgeTrackingModeBox.SelectedItem = "Profile"
+    } else {
+        $badgeTrackingModeBox.SelectedItem = "Global"
+    }
+    $badgeTrackingModeBox.Add_SelectedIndexChanged({
+        if ($script:SettingsIsApplying) { return }
+        $updateScopeVar = Get-Variable -Name UpdateBadgeScopeSummary -Scope Script -ErrorAction SilentlyContinue
+        if ($updateScopeVar -and ($updateScopeVar.Value -is [scriptblock])) { & $updateScopeVar.Value }
+    })
+    $badgeTrackingModeBox.Tag = "Badge Tracking"
+    $script:badgeTrackingModeBox = $badgeTrackingModeBox
+
+    $badgeScopeSummaryLabel = New-Object System.Windows.Forms.Label
+    $badgeScopeSummaryLabel.Text = "Badge Scope"
+    $badgeScopeSummaryLabel.AutoSize = $true
+    $badgeScopeSummaryLabel.Anchor = "Left"
+    $badgeScopeSummaryLabel.Tag = "Badge Scope"
+
+    $badgeScopeSummaryValue = New-Object System.Windows.Forms.Label
+    $badgeScopeSummaryValue.Text = "Shared across all profiles."
+    $badgeScopeSummaryValue.AutoSize = $true
+    $badgeScopeSummaryValue.MaximumSize = New-Object System.Drawing.Size(520, 0)
+    $badgeScopeSummaryValue.Anchor = "Left"
+
+    $badgeScopeRuleLabel = New-Object System.Windows.Forms.Label
+    $badgeScopeRuleLabel.Text = "Switch Rule"
+    $badgeScopeRuleLabel.AutoSize = $true
+    $badgeScopeRuleLabel.Anchor = "Left"
+    $badgeScopeRuleLabel.Tag = "Switch Rule"
+
+    $badgeScopeRuleValue = New-Object System.Windows.Forms.Label
+    $badgeScopeRuleValue.Text = "Mode switches are one-way safe merges. No badge progress is deleted."
+    $badgeScopeRuleValue.AutoSize = $true
+    $badgeScopeRuleValue.MaximumSize = New-Object System.Drawing.Size(520, 0)
+    $badgeScopeRuleValue.Anchor = "Left"
+
     $toggleLayout.Controls.Add($toggleCurrentLabel, 0, 0)
     $toggleLayout.Controls.Add($toggleCurrentValue, 1, 0)
     $toggleLayout.Controls.Add($toggleLifetimeLabel, 0, 1)
     $toggleLayout.Controls.Add($toggleLifetimeValue, 1, 1)
+    $toggleLayout.Controls.Add($badgeTrackingModeLabel, 0, 2)
+    $toggleLayout.Controls.Add($badgeTrackingModeBox, 1, 2)
+    $toggleLayout.Controls.Add($badgeScopeSummaryLabel, 0, 3)
+    $toggleLayout.Controls.Add($badgeScopeSummaryValue, 1, 3)
+    $toggleLayout.Controls.Add($badgeScopeRuleLabel, 0, 4)
+    $toggleLayout.Controls.Add($badgeScopeRuleValue, 1, 4)
     $toggleGroup.Controls.Add($toggleLayout)
 
     $funStatsGroup = New-Object System.Windows.Forms.GroupBox
@@ -405,7 +460,7 @@ function Show-SettingsDialog {
 
     $funStatsLayout = New-Object System.Windows.Forms.TableLayoutPanel
     $funStatsLayout.ColumnCount = 2
-    $funStatsLayout.RowCount = 6
+    $funStatsLayout.RowCount = 25
     $funStatsLayout.AutoSize = $true
     $funStatsLayout.Dock = "Top"
     $funStatsLayout.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::AutoSize)))
@@ -477,23 +532,293 @@ function Show-SettingsDialog {
     $funTotalRunValue.Anchor = "Left"
     $script:SettingsFunTotalRunValue = $funTotalRunValue
 
-    $funStatsLayout.Controls.Add($funDailyLabel, 0, 0)
-    $funStatsLayout.Controls.Add($funDailyValue, 1, 0)
-    $funStatsLayout.Controls.Add($funStreakCurrentLabel, 0, 1)
-    $funStatsLayout.Controls.Add($funStreakCurrentValue, 1, 1)
-    $funStatsLayout.Controls.Add($funStreakBestLabel, 0, 2)
-    $funStatsLayout.Controls.Add($funStreakBestValue, 1, 2)
-    $funStatsLayout.Controls.Add($funMostActiveLabel, 0, 3)
-    $funStatsLayout.Controls.Add($funMostActiveValue, 1, 3)
-    $funStatsLayout.Controls.Add($funLongestPauseLabel, 0, 4)
-    $funStatsLayout.Controls.Add($funLongestPauseValue, 1, 4)
-    $funStatsLayout.Controls.Add($funTotalRunLabel, 0, 5)
-    $funStatsLayout.Controls.Add($funTotalRunValue, 1, 5)
+    $funCrashFreeDaysLabel = New-Object System.Windows.Forms.Label
+    $funCrashFreeDaysLabel.Text = "Crash-Free Days"
+    $funCrashFreeDaysLabel.AutoSize = $true
+    $funCrashFreeDaysLabel.Anchor = "Left"
+
+    $funCrashFreeDaysValue = New-Object System.Windows.Forms.Label
+    $funCrashFreeDaysValue.Text = "0"
+    $funCrashFreeDaysValue.AutoSize = $true
+    $funCrashFreeDaysValue.Anchor = "Left"
+    $script:SettingsFunCrashFreeDaysValue = $funCrashFreeDaysValue
+
+    $funProfileUsageLabel = New-Object System.Windows.Forms.Label
+    $funProfileUsageLabel.Text = "Profile Usage Split"
+    $funProfileUsageLabel.AutoSize = $true
+    $funProfileUsageLabel.Anchor = "Left"
+
+    $funProfileUsageValue = New-Object System.Windows.Forms.Label
+    $funProfileUsageValue.Text = "N/A"
+    $funProfileUsageValue.AutoSize = $true
+    $funProfileUsageValue.Anchor = "Left"
+    $script:SettingsFunProfileUsageValue = $funProfileUsageValue
+
+    $funReliabilityLabel = New-Object System.Windows.Forms.Label
+    $funReliabilityLabel.Text = "Uptime Reliability"
+    $funReliabilityLabel.AutoSize = $true
+    $funReliabilityLabel.Anchor = "Left"
+
+    $funReliabilityValue = New-Object System.Windows.Forms.Label
+    $funReliabilityValue.Text = "100.0%"
+    $funReliabilityValue.AutoSize = $true
+    $funReliabilityValue.Anchor = "Left"
+    $script:SettingsFunReliabilityValue = $funReliabilityValue
+
+    $funTimeSavedLabel = New-Object System.Windows.Forms.Label
+    $funTimeSavedLabel.Text = "Estimated Time Saved"
+    $funTimeSavedLabel.AutoSize = $true
+    $funTimeSavedLabel.Anchor = "Left"
+
+    $funTimeSavedValue = New-Object System.Windows.Forms.Label
+    $funTimeSavedValue.Text = "0m"
+    $funTimeSavedValue.AutoSize = $true
+    $funTimeSavedValue.Anchor = "Left"
+    $script:SettingsFunTimeSavedValue = $funTimeSavedValue
+
+    $funMilestoneLabel = New-Object System.Windows.Forms.Label
+    $funMilestoneLabel.Text = "Milestone Progress"
+    $funMilestoneLabel.AutoSize = $true
+    $funMilestoneLabel.Anchor = "Left"
+
+    $funMilestoneValue = New-Object System.Windows.Forms.Label
+    $funMilestoneValue.Text = "Next: 100 (100 left)"
+    $funMilestoneValue.AutoSize = $true
+    $funMilestoneValue.Anchor = "Left"
+    $script:SettingsFunMilestoneValue = $funMilestoneValue
+
+    $initializeBadgeValueLabel = {
+        param($label)
+        if (-not $label) { return }
+        $label.BorderStyle = [System.Windows.Forms.BorderStyle]::FixedSingle
+        $label.Padding = New-Object System.Windows.Forms.Padding(6, 2, 6, 2)
+        $label.Margin = New-Object System.Windows.Forms.Padding(0, 1, 0, 1)
+        $label.TextAlign = [System.Drawing.ContentAlignment]::MiddleLeft
+    }
+
+    $funCurrentBadgeLabel = New-Object System.Windows.Forms.Label
+    $funCurrentBadgeLabel.Text = "Current Badge"
+    $funCurrentBadgeLabel.AutoSize = $true
+    $funCurrentBadgeLabel.Anchor = "Left"
+
+    $funCurrentBadgeValue = New-Object System.Windows.Forms.Label
+    $funCurrentBadgeValue.Text = "None yet"
+    $funCurrentBadgeValue.AutoSize = $true
+    $funCurrentBadgeValue.Anchor = "Left"
+    & $initializeBadgeValueLabel $funCurrentBadgeValue
+    $script:SettingsFunCurrentBadgeValue = $funCurrentBadgeValue
+
+    $funNextBadgeLabel = New-Object System.Windows.Forms.Label
+    $funNextBadgeLabel.Text = "Next Badge"
+    $funNextBadgeLabel.AutoSize = $true
+    $funNextBadgeLabel.Anchor = "Left"
+
+    $funNextBadgeValue = New-Object System.Windows.Forms.Label
+    $funNextBadgeValue.Text = "Rookie (100) - 100 left"
+    $funNextBadgeValue.AutoSize = $true
+    $funNextBadgeValue.Anchor = "Left"
+    $script:SettingsFunNextBadgeValue = $funNextBadgeValue
+
+    $funBadgeSpacer = New-Object System.Windows.Forms.Label
+    $funBadgeSpacer.Text = ""
+    $funBadgeSpacer.AutoSize = $false
+    $funBadgeSpacer.Height = 8
+    $funBadgeSpacer.MinimumSize = New-Object System.Drawing.Size(1, 8)
+    $funBadgeSpacer.Margin = New-Object System.Windows.Forms.Padding(0, 2, 0, 4)
+
+    $funBottomSpacer = New-Object System.Windows.Forms.Label
+    $funBottomSpacer.Text = ""
+    $funBottomSpacer.AutoSize = $false
+    $funBottomSpacer.Height = 6
+    $funBottomSpacer.MinimumSize = New-Object System.Drawing.Size(1, 6)
+    $funBottomSpacer.Margin = New-Object System.Windows.Forms.Padding(0, 2, 0, 0)
+
+    $funMilestonePctLabel = New-Object System.Windows.Forms.Label
+    $funMilestonePctLabel.Text = "Milestone Progress %"
+    $funMilestonePctLabel.AutoSize = $true
+    $funMilestonePctLabel.Anchor = "Left"
+
+    $funMilestonePctValue = New-Object System.Windows.Forms.Label
+    $funMilestonePctValue.Text = "0.0%"
+    $funMilestonePctValue.AutoSize = $true
+    $funMilestonePctValue.Anchor = "Left"
+    $script:SettingsFunMilestonePctValue = $funMilestonePctValue
+
+    $funBonusBadgesLabel = New-Object System.Windows.Forms.Label
+    $funBonusBadgesLabel.Text = "Bonus Badges"
+    $funBonusBadgesLabel.AutoSize = $true
+    $funBonusBadgesLabel.Anchor = "Left"
+
+    $funBonusBadgesValue = New-Object System.Windows.Forms.Label
+    $funBonusBadgesValue.Text = "None yet"
+    $funBonusBadgesValue.AutoSize = $true
+    $funBonusBadgesValue.Anchor = "Left"
+    $script:SettingsFunBonusBadgesValue = $funBonusBadgesValue
+
+    $funSeasonalBadgeLabel = New-Object System.Windows.Forms.Label
+    $funSeasonalBadgeLabel.Text = "Seasonal Badge"
+    $funSeasonalBadgeLabel.AutoSize = $true
+    $funSeasonalBadgeLabel.Anchor = "Left"
+
+    $funSeasonalBadgeValue = New-Object System.Windows.Forms.Label
+    $funSeasonalBadgeValue.Text = "N/A"
+    $funSeasonalBadgeValue.AutoSize = $true
+    $funSeasonalBadgeValue.Anchor = "Left"
+    $script:SettingsFunSeasonalBadgeValue = $funSeasonalBadgeValue
+
+    $funComboBadgeLabel = New-Object System.Windows.Forms.Label
+    $funComboBadgeLabel.Text = "Combo Badge"
+    $funComboBadgeLabel.AutoSize = $true
+    $funComboBadgeLabel.Anchor = "Left"
+
+    $funComboBadgeValue = New-Object System.Windows.Forms.Label
+    $funComboBadgeValue.Text = "None yet"
+    $funComboBadgeValue.AutoSize = $true
+    $funComboBadgeValue.Anchor = "Left"
+    $script:SettingsFunComboBadgeValue = $funComboBadgeValue
+
+    $funResilienceBadgeLabel = New-Object System.Windows.Forms.Label
+    $funResilienceBadgeLabel.Text = "Resilience Badge"
+    $funResilienceBadgeLabel.AutoSize = $true
+    $funResilienceBadgeLabel.Anchor = "Left"
+
+    $funResilienceBadgeValue = New-Object System.Windows.Forms.Label
+    $funResilienceBadgeValue.Text = "None yet"
+    $funResilienceBadgeValue.AutoSize = $true
+    $funResilienceBadgeValue.Anchor = "Left"
+    $script:SettingsFunResilienceBadgeValue = $funResilienceBadgeValue
+
+    $funBadgeCatalogLabel = New-Object System.Windows.Forms.Label
+    $funBadgeCatalogLabel.Text = "Badge Catalog"
+    $funBadgeCatalogLabel.AutoSize = $true
+    $funBadgeCatalogLabel.Anchor = "Left"
+
+    $funBadgeCatalogValue = New-Object System.Windows.Forms.Label
+    $funBadgeCatalogValue.Text = "0/0 unlocked (0 locked)"
+    $funBadgeCatalogValue.AutoSize = $true
+    $funBadgeCatalogValue.Anchor = "Left"
+    $script:SettingsFunBadgeCatalogValue = $funBadgeCatalogValue
+
+    $funBadgeLevelLabel = New-Object System.Windows.Forms.Label
+    $funBadgeLevelLabel.Text = "Badge Level"
+    $funBadgeLevelLabel.AutoSize = $true
+    $funBadgeLevelLabel.Anchor = "Left"
+
+    $funBadgeLevelValue = New-Object System.Windows.Forms.Label
+    $funBadgeLevelValue.Text = "Lvl 1 (0 pts, 0.0% to next)"
+    $funBadgeLevelValue.AutoSize = $true
+    $funBadgeLevelValue.Anchor = "Left"
+    $script:SettingsFunBadgeLevelValue = $funBadgeLevelValue
+
+    $funTierProgressLabel = New-Object System.Windows.Forms.Label
+    $funTierProgressLabel.Text = "Tier Progress"
+    $funTierProgressLabel.AutoSize = $true
+    $funTierProgressLabel.Anchor = "Left"
+
+    $funTierProgressBar = New-Object System.Windows.Forms.ProgressBar
+    $funTierProgressBar.Minimum = 0
+    $funTierProgressBar.Maximum = 1000
+    $funTierProgressBar.Value = 0
+    $funTierProgressBar.Style = [System.Windows.Forms.ProgressBarStyle]::Continuous
+    $funTierProgressBar.Size = New-Object System.Drawing.Size(190, 14)
+    $funTierProgressBar.Margin = New-Object System.Windows.Forms.Padding(0, 2, 8, 0)
+    $funTierProgressBar.Anchor = "Left"
+
+    $funTierProgressValue = New-Object System.Windows.Forms.Label
+    $funTierProgressValue.Text = "0.0%"
+    $funTierProgressValue.AutoSize = $true
+    $funTierProgressValue.Anchor = "Left"
+
+    $funTierProgressPanel = New-Object System.Windows.Forms.FlowLayoutPanel
+    $funTierProgressPanel.FlowDirection = "LeftToRight"
+    $funTierProgressPanel.AutoSize = $true
+    $funTierProgressPanel.WrapContents = $false
+    $funTierProgressPanel.Anchor = "Left"
+    $funTierProgressPanel.Margin = New-Object System.Windows.Forms.Padding(0, 0, 0, 0)
+    $funTierProgressPanel.Controls.Add($funTierProgressBar) | Out-Null
+    $funTierProgressPanel.Controls.Add($funTierProgressValue) | Out-Null
+    $script:SettingsFunTierProgressBar = $funTierProgressBar
+    $script:SettingsFunTierProgressValue = $funTierProgressValue
+
+    $funBadgeModeLabel = New-Object System.Windows.Forms.Label
+    $funBadgeModeLabel.Text = "Badge Mode"
+    $funBadgeModeLabel.AutoSize = $true
+    $funBadgeModeLabel.Anchor = "Left"
+
+    $funBadgeModeValue = New-Object System.Windows.Forms.Label
+    $funBadgeModeValue.Text = "Global"
+    $funBadgeModeValue.AutoSize = $true
+    $funBadgeModeValue.Anchor = "Left"
+    $script:SettingsFunBadgeModeValue = $funBadgeModeValue
+
+    $funRecentUnlockLabel = New-Object System.Windows.Forms.Label
+    $funRecentUnlockLabel.Text = "Recent Unlock"
+    $funRecentUnlockLabel.AutoSize = $true
+    $funRecentUnlockLabel.Anchor = "Left"
+
+    $funRecentUnlockValue = New-Object System.Windows.Forms.Label
+    $funRecentUnlockValue.Text = "None"
+    $funRecentUnlockValue.AutoSize = $true
+    $funRecentUnlockValue.Anchor = "Left"
+    $script:SettingsFunRecentUnlockValue = $funRecentUnlockValue
+
+    $funStatsLayout.Controls.Add($funCurrentBadgeLabel, 0, 0)
+    $funStatsLayout.Controls.Add($funCurrentBadgeValue, 1, 0)
+    $funStatsLayout.Controls.Add($funNextBadgeLabel, 0, 1)
+    $funStatsLayout.Controls.Add($funNextBadgeValue, 1, 1)
+    $funStatsLayout.Controls.Add($funBonusBadgesLabel, 0, 2)
+    $funStatsLayout.Controls.Add($funBonusBadgesValue, 1, 2)
+    $funStatsLayout.Controls.Add($funSeasonalBadgeLabel, 0, 3)
+    $funStatsLayout.Controls.Add($funSeasonalBadgeValue, 1, 3)
+    $funStatsLayout.Controls.Add($funComboBadgeLabel, 0, 4)
+    $funStatsLayout.Controls.Add($funComboBadgeValue, 1, 4)
+    $funStatsLayout.Controls.Add($funResilienceBadgeLabel, 0, 5)
+    $funStatsLayout.Controls.Add($funResilienceBadgeValue, 1, 5)
+    $funStatsLayout.Controls.Add($funBadgeCatalogLabel, 0, 6)
+    $funStatsLayout.Controls.Add($funBadgeCatalogValue, 1, 6)
+    $funStatsLayout.Controls.Add($funBadgeLevelLabel, 0, 7)
+    $funStatsLayout.Controls.Add($funBadgeLevelValue, 1, 7)
+    $funStatsLayout.Controls.Add($funTierProgressLabel, 0, 8)
+    $funStatsLayout.Controls.Add($funTierProgressPanel, 1, 8)
+    $funStatsLayout.Controls.Add($funBadgeModeLabel, 0, 9)
+    $funStatsLayout.Controls.Add($funBadgeModeValue, 1, 9)
+    $funStatsLayout.Controls.Add($funRecentUnlockLabel, 0, 10)
+    $funStatsLayout.Controls.Add($funRecentUnlockValue, 1, 10)
+    $funStatsLayout.Controls.Add($funBadgeSpacer, 0, 11)
+    $funStatsLayout.SetColumnSpan($funBadgeSpacer, 2)
+    $funStatsLayout.Controls.Add($funDailyLabel, 0, 12)
+    $funStatsLayout.Controls.Add($funDailyValue, 1, 12)
+    $funStatsLayout.Controls.Add($funStreakCurrentLabel, 0, 13)
+    $funStatsLayout.Controls.Add($funStreakCurrentValue, 1, 13)
+    $funStatsLayout.Controls.Add($funStreakBestLabel, 0, 14)
+    $funStatsLayout.Controls.Add($funStreakBestValue, 1, 14)
+    $funStatsLayout.Controls.Add($funMostActiveLabel, 0, 15)
+    $funStatsLayout.Controls.Add($funMostActiveValue, 1, 15)
+    $funStatsLayout.Controls.Add($funLongestPauseLabel, 0, 16)
+    $funStatsLayout.Controls.Add($funLongestPauseValue, 1, 16)
+    $funStatsLayout.Controls.Add($funTotalRunLabel, 0, 17)
+    $funStatsLayout.Controls.Add($funTotalRunValue, 1, 17)
+    $funStatsLayout.Controls.Add($funCrashFreeDaysLabel, 0, 18)
+    $funStatsLayout.Controls.Add($funCrashFreeDaysValue, 1, 18)
+    $funStatsLayout.Controls.Add($funProfileUsageLabel, 0, 19)
+    $funStatsLayout.Controls.Add($funProfileUsageValue, 1, 19)
+    $funStatsLayout.Controls.Add($funReliabilityLabel, 0, 20)
+    $funStatsLayout.Controls.Add($funReliabilityValue, 1, 20)
+    $funStatsLayout.Controls.Add($funTimeSavedLabel, 0, 21)
+    $funStatsLayout.Controls.Add($funTimeSavedValue, 1, 21)
+    $funStatsLayout.Controls.Add($funMilestoneLabel, 0, 22)
+    $funStatsLayout.Controls.Add($funMilestoneValue, 1, 22)
+    $funStatsLayout.Controls.Add($funMilestonePctLabel, 0, 23)
+    $funStatsLayout.Controls.Add($funMilestonePctValue, 1, 23)
+    $funStatsLayout.Controls.Add($funBottomSpacer, 0, 24)
+    $funStatsLayout.SetColumnSpan($funBottomSpacer, 2)
     $funStatsGroup.Controls.Add($funStatsLayout)
 
     $copyStatusButton = New-Object System.Windows.Forms.Button
     $copyStatusButton.Text = "Copy Status"
-    $copyStatusButton.Width = 120
+    $copyStatusButton.AutoSize = $true
+    $copyStatusButton.AutoSizeMode = [System.Windows.Forms.AutoSizeMode]::GrowAndShrink
+    $copyStatusButton.MinimumSize = New-Object System.Drawing.Size(120, 28)
     $copyStatusButton.Tag = "Copy Status"
     $script:CopyStatusButton = $copyStatusButton
     $copyStatusButton.Add_Click({
@@ -518,6 +843,23 @@ function Show-SettingsDialog {
         $lines += "Most Active Hour: $($script:SettingsFunMostActiveHourValue.Text)"
         $lines += "Longest Pause: $($script:SettingsFunLongestPauseValue.Text)"
         $lines += "Total Run Time: $($script:SettingsFunTotalRunValue.Text)"
+        $lines += "Crash-Free Days: $($script:SettingsFunCrashFreeDaysValue.Text)"
+        $lines += "Profile Usage Split: $($script:SettingsFunProfileUsageValue.Text)"
+        $lines += "Uptime Reliability: $($script:SettingsFunReliabilityValue.Text)"
+        $lines += "Estimated Time Saved: $($script:SettingsFunTimeSavedValue.Text)"
+        $lines += "Milestone Progress: $($script:SettingsFunMilestoneValue.Text)"
+        $lines += "Current Badge: $($script:SettingsFunCurrentBadgeValue.Text)"
+        $lines += "Next Badge: $($script:SettingsFunNextBadgeValue.Text)"
+        $lines += "Milestone Progress %: $($script:SettingsFunMilestonePctValue.Text)"
+        $lines += "Bonus Badges: $($script:SettingsFunBonusBadgesValue.Text)"
+        $lines += "Seasonal Badge: $($script:SettingsFunSeasonalBadgeValue.Text)"
+        $lines += "Combo Badge: $($script:SettingsFunComboBadgeValue.Text)"
+        $lines += "Resilience Badge: $($script:SettingsFunResilienceBadgeValue.Text)"
+        $lines += "Badge Catalog: $($script:SettingsFunBadgeCatalogValue.Text)"
+        $lines += "Badge Level: $($script:SettingsFunBadgeLevelValue.Text)"
+        $lines += "Tier Progress: $($script:SettingsFunTierProgressValue.Text)"
+        $lines += "Badge Mode: $($script:SettingsFunBadgeModeValue.Text)"
+        $lines += "Recent Unlock: $($script:SettingsFunRecentUnlockValue.Text)"
         $text = ($lines -join "`r`n")
         [System.Windows.Forms.Clipboard]::SetText($text)
         [System.Windows.Forms.MessageBox]::Show(
@@ -530,11 +872,51 @@ function Show-SettingsDialog {
         Write-Log "Status copied to clipboard." "INFO" $null "Status"
     })
 
+    $exportBadgeCardButton = New-Object System.Windows.Forms.Button
+    $exportBadgeCardButton.Text = "Export Badge Card"
+    $exportBadgeCardButton.AutoSize = $true
+    $exportBadgeCardButton.AutoSizeMode = [System.Windows.Forms.AutoSizeMode]::GrowAndShrink
+    $exportBadgeCardButton.MinimumSize = New-Object System.Drawing.Size(160, 28)
+    $exportBadgeCardButton.Tag = "Export Badge Card"
+    $script:ExportBadgeCardButton = $exportBadgeCardButton
+    $exportBadgeCardButton.Add_Click({
+        try {
+            $cardPath = $null
+            if (Get-Command -Name Export-BadgeShareCard -ErrorAction SilentlyContinue) {
+                $cardPath = Export-BadgeShareCard $settings
+            }
+            if ([string]::IsNullOrWhiteSpace([string]$cardPath)) {
+                throw "Badge card path was empty."
+            }
+            [System.Windows.Forms.Clipboard]::SetText([string]$cardPath)
+            [System.Windows.Forms.MessageBox]::Show(
+                $script:SettingsForm,
+                ("Badge card exported:`n{0}`n`nPath copied to clipboard." -f $cardPath),
+                "Badge Card",
+                [System.Windows.Forms.MessageBoxButtons]::OK,
+                [System.Windows.Forms.MessageBoxIcon]::Information
+            ) | Out-Null
+            Write-Log ("Badge card exported: {0}" -f $cardPath) "INFO" $null "Status"
+        } catch {
+            Write-Log "Failed to export badge card." "WARN" $_.Exception "Status"
+            [System.Windows.Forms.MessageBox]::Show(
+                $script:SettingsForm,
+                ("Failed to export badge card.`n{0}" -f $_.Exception.Message),
+                "Badge Card",
+                [System.Windows.Forms.MessageBoxButtons]::OK,
+                [System.Windows.Forms.MessageBoxIcon]::Warning
+            ) | Out-Null
+        }
+    })
+
     $copyStatusPanel = New-Object System.Windows.Forms.FlowLayoutPanel
     $copyStatusPanel.FlowDirection = "LeftToRight"
     $copyStatusPanel.AutoSize = $true
-    $copyStatusPanel.WrapContents = $false
+    $copyStatusPanel.AutoSizeMode = [System.Windows.Forms.AutoSizeMode]::GrowAndShrink
+    $copyStatusPanel.WrapContents = $true
+    $copyStatusPanel.Dock = "Top"
     $copyStatusPanel.Controls.Add($copyStatusButton) | Out-Null
+    $copyStatusPanel.Controls.Add($exportBadgeCardButton) | Out-Null
     $copyStatusPanel.Tag = "Copy Status"
 
     $topPanel = New-Object System.Windows.Forms.Panel
@@ -585,6 +967,9 @@ function Show-SettingsDialog {
         $script:MinimalModeReason = $null
         $script:SettingsAutoCorrected = $false
         $script:SettingsAutoCorrectedMessage = $null
+        if (Get-Command -Name Sync-MinimalModeState -ErrorAction SilentlyContinue) {
+            try { Sync-MinimalModeState "SettingsBannerRestoreDefaults" } catch { }
+        }
         if ($script:UpdateSettingsBanner) { & $script:UpdateSettingsBanner }
         Write-Log "Settings restored from banner (defaults applied)." "WARN" $null "Settings"
     })
@@ -611,6 +996,9 @@ function Show-SettingsDialog {
         $script:OverrideMinimalMode = $true
         $script:MinimalModeActive = $false
         $script:MinimalModeReason = $null
+        if (Get-Command -Name Sync-MinimalModeState -ErrorAction SilentlyContinue) {
+            try { Sync-MinimalModeState "SettingsBannerExitMinimalMode" } catch { }
+        }
         if ($script:UpdateSettingsBanner) { & $script:UpdateSettingsBanner }
         Write-Log "Minimal mode cleared by user." "WARN" $null "Settings"
     })
@@ -634,6 +1022,9 @@ function Show-SettingsDialog {
         }
         $script:MinimalModeActive = $false
         $script:MinimalModeReason = $null
+        if (Get-Command -Name Sync-MinimalModeState -ErrorAction SilentlyContinue) {
+            try { Sync-MinimalModeState "SettingsBannerResetCrashState" } catch { }
+        }
         if ($script:UpdateSettingsBanner) { & $script:UpdateSettingsBanner }
         if (Get-Command -Name Show-ActionToast -ErrorAction SilentlyContinue) { Show-ActionToast "Crash state reset" }
     })
@@ -647,6 +1038,48 @@ function Show-SettingsDialog {
         $lines = @()
         $autoCorrectVisible = $false
         $tamperVisible = $false
+        $minimalModeActive = $false
+        $minimalModeReason = $null
+        try {
+            if (Get-Command -Name Get-MinimalModeState -ErrorAction SilentlyContinue) {
+                $minimalState = Get-MinimalModeState
+                if ($minimalState) {
+                    $minimalModeActive = [bool]$minimalState.Active
+                    if ($minimalState.PSObject.Properties.Name -contains "Reason") {
+                        $minimalModeReason = [string]$minimalState.Reason
+                    }
+                }
+            } else {
+                $minimalModeActive = [bool]$script:MinimalModeActive
+                $minimalModeReason = [string]$script:MinimalModeReason
+            }
+        } catch {
+            try { $minimalModeActive = [bool]$script:MinimalModeActive } catch { $minimalModeActive = $false }
+            try { $minimalModeReason = [string]$script:MinimalModeReason } catch { $minimalModeReason = $null }
+        }
+        if (-not $minimalModeActive) {
+            $minimalStatePath = $null
+            try { $minimalStatePath = [string]$script:MinimalModeStatePath } catch { $minimalStatePath = $null }
+            if ([string]::IsNullOrWhiteSpace($minimalStatePath)) {
+                $metaRoot = $null
+                try { $metaRoot = [string]$script:MetaDir } catch { $metaRoot = $null }
+                if (-not [string]::IsNullOrWhiteSpace($metaRoot)) {
+                    $minimalStatePath = Join-Path $metaRoot "Teams-Always-Green.minimalmode.state.json"
+                }
+            }
+            if (-not [string]::IsNullOrWhiteSpace($minimalStatePath) -and (Test-Path $minimalStatePath)) {
+                try {
+                    $savedMinimal = Get-Content -Path $minimalStatePath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+                    if ($savedMinimal -and ($savedMinimal.PSObject.Properties.Name -contains "Active") -and [bool]$savedMinimal.Active) {
+                        $minimalModeActive = $true
+                        if ($savedMinimal.PSObject.Properties.Name -contains "Reason") {
+                            $minimalModeReason = [string]$savedMinimal.Reason
+                        }
+                    }
+                } catch {
+                }
+            }
+        }
         if ($script:SettingsAutoCorrected) {
             $seen = $false
             if ($settings -and ($settings.PSObject.Properties.Name -contains "AutoCorrectedNoticeSeen")) {
@@ -675,17 +1108,21 @@ function Show-SettingsDialog {
                 $tamperVisible = $true
             }
         }
-        if ($script:MinimalModeActive) {
-            $lines += "Minimal mode is active after repeated crashes."
+        if ($minimalModeActive) {
+            $minimalLine = "Minimal mode is active."
+            if (-not [string]::IsNullOrWhiteSpace($minimalModeReason)) {
+                $minimalLine = "{0} Reason: {1}" -f $minimalLine, $minimalModeReason
+            }
+            $lines += $minimalLine
         }
         if ($lines.Count -eq 0) {
             $script:SettingsBannerPanel.Visible = $false
             return
         }
         $script:SettingsBannerLabel.Text = ($lines -join " ")
-        $script:SettingsBannerExitMinimalButton.Visible = [bool]$script:MinimalModeActive
-        $script:SettingsBannerResetCrashButton.Visible = [bool]$script:MinimalModeActive
-        $script:SettingsBannerRestoreButton.Visible = [bool]$script:MinimalModeActive
+        $script:SettingsBannerExitMinimalButton.Visible = [bool]$minimalModeActive
+        $script:SettingsBannerResetCrashButton.Visible = [bool]$minimalModeActive
+        $script:SettingsBannerRestoreButton.Visible = [bool]$minimalModeActive
         $script:SettingsBannerPanel.Visible = $true
         if ($autoCorrectVisible -and $settings -and ($settings.PSObject.Properties.Name -contains "AutoCorrectedNoticeSeen")) {
             try {
@@ -707,8 +1144,9 @@ function Show-SettingsDialog {
         }
     }
 
+    $script:SettingsDirtyBaseText = (L "Unsaved changes" "Unsaved changes")
     $script:SettingsDirtyLabel = New-Object System.Windows.Forms.Label
-    $script:SettingsDirtyLabel.Text = "Unsaved changes"
+    $script:SettingsDirtyLabel.Text = $script:SettingsDirtyBaseText
     $script:SettingsDirtyLabel.ForeColor = [System.Drawing.Color]::DarkOrange
     $script:SettingsDirtyLabel.AutoSize = $true
     $script:SettingsDirtyLabel.Margin = New-Object System.Windows.Forms.Padding(12, 6, 0, 0)
@@ -739,9 +1177,10 @@ function Show-SettingsDialog {
     $searchPanel.Margin = New-Object System.Windows.Forms.Padding(0, 0, 0, 6)
 
     $searchLabel = New-Object System.Windows.Forms.Label
-    $searchLabel.Text = "Search settings:"
+    $searchLabel.Text = (L "Search settings:" "Search settings:")
     $searchLabel.AutoSize = $true
     $searchLabel.Margin = New-Object System.Windows.Forms.Padding(12, 4, 0, 0)
+    $script:SettingsSearchLabel = $searchLabel
 
     $script:SettingsSearchBox = New-Object System.Windows.Forms.TextBox
     $script:SettingsSearchBox.Width = 220
@@ -754,6 +1193,12 @@ function Show-SettingsDialog {
     $searchClearButton.Add_Click({
         if ($script:SettingsSearchBox) { $script:SettingsSearchBox.Text = "" }
     })
+
+    $script:SettingsSearchStatusLabel = New-Object System.Windows.Forms.Label
+    $script:SettingsSearchStatusLabel.AutoSize = $true
+    $script:SettingsSearchStatusLabel.Margin = New-Object System.Windows.Forms.Padding(10, 4, 0, 0)
+    $script:SettingsSearchStatusLabel.ForeColor = [System.Drawing.Color]::LightGray
+    $script:SettingsSearchStatusLabel.Text = ""
 
     $script:SettingsSearchTimer = New-Object System.Windows.Forms.Timer
     $script:SettingsSearchTimer.Interval = 250
@@ -776,6 +1221,7 @@ function Show-SettingsDialog {
     $searchPanel.Controls.Add($searchLabel) | Out-Null
     $searchPanel.Controls.Add($script:SettingsSearchBox) | Out-Null
     $searchPanel.Controls.Add($searchClearButton) | Out-Null
+    $searchPanel.Controls.Add($script:SettingsSearchStatusLabel) | Out-Null
     $script:SettingsSearchPanel = $searchPanel
 
     $topPanel.Controls.Add($script:SettingsBannerPanel)
@@ -1142,6 +1588,10 @@ function Show-SettingsDialog {
     $script:startOnLaunchBox = New-Object System.Windows.Forms.CheckBox
     $script:startOnLaunchBox.Checked = [bool]$settings.StartOnLaunch
     $script:startOnLaunchBox.AutoSize = $true
+
+    $script:autoStartOnRestartBox = New-Object System.Windows.Forms.CheckBox
+    $script:autoStartOnRestartBox.Checked = [bool](Get-SettingsPropertyValue $settings "AutoStartOnRestart" $false)
+    $script:autoStartOnRestartBox.AutoSize = $true
 
     $script:quietModeBox = New-Object System.Windows.Forms.CheckBox
     $script:quietModeBox.Checked = [bool]$settings.QuietMode
@@ -2196,6 +2646,16 @@ $clearLogButton = New-Object System.Windows.Forms.Button
     $script:ValidateFoldersButton = $validateFoldersButton
 
     $script:ApplySettingsLocalizationOverrides = {
+        $resolveLocalizedText = {
+            param([string]$key, [string]$fallback)
+            $translated = [string](L $key $fallback)
+            if ([string]::IsNullOrWhiteSpace($translated)) {
+                return $fallback
+            }
+            return $translated
+        }
+        if ($script:SettingsDirtyBaseText -ne $null) { $script:SettingsDirtyBaseText = (L "Unsaved changes" "Unsaved changes") }
+        if ($script:SettingsSearchLabel) { $script:SettingsSearchLabel.Text = (L "Search settings:" "Search settings:") }
         if ($script:SettingsStatusLabel) { $script:SettingsStatusLabel.Text = (L "Status") }
         if ($script:SettingsNextLabel) { $script:SettingsNextLabel.Text = (L "Next Toggle") }
         if ($script:SettingsNextCountdownLabel) { $script:SettingsNextCountdownLabel.Text = (L "Next Toggle In") }
@@ -2205,12 +2665,32 @@ $clearLogButton = New-Object System.Windows.Forms.Button
         if ($script:SettingsSafeModeStatusLabel) { $script:SettingsSafeModeStatusLabel.Text = (L "Safe Mode") }
         if ($script:SettingsKeyboardLabel) { $script:SettingsKeyboardLabel.Text = (L "Keyboard") }
         if ($script:SettingsUptimeLabel) { $script:SettingsUptimeLabel.Text = (L "Uptime") }
+        if ($script:SettingsBadgeTrackingLabel) { $script:SettingsBadgeTrackingLabel.Text = (& $resolveLocalizedText "Badge Tracking" "Badge Tracking") }
+        if ($script:SettingsBadgeScopeSummaryLabel) { $script:SettingsBadgeScopeSummaryLabel.Text = (& $resolveLocalizedText "Badge Scope" "Badge Scope") }
+        if ($script:SettingsBadgeScopeRuleLabel) { $script:SettingsBadgeScopeRuleLabel.Text = (& $resolveLocalizedText "Switch Rule" "Switch Rule") }
         if ($script:SettingsFunDailyLabel) { $script:SettingsFunDailyLabel.Text = (L "Today's Toggles") }
         if ($script:SettingsFunStreakCurrentLabel) { $script:SettingsFunStreakCurrentLabel.Text = (L "Current Streak") }
         if ($script:SettingsFunStreakBestLabel) { $script:SettingsFunStreakBestLabel.Text = (L "Best Streak") }
         if ($script:SettingsFunMostActiveLabel) { $script:SettingsFunMostActiveLabel.Text = (L "Most Active Hour") }
         if ($script:SettingsFunLongestPauseLabel) { $script:SettingsFunLongestPauseLabel.Text = (L "Longest Pause") }
         if ($script:SettingsFunTotalRunLabel) { $script:SettingsFunTotalRunLabel.Text = (L "Total Run Time") }
+        if ($script:SettingsFunCrashFreeDaysLabel) { $script:SettingsFunCrashFreeDaysLabel.Text = (& $resolveLocalizedText "Crash-Free Days" "Crash-Free Days") }
+        if ($script:SettingsFunProfileUsageLabel) { $script:SettingsFunProfileUsageLabel.Text = (& $resolveLocalizedText "Profile Usage Split" "Profile Usage Split") }
+        if ($script:SettingsFunReliabilityLabel) { $script:SettingsFunReliabilityLabel.Text = (& $resolveLocalizedText "Uptime Reliability" "Uptime Reliability") }
+        if ($script:SettingsFunTimeSavedLabel) { $script:SettingsFunTimeSavedLabel.Text = (& $resolveLocalizedText "Estimated Time Saved" "Estimated Time Saved") }
+        if ($script:SettingsFunMilestoneLabel) { $script:SettingsFunMilestoneLabel.Text = (& $resolveLocalizedText "Milestone Progress" "Milestone Progress") }
+        if ($script:SettingsFunCurrentBadgeLabel) { $script:SettingsFunCurrentBadgeLabel.Text = (& $resolveLocalizedText "Current Badge" "Current Badge") }
+        if ($script:SettingsFunNextBadgeLabel) { $script:SettingsFunNextBadgeLabel.Text = (& $resolveLocalizedText "Next Badge" "Next Badge") }
+        if ($script:SettingsFunMilestonePctLabel) { $script:SettingsFunMilestonePctLabel.Text = (& $resolveLocalizedText "Milestone Progress %" "Milestone Progress %") }
+        if ($script:SettingsFunBonusBadgesLabel) { $script:SettingsFunBonusBadgesLabel.Text = (& $resolveLocalizedText "Bonus Badges" "Bonus Badges") }
+        if ($script:SettingsFunSeasonalBadgeLabel) { $script:SettingsFunSeasonalBadgeLabel.Text = (& $resolveLocalizedText "Seasonal Badge" "Seasonal Badge") }
+        if ($script:SettingsFunComboBadgeLabel) { $script:SettingsFunComboBadgeLabel.Text = (& $resolveLocalizedText "Combo Badge" "Combo Badge") }
+        if ($script:SettingsFunResilienceBadgeLabel) { $script:SettingsFunResilienceBadgeLabel.Text = (& $resolveLocalizedText "Resilience Badge" "Resilience Badge") }
+        if ($script:SettingsFunBadgeCatalogLabel) { $script:SettingsFunBadgeCatalogLabel.Text = (& $resolveLocalizedText "Badge Catalog" "Badge Catalog") }
+        if ($script:SettingsFunBadgeLevelLabel) { $script:SettingsFunBadgeLevelLabel.Text = (& $resolveLocalizedText "Badge Level" "Badge Level") }
+        if ($script:SettingsFunTierProgressLabel) { $script:SettingsFunTierProgressLabel.Text = (& $resolveLocalizedText "Tier Progress" "Tier Progress") }
+        if ($script:SettingsFunBadgeModeLabel) { $script:SettingsFunBadgeModeLabel.Text = (& $resolveLocalizedText "Badge Mode" "Badge Mode") }
+        if ($script:SettingsFunRecentUnlockLabel) { $script:SettingsFunRecentUnlockLabel.Text = (& $resolveLocalizedText "Recent Unlock" "Recent Unlock") }
         if ($script:SettingsFilesLabel -and $script:SettingsFilesListText) { $script:SettingsFilesLabel.Text = $script:SettingsFilesListText }
         if ($script:DebugModeButton) { $script:DebugModeButton.Text = (L "Enable Debug (10 min)" "Enable Debug (10 min)") }
         if ($script:LogEventLevelBoxes -and $script:LogEventLevelLabelKeys) {
@@ -2224,6 +2704,7 @@ $clearLogButton = New-Object System.Windows.Forms.Button
             $script:AboutSupportLinkText = $script:AboutSupportLink.Text
         }
         if ($script:CopyStatusButton) { $script:CopyStatusButton.Text = (L "Copy Status") }
+        if ($script:ExportBadgeCardButton) { $script:ExportBadgeCardButton.Text = (L "Export Badge Card" "Export Badge Card") }
         if ($script:SimulateToggleButton) { $script:SimulateToggleButton.Text = (L "Toggle Now") }
         if ($script:SimulateStartStopButton) { $script:SimulateStartStopButton.Text = (L "Start/Stop") }
         if ($script:SimulatePauseResumeButton) { $script:SimulatePauseResumeButton.Text = (L "Pause/Resume") }
@@ -2239,6 +2720,11 @@ $clearLogButton = New-Object System.Windows.Forms.Button
         if ($script:StatusStoppedColorButton) { $script:StatusStoppedColorButton.Text = (L "Change...") }
         if ($script:UpdateAppearancePreview) { & $script:UpdateAppearancePreview }
         if ($script:logFilesLabel -and $script:LogFilesListText) { $script:logFilesLabel.Text = $script:LogFilesListText }
+        if (($script:UpdateSettingsDirtyIndicators) -is [scriptblock]) { & $script:UpdateSettingsDirtyIndicators }
+        if ($script:ApplySettingsSearchFilter -and $script:SettingsSearchBox) {
+            $script:SettingsSearchLast = $null
+            & $script:ApplySettingsSearchFilter $script:SettingsSearchBox.Text
+        }
     }
     $validateFoldersButton.Add_Click({
         $results = Validate-FolderPaths
@@ -2279,6 +2765,20 @@ $clearLogButton = New-Object System.Windows.Forms.Button
         Invoke-HealthCheckDialog
     })
     $script:RunHealthCheckButton = $runHealthCheckButton
+
+    $repairAllButton = New-Object System.Windows.Forms.Button
+    $repairAllButton.Text = "Repair All"
+    $repairAllButton.Width = 140
+    $repairAllButton.Tag = "Repair All"
+    $repairAllButton.Add_Click({
+        & $script:RunSettingsAction "Repair All" {
+            if (-not (Get-Command -Name Invoke-RepairAll -ErrorAction SilentlyContinue)) {
+                throw "Repair-all action is unavailable in this build."
+            }
+            [void](Invoke-RepairAll -Source "settings")
+        }
+    })
+    $script:RepairAllButton = $repairAllButton
 
     $resetCrashStateButton = New-Object System.Windows.Forms.Button
     $resetCrashStateButton.Text = "Reset Crash State"
@@ -2460,7 +2960,18 @@ $clearLogButton = New-Object System.Windows.Forms.Button
             $lines += "Recent Actions:"
             $lines += (Get-RecentActionsLines)
             $lines += ""
-            $lines += "Date/Time Format: " + (if ($settings.UseSystemDateTimeFormat) { "System ($($settings.SystemDateTimeFormatMode))" } else { [string]$settings.DateTimeFormat })
+            $lines += "Self-Healing:"
+            $queueDepth = if ($script:SelfHealActionQueue) { @($script:SelfHealActionQueue).Count } else { 0 }
+            $lines += "  Queue Depth: $queueDepth"
+            $lines += "  Repair-All Runs: $([int]$script:SelfHealStats.RepairAllRuns)"
+            $lines += "  Heartbeat Recoveries: $([int]$script:SelfHealStats.HeartbeatRecoveries)"
+            $lines += "  Timer Recoveries: queued=$([int]$script:SelfHealStats.TimerRecoveryQueued) succeeded=$([int]$script:SelfHealStats.TimerRecoverySuccess) failed=$([int]$script:SelfHealStats.TimerRecoveryFailed)"
+            $lines += "  Queue Suppressed: $([int]$script:SelfHealStats.QueueSuppressedCount)"
+            $lines += "  Recent Auto-Repairs:"
+            $lines += (Get-SelfHealRecentActionLines)
+            $lines += ""
+            $dateTimeFormatDisplay = if ($settings.UseSystemDateTimeFormat) { "System ($($settings.SystemDateTimeFormatMode))" } else { [string]$settings.DateTimeFormat }
+            $lines += "Date/Time Format: " + $dateTimeFormatDisplay
             $lines += ""
             if ($settings.ScrubDiagnostics) {
                 $lines = Scrub-LogLines $lines
@@ -2522,6 +3033,16 @@ $clearLogButton = New-Object System.Windows.Forms.Button
             $lines += ""
             $lines += "Recent Actions:"
             $lines += (Get-RecentActionsLines)
+            $lines += ""
+            $lines += "Self-Healing:"
+            $queueDepth = if ($script:SelfHealActionQueue) { @($script:SelfHealActionQueue).Count } else { 0 }
+            $lines += "  Queue Depth: $queueDepth"
+            $lines += "  Repair-All Runs: $([int]$script:SelfHealStats.RepairAllRuns)"
+            $lines += "  Heartbeat Recoveries: $([int]$script:SelfHealStats.HeartbeatRecoveries)"
+            $lines += "  Timer Recoveries: queued=$([int]$script:SelfHealStats.TimerRecoveryQueued) succeeded=$([int]$script:SelfHealStats.TimerRecoverySuccess) failed=$([int]$script:SelfHealStats.TimerRecoveryFailed)"
+            $lines += "  Queue Suppressed: $([int]$script:SelfHealStats.QueueSuppressedCount)"
+            $lines += "  Recent Auto-Repairs:"
+            $lines += (Get-SelfHealRecentActionLines)
             if ($settings.ScrubDiagnostics) {
                 $lines = Scrub-LogLines $lines
             }
@@ -2579,6 +3100,16 @@ $clearLogButton = New-Object System.Windows.Forms.Button
             $lines += "Recent Actions:"
             $lines += (Get-RecentActionsLines)
             $lines += ""
+            $lines += "Self-Healing:"
+            $queueDepth = if ($script:SelfHealActionQueue) { @($script:SelfHealActionQueue).Count } else { 0 }
+            $lines += "  Queue Depth: $queueDepth"
+            $lines += "  Repair-All Runs: $([int]$script:SelfHealStats.RepairAllRuns)"
+            $lines += "  Heartbeat Recoveries: $([int]$script:SelfHealStats.HeartbeatRecoveries)"
+            $lines += "  Timer Recoveries: queued=$([int]$script:SelfHealStats.TimerRecoveryQueued) succeeded=$([int]$script:SelfHealStats.TimerRecoverySuccess) failed=$([int]$script:SelfHealStats.TimerRecoveryFailed)"
+            $lines += "  Queue Suppressed: $([int]$script:SelfHealStats.QueueSuppressedCount)"
+            $lines += "  Recent Auto-Repairs:"
+            $lines += (Get-SelfHealRecentActionLines)
+            $lines += ""
             $lines += "Last 200 Log Lines:"
             if (Test-Path $logPath) {
                 $lines += Get-Content -Path $logPath -Tail 200
@@ -2612,7 +3143,7 @@ $clearLogButton = New-Object System.Windows.Forms.Button
 
     $diagnosticsLayout = New-Object System.Windows.Forms.TableLayoutPanel
     $diagnosticsLayout.ColumnCount = 2
-    $diagnosticsLayout.RowCount = 8
+    $diagnosticsLayout.RowCount = 10
     $diagnosticsLayout.AutoSize = $true
     $diagnosticsLayout.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::AutoSize)))
     $diagnosticsLayout.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Percent, 100)))
@@ -2681,6 +3212,22 @@ $clearLogButton = New-Object System.Windows.Forms.Button
     $diagLogWriteValue.Text = "N/A"
     $diagLogWriteValue.AutoSize = $true
 
+    $diagSelfHealQueueLabel = New-Object System.Windows.Forms.Label
+    $diagSelfHealQueueLabel.Text = "Auto-Repair Queue"
+    $diagSelfHealQueueLabel.AutoSize = $true
+
+    $diagSelfHealQueueValue = New-Object System.Windows.Forms.Label
+    $diagSelfHealQueueValue.Text = "0"
+    $diagSelfHealQueueValue.AutoSize = $true
+
+    $diagSelfHealLastLabel = New-Object System.Windows.Forms.Label
+    $diagSelfHealLastLabel.Text = "Last Auto-Repair"
+    $diagSelfHealLastLabel.AutoSize = $true
+
+    $diagSelfHealLastValue = New-Object System.Windows.Forms.Label
+    $diagSelfHealLastValue.Text = "None"
+    $diagSelfHealLastValue.AutoSize = $true
+
     $diagnosticsLayout.Controls.Add($diagErrorLabel, 0, 0)
     $diagnosticsLayout.Controls.Add($diagErrorValue, 1, 0)
     $diagnosticsLayout.Controls.Add($diagRestartLabel, 0, 1)
@@ -2697,6 +3244,10 @@ $clearLogButton = New-Object System.Windows.Forms.Button
     $diagnosticsLayout.Controls.Add($diagLogRotateValue, 1, 6)
     $diagnosticsLayout.Controls.Add($diagLogWriteLabel, 0, 7)
     $diagnosticsLayout.Controls.Add($diagLogWriteValue, 1, 7)
+    $diagnosticsLayout.Controls.Add($diagSelfHealQueueLabel, 0, 8)
+    $diagnosticsLayout.Controls.Add($diagSelfHealQueueValue, 1, 8)
+    $diagnosticsLayout.Controls.Add($diagSelfHealLastLabel, 0, 9)
+    $diagnosticsLayout.Controls.Add($diagSelfHealLastValue, 1, 9)
     $diagnosticsGroup.Controls.Add($diagnosticsLayout)
 
     $logCategoryGroup = New-Object System.Windows.Forms.GroupBox
@@ -2839,15 +3390,20 @@ $clearLogButton = New-Object System.Windows.Forms.Button
         Advanced = $advancedPanel
         About = $aboutPanel
     }
+    $script:SettingsSearchResultCounts = @{}
 
     $script:ApplySettingsSearchFilter = {
         param([string]$text)
         $needle = if ($text) { $text.Trim().ToLowerInvariant() } else { "" }
         if ($script:SettingsSearchLast -eq $needle) { return }
         $script:SettingsSearchLast = $needle
-        foreach ($panel in $script:SettingsTabPanels.Values) {
+        $resultCounts = @{}
+        $totalMatches = 0
+        foreach ($tabName in @($script:SettingsTabPanels.Keys)) {
+            $panel = $script:SettingsTabPanels[$tabName]
             if (-not $panel) { continue }
             $hasMatch = $false
+            $matchCount = 0
             $headerControls = @()
             foreach ($control in $panel.Controls) {
                 $tagText = [string]$control.Tag
@@ -2871,12 +3427,43 @@ $clearLogButton = New-Object System.Windows.Forms.Button
                 if ($tagText.ToLowerInvariant().Contains($needle)) {
                     $control.Visible = $true
                     $hasMatch = $true
+                    $matchCount++
                 } else {
                     $control.Visible = $false
                 }
             }
             foreach ($header in $headerControls) {
                 $header.Visible = ([string]::IsNullOrWhiteSpace($needle) -or $hasMatch)
+            }
+            if (-not [string]::IsNullOrWhiteSpace($needle) -and $matchCount -gt 0) {
+                $resultCounts[$tabName] = $matchCount
+                $totalMatches += $matchCount
+            }
+        }
+        $script:SettingsSearchResultCounts = $resultCounts
+        if ($script:SettingsSearchStatusLabel) {
+            if ([string]::IsNullOrWhiteSpace($needle)) {
+                $script:SettingsSearchStatusLabel.Text = ""
+                $script:SettingsSearchStatusLabel.ForeColor = [System.Drawing.Color]::LightGray
+            } elseif ($totalMatches -le 0) {
+                $script:SettingsSearchStatusLabel.Text = (L "No matches" "No matches")
+                $script:SettingsSearchStatusLabel.ForeColor = [System.Drawing.Color]::IndianRed
+            } else {
+                $tabsWithMatches = @($resultCounts.Keys).Count
+                $script:SettingsSearchStatusLabel.Text = ("{0} match(es) in {1} tab(s)" -f $totalMatches, $tabsWithMatches)
+                $script:SettingsSearchStatusLabel.ForeColor = [System.Drawing.Color]::LightGray
+            }
+        }
+        if (-not [string]::IsNullOrWhiteSpace($needle) -and $totalMatches -gt 0 -and $script:SettingsTabControl -and $script:GetSettingsTabKey -and $script:GetSettingsTabPage) {
+            $selectedKey = & $script:GetSettingsTabKey $script:SettingsTabControl.SelectedTab
+            if ([string]::IsNullOrWhiteSpace($selectedKey) -or -not $resultCounts.ContainsKey($selectedKey)) {
+                $firstMatchKey = @($resultCounts.Keys | Sort-Object | Select-Object -First 1)
+                if ($firstMatchKey.Count -gt 0) {
+                    $firstPage = & $script:GetSettingsTabPage $firstMatchKey[0]
+                    if ($firstPage -and $script:SettingsTabControl.SelectedTab -ne $firstPage) {
+                        $script:SettingsTabControl.SelectedTab = $firstPage
+                    }
+                }
             }
         }
         if ($script:UpdateTabLayouts) { & $script:UpdateTabLayouts }
@@ -4728,6 +5315,7 @@ $clearLogButton = New-Object System.Windows.Forms.Button
         try {
             if ($script:AddSettingRow) {
                 if ($script:RunHealthCheckButton) { & $script:AddSettingRow $panel "Run Health Check" $script:RunHealthCheckButton | Out-Null }
+                if ($script:RepairAllButton) { & $script:AddSettingRow $panel "Repair All" $script:RepairAllButton | Out-Null }
                 if ($script:ResetCrashStateButton) { & $script:AddSettingRow $panel "Reset Crash State" $script:ResetCrashStateButton | Out-Null }
                 if ($script:OpenDiagnosticsFolderButton) { & $script:AddSettingRow $panel "Open Diagnostics Folder" $script:OpenDiagnosticsFolderButton | Out-Null }
                 if ($script:ExportDiagnosticsButton) { & $script:AddSettingRow $panel "Export Diagnostics" $script:ExportDiagnosticsButton | Out-Null }
@@ -4812,6 +5400,7 @@ $clearLogButton = New-Object System.Windows.Forms.Button
     & $addSettingRow $generalPanel "Remember Choice" $script:rememberChoiceBox | Out-Null
     & $addSettingRow $generalPanel "Show First-Run Tips" $script:showFirstRunToastBox | Out-Null
     & $addSettingRow $generalPanel "Start on Launch" $script:startOnLaunchBox | Out-Null
+    & $addSettingRow $generalPanel "Auto Start on Restart" $script:autoStartOnRestartBox | Out-Null
     & $addSettingRow $generalPanel "Run Once on Launch" $script:runOnceOnLaunchBox | Out-Null
     & $addSettingRow $generalPanel "Date/Time Format" $script:dateTimeFormatBox | Out-Null
     $script:ErrorLabels["Date/Time Format"] = & $addErrorRow $generalPanel
@@ -4908,18 +5497,21 @@ $clearLogButton = New-Object System.Windows.Forms.Button
     $securityHelpLabel.MaximumSize = New-Object System.Drawing.Size(460, 0)
     $securityHelpLabel.ForeColor = [System.Drawing.Color]::DarkGray
     $securityHelpLabel.Text = "Tip: Security Mode enables strict import and update checks. Use this in production; disable only for trusted troubleshooting."
+    $securityHelpLabel.Font = New-Object System.Drawing.Font($securityHelpLabel.Font, [System.Drawing.FontStyle]::Italic)
 
     $signatureHelpLabel = New-Object System.Windows.Forms.Label
     $signatureHelpLabel.AutoSize = $true
     $signatureHelpLabel.MaximumSize = New-Object System.Drawing.Size(460, 0)
     $signatureHelpLabel.ForeColor = [System.Drawing.Color]::DarkGray
     $signatureHelpLabel.Text = "Tip: Script signature validation requires trusted certificates. Keep thumbprints scoped to your approved signer set."
+    $signatureHelpLabel.Font = New-Object System.Drawing.Font($signatureHelpLabel.Font, [System.Drawing.FontStyle]::Italic)
 
     $updateTrustHelpLabel = New-Object System.Windows.Forms.Label
     $updateTrustHelpLabel.AutoSize = $true
     $updateTrustHelpLabel.MaximumSize = New-Object System.Drawing.Size(460, 0)
     $updateTrustHelpLabel.ForeColor = [System.Drawing.Color]::DarkGray
     $updateTrustHelpLabel.Text = "Tip: Keep Update Owner/Repo pinned to your official source and require hash/signature checks to reduce supply-chain risk."
+    $updateTrustHelpLabel.Font = New-Object System.Drawing.Font($updateTrustHelpLabel.Font, [System.Drawing.FontStyle]::Italic)
 
     & $addSettingRow $advancedPanel "Safe Mode Enabled" $script:SafeModeEnabledBox | Out-Null
     & $addSettingRow $advancedPanel "Safe Mode Failure Threshold" $script:safeModeThresholdBox | Out-Null
@@ -4927,12 +5519,14 @@ $clearLogButton = New-Object System.Windows.Forms.Button
     if ($script:AddSpacerRow) { & $script:AddSpacerRow $advancedPanel }
     & $addSettingRow $advancedPanel "Security Mode" $script:securityModeBox | Out-Null
     & $addFullRow $advancedPanel $securityHelpLabel
+    if ($script:AddSpacerRow) { & $script:AddSpacerRow $advancedPanel }
     & $addSettingRow $advancedPanel "Strict Settings Import" $script:strictSettingsImportBox | Out-Null
     & $addSettingRow $advancedPanel "Strict Profile Import" $script:strictProfileImportBox | Out-Null
     & $addSettingRow $advancedPanel "Strict Update Policy" $script:strictUpdatePolicyBox | Out-Null
     & $addSettingRow $advancedPanel "Require Script Signature" $script:requireScriptSignatureBox | Out-Null
     & $addSettingRow $advancedPanel "Trusted Signer Thumbprints" $script:trustedSignerThumbprintsBox | Out-Null
     & $addFullRow $advancedPanel $signatureHelpLabel
+    if ($script:AddSpacerRow) { & $script:AddSpacerRow $advancedPanel }
     & $addSettingRow $advancedPanel "Allow External Paths" $script:allowExternalPathsBox | Out-Null
     & $addSettingRow $advancedPanel "Harden Permissions" $script:hardenPermissionsBox | Out-Null
     & $addSettingRow $advancedPanel "Update Owner" $script:updateOwnerBox | Out-Null
@@ -4940,6 +5534,7 @@ $clearLogButton = New-Object System.Windows.Forms.Button
     & $addSettingRow $advancedPanel "Require Update Hash" $script:updateRequireHashBox | Out-Null
     & $addSettingRow $advancedPanel "Require Update Signature" $script:updateRequireSignatureBox | Out-Null
     & $addFullRow $advancedPanel $updateTrustHelpLabel
+    if ($script:AddSpacerRow) { & $script:AddSpacerRow $advancedPanel }
     & $addSettingRow $advancedPanel "Allow Pre-release Updates" $script:updateAllowPrereleaseBox | Out-Null
     & $addSettingRow $advancedPanel "Allow Downgrade Updates" $script:updateAllowDowngradeBox | Out-Null
     if ($script:AddSpacerRow) { & $script:AddSpacerRow $advancedPanel }
@@ -5127,9 +5722,112 @@ $clearLogButton = New-Object System.Windows.Forms.Button
         }
         $script:LastSavedLabel.Text = "Last saved: Never$suffix"
     }
+    $script:SetSettingsBusyState = {
+        param([bool]$isBusy)
+        if (-not $script:SettingsForm -or $script:SettingsForm.IsDisposed) { return }
+        try {
+            $script:SettingsForm.UseWaitCursor = $isBusy
+            [System.Windows.Forms.Application]::UseWaitCursor = $isBusy
+            [System.Windows.Forms.Application]::DoEvents()
+        } catch {
+        }
+    }
+    $script:GetPendingSettingsDiffKeys = {
+        if (-not $script:CollectSettingsFromControls -or (($script:CollectSettingsFromControls) -isnot [scriptblock])) { return @() }
+        $previousSuppressPathWarnings = $false
+        try { $previousSuppressPathWarnings = [bool]$script:SuppressPathWarnings } catch { $previousSuppressPathWarnings = $false }
+        $script:SuppressPathWarnings = $true
+        try {
+            $collectResult = & $script:CollectSettingsFromControls
+            if (-not $collectResult -or -not $collectResult.Settings) { return @() }
+            $baseSettings = if ($script:settingsDialogLastSaved) { $script:settingsDialogLastSaved } else { $settings }
+            if (-not $baseSettings) { return @() }
+            $baseSnapshot = Get-SettingsSnapshot $baseSettings
+            $pendingSnapshot = Get-SettingsSnapshot $collectResult.Settings
+            $changedKeys = New-Object System.Collections.Generic.List[string]
+            $allKeys = @($baseSnapshot.Keys + $pendingSnapshot.Keys) | Sort-Object -Unique
+            foreach ($key in $allKeys) {
+                $before = if ($baseSnapshot.ContainsKey($key)) { $baseSnapshot[$key] } else { "<missing>" }
+                $after = if ($pendingSnapshot.ContainsKey($key)) { $pendingSnapshot[$key] } else { "<missing>" }
+                if ($before -ne $after) { $changedKeys.Add([string]$key) }
+            }
+            return @($changedKeys.ToArray())
+        } catch {
+            return @()
+        } finally {
+            $script:SuppressPathWarnings = $previousSuppressPathWarnings
+        }
+    }
+    $script:UpdateSettingsTabChangeBadges = {
+        param([string[]]$changedKeys)
+        if (-not $script:SettingsTabControl -or -not $script:GetSettingsTabKey) { return }
+        $sectionCounts = @{}
+        $keys = @($changedKeys)
+        foreach ($key in $keys) {
+            if ([string]::IsNullOrWhiteSpace($key)) { continue }
+            $section = "Other"
+            if (($script:GetSettingsPreviewSectionForKey) -is [scriptblock]) {
+                $section = [string](& $script:GetSettingsPreviewSectionForKey $key)
+            } else {
+                if ($key -like "Schedule*" -or $key -like "Pause*") { $section = "Scheduling" }
+                elseif ($key -like "Hotkey*") { $section = "Hotkeys" }
+                elseif ($key -like "Log*" -or $key -eq "LogDirectory") { $section = "Logging" }
+                elseif ($key -eq "Profiles" -or $key -eq "ActiveProfile") { $section = "Profiles" }
+                elseif ($key -like "Theme*" -or $key -like "StatusColor*" -or $key -like "*Tooltip*" -or $key -eq "FontSize" -or $key -eq "SettingsFontSize" -or $key -eq "CompactMode" -or $key -eq "QuietMode") { $section = "Appearance" }
+                elseif ($key -like "Update*" -or $key -like "Strict*" -or $key -like "Security*" -or $key -like "Require*" -or $key -like "Trusted*" -or $key -eq "AllowExternalPaths" -or $key -eq "HardenPermissions" -or $key -eq "DataRoot") { $section = "Advanced" }
+                elseif ($key -eq "IntervalSeconds" -or $key -like "Start*" -or $key -like "Remember*" -or $key -eq "UiLanguage" -or $key -eq "DateTimeFormat" -or $key -eq "UseSystemDateTimeFormat" -or $key -eq "SystemDateTimeFormatMode" -or $key -eq "OpenSettingsAtLastTab" -or $key -eq "FirstRunWizardCompleted" -or $key -eq "BadgeTrackingMode") { $section = "General" }
+            }
+            if (-not $sectionCounts.ContainsKey($section)) { $sectionCounts[$section] = 0 }
+            $sectionCounts[$section] = [int]$sectionCounts[$section] + 1
+        }
+        foreach ($tab in $script:SettingsTabControl.TabPages) {
+            if (-not $tab) { continue }
+            $key = if ($script:GetSettingsTabKey) { [string](& $script:GetSettingsTabKey $tab) } else { [string]$tab.Text }
+            if ([string]::IsNullOrWhiteSpace($key)) { continue }
+            $baseText = ([string]$tab.Text -replace '\s+\(\d+\)$', '')
+            if ([string]::IsNullOrWhiteSpace($baseText)) { $baseText = $key }
+            $count = 0
+            if ($sectionCounts.ContainsKey($key)) { $count = [int]$sectionCounts[$key] }
+            $newText = if ($count -gt 0) { "{0} ({1})" -f $baseText, $count } else { $baseText }
+            if ($tab.Text -ne $newText) { $tab.Text = $newText }
+        }
+    }
+    $script:UpdateSettingsDirtyIndicators = {
+        if (-not $script:SettingsDirty) {
+            if ($script:SettingsDirtyLabel) {
+                $baseText = if ([string]::IsNullOrWhiteSpace([string]$script:SettingsDirtyBaseText)) { "Unsaved changes" } else { [string]$script:SettingsDirtyBaseText }
+                $script:SettingsDirtyLabel.Text = $baseText
+            }
+            if (($script:UpdateSettingsTabChangeBadges) -is [scriptblock]) { & $script:UpdateSettingsTabChangeBadges @() }
+            return
+        }
+        $changedKeys = if (($script:GetPendingSettingsDiffKeys) -is [scriptblock]) { @(& $script:GetPendingSettingsDiffKeys) } else { @() }
+        $changedCount = @($changedKeys).Count
+        if ($script:SettingsDirtyLabel) {
+            $baseText = if ([string]::IsNullOrWhiteSpace([string]$script:SettingsDirtyBaseText)) { "Unsaved changes" } else { [string]$script:SettingsDirtyBaseText }
+            $script:SettingsDirtyLabel.Text = if ($changedCount -gt 0) { "{0} ({1})" -f $baseText, $changedCount } else { $baseText }
+        }
+        if (($script:UpdateSettingsTabChangeBadges) -is [scriptblock]) { & $script:UpdateSettingsTabChangeBadges $changedKeys }
+    }
+    $script:SettingsDirtyRefreshTimer = New-Object System.Windows.Forms.Timer
+    $script:SettingsDirtyRefreshTimer.Interval = 200
+    $script:SettingsDirtyRefreshTimer.Add_Tick({
+        Invoke-SafeTimerAction "SettingsDirtyRefreshTimer" {
+            $script:SettingsDirtyRefreshTimer.Stop()
+            if (($script:UpdateSettingsDirtyIndicators) -is [scriptblock]) { & $script:UpdateSettingsDirtyIndicators }
+        }
+    })
+    $script:ScheduleSettingsDirtyRefresh = {
+        if (-not $script:SettingsDirtyRefreshTimer) { return }
+        if ($script:SettingsDirtyRefreshTimer.Enabled) { $script:SettingsDirtyRefreshTimer.Stop() }
+        $script:SettingsDirtyRefreshTimer.Start()
+    }
     $script:SetDirty = {
         param([bool]$value)
-        if ($settingsDirty -eq $value) { return }
+        if ($settingsDirty -eq $value) {
+            if ($value -and (($script:ScheduleSettingsDirtyRefresh) -is [scriptblock])) { & $script:ScheduleSettingsDirtyRefresh }
+            return
+        }
         $settingsDirty = $value
         $script:SettingsDirty = $value
         if ($script:SettingsOkButton) { $script:SettingsOkButton.Enabled = $value }
@@ -5137,6 +5835,11 @@ $clearLogButton = New-Object System.Windows.Forms.Button
         if ($value -and $script:SettingsSaveLabel) { $script:SettingsSaveLabel.Visible = $false }
         $dirtyVar = Get-Variable -Name UpdateProfileDirtyIndicator -Scope Script -ErrorAction SilentlyContinue
         if ($dirtyVar -and $dirtyVar.Value -is [scriptblock]) { & $dirtyVar.Value }
+        if ($value) {
+            if (($script:ScheduleSettingsDirtyRefresh) -is [scriptblock]) { & $script:ScheduleSettingsDirtyRefresh }
+        } elseif (($script:UpdateSettingsDirtyIndicators) -is [scriptblock]) {
+            & $script:UpdateSettingsDirtyIndicators
+        }
     }
 
     $script:UpdateProfileDirtyIndicator = {
@@ -5165,11 +5868,17 @@ $clearLogButton = New-Object System.Windows.Forms.Button
     $runSettingsAction = {
         param([string]$name, [scriptblock]$action)
         if (Get-Command -Name Invoke-UiSafeAction -ErrorAction SilentlyContinue) {
-            Invoke-UiSafeAction -Name $name -Action $action -Context "Settings-UI" -ShowDialog -DialogTitle "Error" -DialogMessagePrefix "Settings action failed" | Out-Null
+            try {
+                if (($script:SetSettingsBusyState) -is [scriptblock]) { & $script:SetSettingsBusyState $true }
+                Invoke-UiSafeAction -Name $name -Action $action -Context "Settings-UI" -ShowDialog -DialogTitle "Error" -DialogMessagePrefix "Settings action failed" | Out-Null
+            } finally {
+                if (($script:SetSettingsBusyState) -is [scriptblock]) { & $script:SetSettingsBusyState $false }
+            }
             return
         }
         Set-LastUserAction $name "Settings"
         try {
+            if (($script:SetSettingsBusyState) -is [scriptblock]) { & $script:SetSettingsBusyState $true }
             $actionStart = Get-Date
             if ($settings.VerboseUiLogging) {
                 Write-Log "UI: Settings action started: $name" "DEBUG" $null "Settings-UI"
@@ -5192,6 +5901,8 @@ $clearLogButton = New-Object System.Windows.Forms.Button
                 [System.Windows.Forms.MessageBoxButtons]::OK,
                 [System.Windows.Forms.MessageBoxIcon]::Error
             ) | Out-Null
+        } finally {
+            if (($script:SetSettingsBusyState) -is [scriptblock]) { & $script:SetSettingsBusyState $false }
         }
     }
     $script:RunSettingsAction = $runSettingsAction
@@ -5304,7 +6015,7 @@ $clearLogButton = New-Object System.Windows.Forms.Button
 
     foreach ($ctrl in @(
         $script:profileReadOnlyBox,
-        $script:intervalBox, $script:startWithWindowsBox, $script:openSettingsLastTabBox, $script:languageBox, $script:rememberChoiceBox, $script:showFirstRunToastBox, $script:startOnLaunchBox, $script:quietModeBox, $script:dateTimeFormatBox, $script:dateTimeFormatPresetBox, $script:useSystemDateTimeFormatBox, $script:systemDateTimeFormatModeBox,
+        $script:intervalBox, $script:startWithWindowsBox, $script:openSettingsLastTabBox, $script:languageBox, $script:rememberChoiceBox, $script:showFirstRunToastBox, $script:startOnLaunchBox, $script:autoStartOnRestartBox, $script:quietModeBox, $script:dateTimeFormatBox, $script:dateTimeFormatPresetBox, $script:useSystemDateTimeFormatBox, $script:systemDateTimeFormatModeBox,
         $script:tooltipStyleBox, $script:disableBalloonBox, $script:themeModeBox, $script:fontSizeBox, $script:settingsFontSizeBox, $script:compactModeBox, $script:toggleCountBox, $script:LastTogglePicker, $script:runOnceOnLaunchBox, $script:pauseUntilBox,
         $script:pauseDurationsBox, $script:scheduleOverrideBox, $script:scheduleEnabledBox, $script:scheduleStartBox, $script:scheduleEndBox, $script:scheduleWeekdaysBox,
         $script:scheduleSuspendUntilBox, $script:scheduleSuspendQuickBox, $script:SafeModeEnabledBox, $script:safeModeThresholdBox,
@@ -5343,6 +6054,7 @@ $clearLogButton = New-Object System.Windows.Forms.Button
         "Remember Choice" = "Remember the answer to the start prompt shown on launch."
         "Show First-Run Tips" = "Show a short help tip after the first launch."
         "Start on Launch" = "Automatically start toggling when the app launches."
+        "Auto Start on Restart" = "When enabled, restarting the app from tray will auto-start toggling on relaunch."
         "Run Once on Launch" = "Toggle Scroll Lock once at startup without staying in a running loop."
         "Date/Time Format" = "Format used for all displayed timestamps. Example: yyyy-MM-dd HH:mm:ss."
         "Date/Time Format Preset" = "Pick a common format and apply it to the format box."
@@ -5378,6 +6090,8 @@ $clearLogButton = New-Object System.Windows.Forms.Button
         "Hotkey Status" = "Shows whether the hotkeys registered successfully."
         "Validate Hotkeys" = "Validate hotkey strings without registering them."
         "Test Hotkeys" = "Simulate hotkey actions using the buttons below."
+        "Badge Scope" = "Explains where badge progression is tracked for the selected mode."
+        "Switch Rule" = "Mode switches are one-way safe merges; existing badge progress is preserved."
         "Safe Mode Enabled" = "Disable toggling after repeated failures to prevent constant errors."
         "Safe Mode Failure Threshold" = "Number of consecutive failures before Safe Mode activates."
         "Security Mode" = "Enable a hardened policy bundle: strict import validation, strict update policy, hash/signature requirements, and no external runtime paths."
@@ -5408,6 +6122,8 @@ $clearLogButton = New-Object System.Windows.Forms.Button
         "Reset Crash State" = "Clear crash counters and Safe Mode state for recovery."
         "Open Diagnostics Folder" = "Open the folder that stores logs and diagnostics outputs."
         "Copy Status" = "Copy current status details to the clipboard."
+        "Export Badge Card" = "Export a shareable badge progress card to the Meta\\BadgeCards folder."
+        "Badge Tracking" = "Global = one shared badge track. Profile = each profile has its own badge track."
         "Log Max Size (KB)" = "Rotate the log when it exceeds this size."
         "Log Retention (days)" = "Delete old log files after this many days. Set to 0 to keep indefinitely."
         "Log Size" = "Current log size compared to the max size threshold."
@@ -5467,6 +6183,7 @@ $clearLogButton = New-Object System.Windows.Forms.Button
     & $setToolTip $previewChangesButton "Preview changes without saving."
     & $setToolTip $undoChangesButton "Revert changes back to the last saved settings."
     & $setToolTip $copyDiagnosticsButton "Copy diagnostics to the clipboard."
+    if ($repairAllButton) { & $setToolTip $repairAllButton "Run full repair actions (snapshots, modules, timers, and status refresh)." }
     if ($resetCrashStateButton) { & $setToolTip $resetCrashStateButton "Clear crash counters and Safe Mode state." }
     if ($openDiagnosticsFolderButton) { & $setToolTip $openDiagnosticsFolderButton "Open the diagnostics/logs folder." }
     if ($restorePreviousSettingsButton) { & $setToolTip $restorePreviousSettingsButton "Restore settings from a version snapshot." }
@@ -5484,12 +6201,32 @@ $clearLogButton = New-Object System.Windows.Forms.Button
     $script:SettingsSafeModeStatusLabel = $safeModeStatusLabel
     $script:SettingsKeyboardLabel = $keyboardLabel
     $script:SettingsUptimeLabel = $uptimeLabel
+    $script:SettingsBadgeTrackingLabel = $badgeTrackingModeLabel
+    $script:SettingsBadgeScopeSummaryLabel = $badgeScopeSummaryLabel
+    $script:SettingsBadgeScopeRuleLabel = $badgeScopeRuleLabel
     $script:SettingsFunDailyLabel = $funDailyLabel
     $script:SettingsFunStreakCurrentLabel = $funStreakCurrentLabel
     $script:SettingsFunStreakBestLabel = $funStreakBestLabel
     $script:SettingsFunMostActiveLabel = $funMostActiveLabel
     $script:SettingsFunLongestPauseLabel = $funLongestPauseLabel
     $script:SettingsFunTotalRunLabel = $funTotalRunLabel
+    $script:SettingsFunCrashFreeDaysLabel = $funCrashFreeDaysLabel
+    $script:SettingsFunProfileUsageLabel = $funProfileUsageLabel
+    $script:SettingsFunReliabilityLabel = $funReliabilityLabel
+    $script:SettingsFunTimeSavedLabel = $funTimeSavedLabel
+    $script:SettingsFunMilestoneLabel = $funMilestoneLabel
+    $script:SettingsFunCurrentBadgeLabel = $funCurrentBadgeLabel
+    $script:SettingsFunNextBadgeLabel = $funNextBadgeLabel
+    $script:SettingsFunMilestonePctLabel = $funMilestonePctLabel
+    $script:SettingsFunBonusBadgesLabel = $funBonusBadgesLabel
+    $script:SettingsFunSeasonalBadgeLabel = $funSeasonalBadgeLabel
+    $script:SettingsFunComboBadgeLabel = $funComboBadgeLabel
+    $script:SettingsFunResilienceBadgeLabel = $funResilienceBadgeLabel
+    $script:SettingsFunBadgeCatalogLabel = $funBadgeCatalogLabel
+    $script:SettingsFunBadgeLevelLabel = $funBadgeLevelLabel
+    $script:SettingsFunTierProgressLabel = $funTierProgressLabel
+    $script:SettingsFunBadgeModeLabel = $funBadgeModeLabel
+    $script:SettingsFunRecentUnlockLabel = $funRecentUnlockLabel
     $script:SettingsStatusValue = $statusValue
     $script:SettingsNextValue = $nextValue
     $script:SettingsUptimeValue = $uptimeValue
@@ -5497,9 +6234,30 @@ $clearLogButton = New-Object System.Windows.Forms.Button
     $script:SettingsNextCountdownValue = $nextCountdownValue
     $script:SettingsToggleCurrentValue = $toggleCurrentValue
     $script:SettingsToggleLifetimeValue = $toggleLifetimeValue
+    $script:SettingsBadgeTrackingModeBox = $badgeTrackingModeBox
+    $script:SettingsBadgeScopeSummaryValue = $badgeScopeSummaryValue
+    $script:SettingsBadgeScopeRuleValue = $badgeScopeRuleValue
     $script:SettingsProfileStatusValue = $profileStatusValue
     $script:SettingsScheduleStatusValue = $scheduleStatusValue
     $script:SettingsSafeModeStatusValue = $safeModeStatusValue
+    $script:SettingsFunCrashFreeDaysValue = $funCrashFreeDaysValue
+    $script:SettingsFunProfileUsageValue = $funProfileUsageValue
+    $script:SettingsFunReliabilityValue = $funReliabilityValue
+    $script:SettingsFunTimeSavedValue = $funTimeSavedValue
+    $script:SettingsFunMilestoneValue = $funMilestoneValue
+    $script:SettingsFunCurrentBadgeValue = $funCurrentBadgeValue
+    $script:SettingsFunNextBadgeValue = $funNextBadgeValue
+    $script:SettingsFunMilestonePctValue = $funMilestonePctValue
+    $script:SettingsFunBonusBadgesValue = $funBonusBadgesValue
+    $script:SettingsFunSeasonalBadgeValue = $funSeasonalBadgeValue
+    $script:SettingsFunComboBadgeValue = $funComboBadgeValue
+    $script:SettingsFunResilienceBadgeValue = $funResilienceBadgeValue
+    $script:SettingsFunBadgeCatalogValue = $funBadgeCatalogValue
+    $script:SettingsFunBadgeLevelValue = $funBadgeLevelValue
+    $script:SettingsFunTierProgressBar = $funTierProgressBar
+    $script:SettingsFunTierProgressValue = $funTierProgressValue
+    $script:SettingsFunBadgeModeValue = $funBadgeModeValue
+    $script:SettingsFunRecentUnlockValue = $funRecentUnlockValue
     $script:SettingsKeyboardValue = $keyboardValue
     $script:SettingsHotkeyStatusValue = $hotkeyStatusValue
     $script:SettingsLogMaxBox = $script:logMaxBox
@@ -5513,6 +6271,8 @@ $clearLogButton = New-Object System.Windows.Forms.Button
     $script:SettingsDiagLogSizeValue = $diagLogSizeValue
     $script:SettingsDiagLogRotateValue = $diagLogRotateValue
     $script:SettingsDiagLogWriteValue = $diagLogWriteValue
+    $script:SettingsDiagSelfHealQueueValue = $diagSelfHealQueueValue
+    $script:SettingsDiagSelfHealLastValue = $diagSelfHealLastValue
     $script:SettingsResetConfirmState = $resetConfirmState
     $script:SettingsResetButton = $resetButton
 
@@ -5521,6 +6281,55 @@ $clearLogButton = New-Object System.Windows.Forms.Button
             if ($script:logCategoryBoxes.ContainsKey($name)) {
                 & $setToolTip $script:logCategoryBoxes[$name] "Include $name category entries when the log level allows."
             }
+        }
+    }
+
+    $script:UpdateBadgeScopeSummary = {
+        param($src = $null)
+        try {
+            $settingsRef = if ($src) { $src } elseif ($settings) { $settings } else { $script:settings }
+            $modeValue = ""
+            if ($script:badgeTrackingModeBox -and $script:badgeTrackingModeBox.SelectedItem) {
+                $modeValue = [string]$script:badgeTrackingModeBox.SelectedItem
+            } else {
+                $modeValue = [string](Get-SettingsPropertyValue $settingsRef "BadgeTrackingMode" "Global")
+            }
+            if ([string]::IsNullOrWhiteSpace($modeValue)) { $modeValue = "Global" }
+            $modeText = if ($modeValue.ToLowerInvariant() -eq "profile") { "Profile" } else { "Global" }
+
+            $activeProfileName = ""
+            if ($script:profileBox -and $script:profileBox.SelectedItem) {
+                $activeProfileName = [string]$script:profileBox.SelectedItem
+            }
+            if ([string]::IsNullOrWhiteSpace($activeProfileName)) {
+                $activeProfileName = [string](Get-SettingsPropertyValue $settingsRef "ActiveProfile" "Default")
+            }
+            if ([string]::IsNullOrWhiteSpace($activeProfileName)) { $activeProfileName = "Default" }
+
+            $stats = Convert-ToHashtable (Get-SettingsPropertyValue $settingsRef "Stats" @{})
+            $globalLifetime = 0L
+            try { $globalLifetime = [int64](Get-LifetimeCountFromStatsObject $stats 0) } catch { $globalLifetime = 0L }
+            $profileLifetime = $globalLifetime
+            if (Get-Command -Name Get-ProfileLifetimeToggleCount -ErrorAction SilentlyContinue) {
+                try { $profileLifetime = [int64](Get-ProfileLifetimeToggleCount $stats $activeProfileName $globalLifetime) } catch { $profileLifetime = $globalLifetime }
+            }
+            if ($profileLifetime -lt 0) { $profileLifetime = 0L }
+            if ($globalLifetime -lt 0) { $globalLifetime = 0L }
+
+            $summaryText = ""
+            $ruleText = ""
+            if ($modeText -eq "Profile") {
+                $summaryText = ("Per-profile progression for '{0}' ({1:N0} toggles)." -f $activeProfileName, $profileLifetime)
+                $ruleText = "Switching to Global merges profile badge unlocks into the Global track. Nothing is deleted."
+            } else {
+                $summaryText = ("Shared progression across all profiles ({0:N0} toggles)." -f $globalLifetime)
+                $ruleText = ("Switching to Profile seeds '{0}' from Global and keeps Global unlocks intact." -f $activeProfileName)
+            }
+            if ($script:SettingsBadgeScopeSummaryValue) { $script:SettingsBadgeScopeSummaryValue.Text = $summaryText }
+            if ($script:SettingsBadgeScopeRuleValue) { $script:SettingsBadgeScopeRuleValue.Text = $ruleText }
+        } catch {
+            if ($script:SettingsBadgeScopeSummaryValue) { $script:SettingsBadgeScopeSummaryValue.Text = "Shared progression across all profiles." }
+            if ($script:SettingsBadgeScopeRuleValue) { $script:SettingsBadgeScopeRuleValue.Text = "Mode switches are one-way safe merges. No badge progress is deleted." }
         }
     }
 
@@ -5538,6 +6347,7 @@ $clearLogButton = New-Object System.Windows.Forms.Button
         $script:rememberChoiceBox.Checked = [bool]$src.RememberChoice
         $script:showFirstRunToastBox.Checked = [bool]$src.ShowFirstRunToast
         $script:startOnLaunchBox.Checked = [bool]$src.StartOnLaunch
+        $script:autoStartOnRestartBox.Checked = [bool](Get-SettingsPropertyValue $src "AutoStartOnRestart" $false)
         $script:quietModeBox.Checked = [bool]$src.QuietMode
         $tooltipStyleValue = [string]$src.TooltipStyle
         if ([string]::IsNullOrWhiteSpace($tooltipStyleValue)) {
@@ -5592,6 +6402,17 @@ $clearLogButton = New-Object System.Windows.Forms.Button
         Apply-MenuFontSize ([int]$script:fontSizeBox.Value)
         Apply-SettingsFontSize ([int]$script:settingsFontSizeBox.Value)
         $script:toggleCountBox.Value = [int]$src.ToggleCount
+        if ($script:badgeTrackingModeBox) {
+            $modeValue = [string](Get-SettingsPropertyValue $src "BadgeTrackingMode" "Global")
+            if ([string]::IsNullOrWhiteSpace($modeValue)) { $modeValue = "Global" }
+            if ($modeValue.ToLowerInvariant() -eq "profile") {
+                $script:badgeTrackingModeBox.SelectedItem = "Profile"
+            } else {
+                $script:badgeTrackingModeBox.SelectedItem = "Global"
+            }
+            $updateScopeVar = Get-Variable -Name UpdateBadgeScopeSummary -Scope Script -ErrorAction SilentlyContinue
+            if ($updateScopeVar -and ($updateScopeVar.Value -is [scriptblock])) { & $updateScopeVar.Value $src }
+        }
         if ($src.LastToggleTime) {
             try {
                 $script:LastTogglePicker.Value = [DateTime]::Parse([string]$src.LastToggleTime)
@@ -6096,6 +6917,12 @@ $clearLogButton = New-Object System.Windows.Forms.Button
         $pending.IntervalSeconds = $intervalSeconds
         $pending.StartWithWindows = $script:startWithWindowsBox.Checked
         $pending.OpenSettingsAtLastTab = $script:openSettingsLastTabBox.Checked
+        if ($script:badgeTrackingModeBox -and $script:badgeTrackingModeBox.SelectedItem) {
+            $pending.BadgeTrackingMode = [string]$script:badgeTrackingModeBox.SelectedItem
+        } else {
+            $pending.BadgeTrackingMode = [string](Get-SettingsPropertyValue $settings "BadgeTrackingMode" "Global")
+            if ([string]::IsNullOrWhiteSpace($pending.BadgeTrackingMode)) { $pending.BadgeTrackingMode = "Global" }
+        }
         $selectedLang = $null
         if ($script:languageBox) { $selectedLang = $script:languageBox.SelectedItem }
         if ($selectedLang -and $selectedLang.PSObject.Properties.Name -contains "Code") {
@@ -6106,6 +6933,7 @@ $clearLogButton = New-Object System.Windows.Forms.Button
         $pending.RememberChoice = $script:rememberChoiceBox.Checked
         $pending.ShowFirstRunToast = [bool]$script:showFirstRunToastBox.Checked
         $pending.StartOnLaunch = $script:startOnLaunchBox.Checked
+        $pending.AutoStartOnRestart = [bool]$script:autoStartOnRestartBox.Checked
         $pending.QuietMode = $script:quietModeBox.Checked
         $pending.DisableBalloonTips = $script:disableBalloonBox.Checked
         $pending.DateTimeFormat = Normalize-DateTimeFormat $formatText
@@ -6326,7 +7154,7 @@ $clearLogButton = New-Object System.Windows.Forms.Button
         if ($key -eq "Profiles" -or $key -eq "ActiveProfile") { return "Profiles" }
         if ($key -like "Theme*" -or $key -like "StatusColor*" -or $key -like "*Tooltip*" -or $key -eq "FontSize" -or $key -eq "SettingsFontSize" -or $key -eq "CompactMode" -or $key -eq "QuietMode") { return "Appearance" }
         if ($key -like "Update*" -or $key -like "Strict*" -or $key -like "Security*" -or $key -like "Require*" -or $key -like "Trusted*" -or $key -eq "AllowExternalPaths" -or $key -eq "HardenPermissions" -or $key -eq "DataRoot") { return "Advanced" }
-        if ($key -eq "IntervalSeconds" -or $key -like "Start*" -or $key -like "Remember*" -or $key -eq "UiLanguage" -or $key -eq "DateTimeFormat" -or $key -eq "UseSystemDateTimeFormat" -or $key -eq "SystemDateTimeFormatMode" -or $key -eq "OpenSettingsAtLastTab" -or $key -eq "FirstRunWizardCompleted") { return "General" }
+        if ($key -eq "IntervalSeconds" -or $key -like "Start*" -or $key -like "Remember*" -or $key -eq "UiLanguage" -or $key -eq "DateTimeFormat" -or $key -eq "UseSystemDateTimeFormat" -or $key -eq "SystemDateTimeFormatMode" -or $key -eq "OpenSettingsAtLastTab" -or $key -eq "FirstRunWizardCompleted" -or $key -eq "BadgeTrackingMode") { return "General" }
 
         return "Other"
     }
@@ -6482,6 +7310,8 @@ $clearLogButton = New-Object System.Windows.Forms.Button
                 $script:SuppressPathWarnings = $previousSuppressPathWarnings
             }
             if (-not $collectResult -or $collectResult.Errors.Count -gt 0) { return }
+            # Keep the preview dialog interactive; avoid leaving the wait cursor active while it is open.
+            if (($script:SetSettingsBusyState) -is [scriptblock]) { & $script:SetSettingsBusyState $false }
             if (& $script:ShowPendingSettingsDiff $collectResult.Settings) {
                 Write-Log "UI: Settings preview displayed." "DEBUG" $null "Settings-Dialog"
             }
@@ -6499,6 +7329,7 @@ $clearLogButton = New-Object System.Windows.Forms.Button
 
     $script:SettingsOkButton.Add_Click({
         try {
+        if (($script:SetSettingsBusyState) -is [scriptblock]) { & $script:SetSettingsBusyState $true }
         Set-LastUserAction "Save Settings" "Settings"
         $collectResult = & $script:CollectSettingsFromControls -ShowErrors
         if (-not $collectResult -or $collectResult.Errors.Count -gt 0) { return }
@@ -6647,6 +7478,8 @@ $clearLogButton = New-Object System.Windows.Forms.Button
                 [System.Windows.Forms.MessageBoxButtons]::OK,
                 [System.Windows.Forms.MessageBoxIcon]::Error
             ) | Out-Null
+        } finally {
+            if (($script:SetSettingsBusyState) -is [scriptblock]) { & $script:SetSettingsBusyState $false }
         }
     })
 
@@ -6718,9 +7551,20 @@ $clearLogButton = New-Object System.Windows.Forms.Button
             return
         }
     }
+    $setBackColorIfChanged = {
+        param($control, $color)
+        if ($null -eq $control) { return }
+        if (-not $control.PSObject.Properties.Match('BackColor')) { return }
+        try {
+            if ($control.BackColor -ne $color) { $control.BackColor = $color }
+        } catch {
+            return
+        }
+    }
     $script:SettingsSetText = $setTextIfChanged
     $script:SettingsSetVisible = $setVisibleIfChanged
     $script:SettingsSetForeColor = $setForeColorIfChanged
+    $script:SettingsSetBackColor = $setBackColorIfChanged
 
     $updateSettingsStatus = {
         if ($script:isShuttingDown -or $script:SettingsUiRefreshInProgress) { return }
@@ -6772,6 +7616,18 @@ $clearLogButton = New-Object System.Windows.Forms.Button
                 if (-not $control.PSObject.Properties.Match('ForeColor')) { return }
                 try {
                     if ($control.ForeColor -ne $color) { $control.ForeColor = $color }
+                } catch {
+                    return
+                }
+            }
+        }
+        if (-not ($script:SettingsSetBackColor -is [scriptblock])) {
+            $script:SettingsSetBackColor = {
+                param($control, $color)
+                if ($null -eq $control) { return }
+                if (-not $control.PSObject.Properties.Match('BackColor')) { return }
+                try {
+                    if ($control.BackColor -ne $color) { $control.BackColor = $color }
                 } catch {
                     return
                 }
@@ -6833,55 +7689,45 @@ $clearLogButton = New-Object System.Windows.Forms.Button
                 if ($script:SettingsToggleCurrentValue) {
                     if ($script:SettingsSetText -is [scriptblock]) { & $script:SettingsSetText $script:SettingsToggleCurrentValue ([string]$script:tickCount) }
                 }
-                if ($script:SettingsToggleLifetimeValue) {
-                    if ($script:SettingsSetText -is [scriptblock]) { & $script:SettingsSetText $script:SettingsToggleLifetimeValue ([string]$settings.ToggleCount) }
-                }
                 $step = "StatusTab-FunStats"
                 try {
-                    $cacheFresh = $false
-                    if ($script:FunStatsCache -and $script:FunStatsCache.Updated) {
-                        $cacheFresh = ((Get-Date) - $script:FunStatsCache.Updated).TotalSeconds -lt 10
+                    $funStats = Ensure-FunStats $settings
+                    $lifetimeToggleCount = [int](Get-LifetimeToggleCount $funStats ([int](Get-SettingsPropertyValue $settings "ToggleCount" 0)))
+                    if ($script:SettingsToggleLifetimeValue) {
+                        if ($script:SettingsSetText -is [scriptblock]) { & $script:SettingsSetText $script:SettingsToggleLifetimeValue ([string]$lifetimeToggleCount) }
                     }
-                    if (-not $cacheFresh) {
-                        $funStats = Ensure-FunStats $settings
-                        $dailyCount = [string](Get-DailyToggleCount $funStats (Get-Date))
-                        $streaks = Get-ToggleStreaks $funStats
-                        $mostActive = Get-MostActiveHourLabel $funStats
+                    $dailyCount = [string](Get-DailyToggleCount $funStats (Get-Date))
+                    $streaks = Get-ToggleStreaks $funStats
+                    $mostActive = Get-MostActiveHourLabel $funStats
+                    $longestPause = 0
+                    try {
+                        if ($funStats -is [System.Collections.IDictionary] -and $funStats.ContainsKey("LongestPauseMinutes")) {
+                            $longestPause = [int]$funStats["LongestPauseMinutes"]
+                        } elseif ($funStats -and $funStats.PSObject.Properties.Match("LongestPauseMinutes").Count -gt 0) {
+                            $longestPause = [int]$funStats.LongestPauseMinutes
+                        }
+                    } catch {
                         $longestPause = 0
-                        try {
-                            if ($funStats -is [System.Collections.IDictionary] -and $funStats.ContainsKey("LongestPauseMinutes")) {
-                                $longestPause = [int]$funStats["LongestPauseMinutes"]
-                            } elseif ($funStats -and $funStats.PSObject.Properties.Match("LongestPauseMinutes").Count -gt 0) {
-                                $longestPause = [int]$funStats.LongestPauseMinutes
-                            }
-                        } catch {
-                            $longestPause = 0
-                        }
-                        $totalRun = 0.0
-                        try {
-                            if ($funStats -is [System.Collections.IDictionary] -and $funStats.ContainsKey("TotalRunMinutes")) {
-                                $totalRun = [double]$funStats["TotalRunMinutes"]
-                            } elseif ($funStats -and $funStats.PSObject.Properties.Match("TotalRunMinutes").Count -gt 0) {
-                                $totalRun = [double]$funStats.TotalRunMinutes
-                            }
-                        } catch {
-                            $totalRun = 0.0
-                        }
-                        $script:FunStatsCache = @{
-                            Updated = Get-Date
-                            Daily = $dailyCount
-                            Streaks = $streaks
-                            MostActive = $mostActive
-                            LongestPause = $longestPause
-                            TotalRun = $totalRun
-                        }
-                    } else {
-                        $dailyCount = [string]$script:FunStatsCache.Daily
-                        $streaks = $script:FunStatsCache.Streaks
-                        $mostActive = $script:FunStatsCache.MostActive
-                        $longestPause = [int]$script:FunStatsCache.LongestPause
-                        $totalRun = [double]$script:FunStatsCache.TotalRun
                     }
+                    $totalRunPersisted = 0.0
+                    try {
+                        if ($funStats -is [System.Collections.IDictionary] -and $funStats.ContainsKey("TotalRunMinutes")) {
+                            $totalRunPersisted = [double]$funStats["TotalRunMinutes"]
+                        } elseif ($funStats -and $funStats.PSObject.Properties.Match("TotalRunMinutes").Count -gt 0) {
+                            $totalRunPersisted = [double]$funStats.TotalRunMinutes
+                        }
+                    } catch {
+                        $totalRunPersisted = 0.0
+                    }
+                    $currentSessionMinutes = 0.0
+                    try {
+                        if ($script:AppStartTime) {
+                            $currentSessionMinutes = [Math]::Max(0, ((Get-Date) - $script:AppStartTime).TotalMinutes)
+                        }
+                    } catch {
+                        $currentSessionMinutes = 0.0
+                    }
+                    $totalRun = [Math]::Round(($totalRunPersisted + $currentSessionMinutes), 1)
                     $funDailyControl = & $getSettingsControl 'SettingsFunDailyValue'
                     if ($funDailyControl) {
                         if ($script:SettingsSetText -is [scriptblock]) { & $script:SettingsSetText $funDailyControl $dailyCount }
@@ -6900,14 +7746,447 @@ $clearLogButton = New-Object System.Windows.Forms.Button
                     }
                     $funLongestPauseControl = & $getSettingsControl 'SettingsFunLongestPauseValue'
                     if ($funLongestPauseControl) {
-                        if ($script:SettingsSetText -is [scriptblock]) { & $script:SettingsSetText $funLongestPauseControl (if ($longestPause -gt 0) { "$longestPause min" } else { "N/A" }) }
+                        $longestPauseDisplay = if ($longestPause -gt 0) { "$longestPause min" } else { "N/A" }
+                        if ($script:SettingsSetText -is [scriptblock]) { & $script:SettingsSetText $funLongestPauseControl $longestPauseDisplay }
                     }
                     $funTotalRunControl = & $getSettingsControl 'SettingsFunTotalRunValue'
                     if ($funTotalRunControl) {
                         if ($script:SettingsSetText -is [scriptblock]) { & $script:SettingsSetText $funTotalRunControl (Format-TotalRunTime $totalRun) }
                     }
+
+                    $crashFreeDays = 0
+                    if (Get-Command -Name Get-CrashFreeDays -ErrorAction SilentlyContinue) {
+                        try {
+                            $crashFreeDays = [int](Get-CrashFreeDays $funStats (Get-Date))
+                        } catch {
+                            $crashFreeDays = 0
+                        }
+                    }
+                    $funCrashFreeControl = & $getSettingsControl 'SettingsFunCrashFreeDaysValue'
+                    if ($funCrashFreeControl) {
+                        if ($script:SettingsSetText -is [scriptblock]) { & $script:SettingsSetText $funCrashFreeControl ([string]$crashFreeDays) }
+                    }
+
+                    $activeProfileName = [string](Get-SettingsPropertyValue $settings "ActiveProfile" "Default")
+                    if ([string]::IsNullOrWhiteSpace($activeProfileName)) { $activeProfileName = "Default" }
+                    $profileSplit = "N/A"
+                    if (Get-Command -Name Get-ProfileUsageSplitLabel -ErrorAction SilentlyContinue) {
+                        try {
+                            $profileSplit = [string](Get-ProfileUsageSplitLabel $funStats $activeProfileName)
+                        } catch {
+                            $profileSplit = "N/A"
+                        }
+                    }
+                    $funProfileUsageControl = & $getSettingsControl 'SettingsFunProfileUsageValue'
+                    if ($funProfileUsageControl) {
+                        if ($script:SettingsSetText -is [scriptblock]) { & $script:SettingsSetText $funProfileUsageControl $profileSplit }
+                    }
+
+                    $reliabilityPct = 100.0
+                    if (Get-Command -Name Get-UptimeReliabilityPercent -ErrorAction SilentlyContinue) {
+                        try {
+                            $reliabilityPct = [double](Get-UptimeReliabilityPercent $funStats)
+                        } catch {
+                            $reliabilityPct = 100.0
+                        }
+                    }
+                    $funReliabilityControl = & $getSettingsControl 'SettingsFunReliabilityValue'
+                    if ($funReliabilityControl) {
+                        if ($script:SettingsSetText -is [scriptblock]) { & $script:SettingsSetText $funReliabilityControl ("{0:N1}%" -f $reliabilityPct) }
+                    }
+
+                    $timeSavedMinutes = [Math]::Round((($lifetimeToggleCount * 2.0) / 60.0), 1)
+                    if (Get-Command -Name Get-EstimatedTimeSavedMinutes -ErrorAction SilentlyContinue) {
+                        try {
+                            $timeSavedMinutes = [double](Get-EstimatedTimeSavedMinutes $lifetimeToggleCount)
+                        } catch {
+                            $timeSavedMinutes = [Math]::Round((($lifetimeToggleCount * 2.0) / 60.0), 1)
+                        }
+                    }
+                    $funTimeSavedControl = & $getSettingsControl 'SettingsFunTimeSavedValue'
+                    if ($funTimeSavedControl) {
+                        if ($script:SettingsSetText -is [scriptblock]) { & $script:SettingsSetText $funTimeSavedControl (Format-TotalRunTime $timeSavedMinutes) }
+                    }
+
+                    $baseStatsColor = [System.Drawing.SystemColors]::ControlText
+                    if ($funDailyControl) {
+                        try { $baseStatsColor = $funDailyControl.ForeColor } catch { }
+                    }
+                    $milestoneText = ("Next: 100 ({0} left)" -f [Math]::Max(0, (100 - $lifetimeToggleCount)))
+                    $currentBadgeText = "None yet"
+                    $nextBadgeText = ("Rookie (100) - {0} left" -f [Math]::Max(0, (100 - $lifetimeToggleCount)))
+                    $milestonePctText = "0.0%"
+                    $bonusBadgeText = "None yet"
+                    $currentBadgeRarity = "Common"
+                    $seasonalBadgeText = "N/A"
+                    $comboBadgeText = "None yet"
+                    $resilienceBadgeText = "None yet"
+                    $badgeCatalogText = "0/0 unlocked (0 locked)"
+                    $badgeLevelText = "Lvl 1 (0 pts, 0.0% to next)"
+                    $tierProgressPct = 0.0
+                    $badgeModeText = "Global"
+                    $recentUnlockText = "None"
+                    $badgeSummary = $null
+                    $badgeSummaryError = ""
+                    if (Get-Command -Name Get-BadgeSummary -ErrorAction SilentlyContinue) {
+                        try {
+                            $badgeSummary = Get-BadgeSummary $funStats $settings (Get-Date)
+                        } catch {
+                            $badgeSummaryError = if ($_.Exception) { [string]$_.Exception.Message } else { "Unknown error" }
+                            $badgeSummary = $null
+                        }
+                    }
+                    if ($badgeSummary) {
+                        $milestoneText = [string]$badgeSummary.MilestoneText
+                        $currentBadgeText = [string]$badgeSummary.CurrentBadgeText
+                        $nextBadgeText = [string]$badgeSummary.NextBadgeText
+                        $milestonePctText = [string]$badgeSummary.MilestonePctText
+                        $bonusBadgeText = [string]$badgeSummary.BonusBadgeText
+                        $currentBadgeRarity = [string]$badgeSummary.CurrentBadgeRarity
+                        $seasonalBadgeText = [string]$badgeSummary.SeasonalBadgeText
+                        $comboBadgeText = [string]$badgeSummary.ComboBadgeText
+                        $resilienceBadgeText = [string]$badgeSummary.ResilienceBadgeText
+                        $badgeCatalogText = [string]$badgeSummary.CatalogText
+                        $badgeLevelText = [string]$badgeSummary.BadgeLevelText
+                        if ($badgeSummary.PSObject.Properties.Match("BadgeLevelProgressPct").Count -gt 0) {
+                            try { $tierProgressPct = [double]$badgeSummary.BadgeLevelProgressPct } catch { $tierProgressPct = 0.0 }
+                        }
+                        $badgeModeText = [string]$badgeSummary.TrackingMode
+                        $recentUnlockText = [string]$badgeSummary.RecentUnlockText
+                    } else {
+                        if (-not [string]::IsNullOrWhiteSpace($badgeSummaryError)) {
+                            Write-LogThrottled "SettingsStatus-BadgeSummary" ("Badge summary fallback used: {0}" -f $badgeSummaryError) "WARN" 30
+                        }
+                        $badgeModeRaw = [string](Get-SettingsPropertyValue $settings "BadgeTrackingMode" "Global")
+                        $badgeModeText = if ($badgeModeRaw -and $badgeModeRaw.Trim().ToLowerInvariant() -eq "profile") { "Profile" } else { "Global" }
+                        $scopeKey = "global"
+                        if ($badgeModeText -eq "Profile") {
+                            $safeProfile = if ([string]::IsNullOrWhiteSpace($activeProfileName)) { "default" } else { $activeProfileName.Trim().ToLowerInvariant() }
+                            $scopeKey = ("profile:{0}" -f $safeProfile)
+                        }
+
+                        $milestoneInfo = $null
+                        if (Get-Command -Name Get-MilestoneInfo -ErrorAction SilentlyContinue) {
+                            try { $milestoneInfo = Get-MilestoneInfo ([long]$lifetimeToggleCount) } catch { $milestoneInfo = $null }
+                        }
+                        if ($milestoneInfo) {
+                            $milestoneText = if ([bool]$milestoneInfo.IsMax) {
+                                "MAX"
+                            } else {
+                                ("Next: {0} ({1:N0} left)" -f [string]$milestoneInfo.NextName, [int64]$milestoneInfo.LeftToNext)
+                            }
+                            $currentBadgeText = if ([int64]$milestoneInfo.CurrentValue -gt 0) {
+                                [string]$milestoneInfo.CurrentName
+                            } else {
+                                "None yet"
+                            }
+                            $nextBadgeText = if ([bool]$milestoneInfo.IsMax) {
+                                "MAX"
+                            } else {
+                                ("{0} ({1:N0}) [{2}] - {3:N0} left" -f [string]$milestoneInfo.NextName, [int64]$milestoneInfo.NextValue, [string]$milestoneInfo.NextTier, [int64]$milestoneInfo.LeftToNext)
+                            }
+                            $milestonePctText = if ([bool]$milestoneInfo.IsMax) { "100.0%" } else { ("{0:N1}%" -f [double]$milestoneInfo.ProgressToNextPct) }
+                            $currentBadgeRarity = [string]$milestoneInfo.CurrentRarity
+                        }
+
+                        $unlockedMap = @{}
+                        try {
+                            if ($funStats -is [System.Collections.IDictionary] -and $funStats.ContainsKey("BadgeUnlocked")) {
+                                $unlockedMap = Convert-ToHashtable $funStats["BadgeUnlocked"]
+                            } elseif ($funStats -and $funStats.PSObject.Properties.Match("BadgeUnlocked").Count -gt 0) {
+                                $unlockedMap = Convert-ToHashtable $funStats.BadgeUnlocked
+                            }
+                        } catch {
+                            $unlockedMap = @{}
+                        }
+
+                        $scopeEntries = @()
+                        foreach ($entryObj in @($unlockedMap.Values)) {
+                            $entry = Convert-ToHashtable $entryObj
+                            $entryScope = "global"
+                            if ($entry.ContainsKey("Scope") -and -not [string]::IsNullOrWhiteSpace([string]$entry["Scope"])) {
+                                $entryScope = [string]$entry["Scope"]
+                            }
+                            if ($entryScope -eq $scopeKey) { $scopeEntries += ,$entry }
+                        }
+
+                        $catalogTotal = 0
+                        if (Get-Command -Name Get-BadgeCatalogDefinitions -ErrorAction SilentlyContinue) {
+                            try { $catalogTotal = @(Get-BadgeCatalogDefinitions).Count } catch { $catalogTotal = 0 }
+                        }
+                        $catalogUnlocked = @($scopeEntries).Count
+                        if ($catalogTotal -le 0) { $catalogTotal = $catalogUnlocked }
+                        $catalogLocked = [Math]::Max(0, ($catalogTotal - $catalogUnlocked))
+                        $badgeCatalogText = ("{0}/{1} unlocked ({2} locked)" -f $catalogUnlocked, $catalogTotal, $catalogLocked)
+
+                        $byKindNames = {
+                            param([object[]]$entries, [string]$kind, [string]$noneText = "None yet")
+                            $names = @()
+                            foreach ($entry in @($entries)) {
+                                $entryKind = if ($entry.ContainsKey("Kind")) { [string]$entry["Kind"] } else { "" }
+                                if ($entryKind -ne $kind) { continue }
+                                $entryName = if ($entry.ContainsKey("Name")) { [string]$entry["Name"] } else { "" }
+                                if (-not [string]::IsNullOrWhiteSpace($entryName)) { $names += $entryName }
+                            }
+                            $names = @($names | Select-Object -Unique)
+                            if ($names.Count -eq 0) { return $noneText }
+                            return ($names -join ", ")
+                        }
+                        $bonusBadgeText = & $byKindNames @($scopeEntries) "Bonus" "None yet"
+                        $seasonalBadgeText = & $byKindNames @($scopeEntries) "Seasonal" "N/A"
+                        $comboBadgeText = & $byKindNames @($scopeEntries) "Combo" "None yet"
+                        $resilienceBadgeText = & $byKindNames @($scopeEntries) "Resilience" "None yet"
+
+                        $points = 0
+                        try {
+                            if ($funStats -is [System.Collections.IDictionary] -and $funStats.ContainsKey("BadgePoints")) {
+                                $points = [int]$funStats["BadgePoints"]
+                            } elseif ($funStats -and $funStats.PSObject.Properties.Match("BadgePoints").Count -gt 0) {
+                                $points = [int]$funStats.BadgePoints
+                            }
+                        } catch {
+                            $points = 0
+                        }
+                        if ($points -lt 0) { $points = 0 }
+                        if ($points -eq 0 -and $scopeEntries.Count -gt 0) {
+                            foreach ($entry in $scopeEntries) {
+                                try { $points += [Math]::Max(0, [int]$entry["Points"]) } catch { }
+                            }
+                        }
+                        $levelInfo = $null
+                        if (Get-Command -Name Get-BadgeLevelInfo -ErrorAction SilentlyContinue) {
+                            try { $levelInfo = Get-BadgeLevelInfo $points } catch { $levelInfo = $null }
+                        }
+                        if ($levelInfo) {
+                            $badgeLevelText = ("Lvl {0} ({1:N0} pts, {2:N1}% to next)" -f [int]$levelInfo.Level, [int]$points, [double]$levelInfo.ProgressPct)
+                            try { $tierProgressPct = [double]$levelInfo.ProgressPct } catch { $tierProgressPct = 0.0 }
+                        } else {
+                            $badgeLevelText = ("Lvl 1 ({0:N0} pts, 0.0% to next)" -f [int]$points)
+                            $tierProgressPct = 0.0
+                        }
+
+                        $history = @()
+                        try {
+                            if ($funStats -is [System.Collections.IDictionary] -and $funStats.ContainsKey("BadgeHistory")) {
+                                $history = @($funStats["BadgeHistory"])
+                            } elseif ($funStats -and $funStats.PSObject.Properties.Match("BadgeHistory").Count -gt 0) {
+                                $history = @($funStats.BadgeHistory)
+                            }
+                        } catch {
+                            $history = @()
+                        }
+                        $recent = $null
+                        foreach ($entry in $history) {
+                            if (-not $entry) { continue }
+                            $entryHash = Convert-ToHashtable $entry
+                            $entryScope = if ($entryHash.ContainsKey("Scope")) { [string]$entryHash["Scope"] } else { "global" }
+                            if ([string]::IsNullOrWhiteSpace($entryScope)) { $entryScope = "global" }
+                            if ($entryScope -ne $scopeKey) { continue }
+                            $recent = $entry
+                        }
+                        if ($recent) {
+                            $recentHash = Convert-ToHashtable $recent
+                            $recentName = if ($recentHash.ContainsKey("Name")) { [string]$recentHash["Name"] } else { "Badge" }
+                            $recentAtText = ""
+                            try {
+                                if ($recentHash.ContainsKey("UnlockedAt") -and -not [string]::IsNullOrWhiteSpace([string]$recentHash["UnlockedAt"])) {
+                                    $recentAtText = (Format-LocalTime ([datetime]$recentHash["UnlockedAt"]))
+                                }
+                            } catch {
+                                $recentAtText = ""
+                            }
+                            $recentUnlockText = if ([string]::IsNullOrWhiteSpace($recentAtText)) { $recentName } else { ("{0} at {1}" -f $recentName, $recentAtText) }
+                        }
+
+                        $currentStreakValue = 0
+                        if ($streaks -and $streaks.PSObject.Properties.Match("Current").Count -gt 0) {
+                            $currentStreakValue = [int]$streaks.Current
+                        }
+                        if (Get-Command -Name Get-BonusBadgeLabel -ErrorAction SilentlyContinue) {
+                            try {
+                                $bonusBadgeText = [string](Get-BonusBadgeLabel $funStats $currentStreakValue ([double]$reliabilityPct) ([int]$crashFreeDays) ([double]$totalRun) ([long]$lifetimeToggleCount))
+                                if ([string]::IsNullOrWhiteSpace($bonusBadgeText)) { $bonusBadgeText = "None yet" }
+                            } catch {
+                                $bonusBadgeText = "None yet"
+                            }
+                        }
+                    }
+                    $baseStatsBackColor = [System.Drawing.SystemColors]::Control
+                    if ($funDailyControl) {
+                        try { $baseStatsBackColor = $funDailyControl.BackColor } catch { }
+                    }
+                    $getRarityStyle = {
+                        param([string]$rarity, [System.Drawing.Color]$fallbackForeColor, [System.Drawing.Color]$fallbackBackColor)
+                        $style = [pscustomobject]@{
+                            ForeColor = $fallbackForeColor
+                            BackColor = $fallbackBackColor
+                        }
+                        $key = [string]$rarity
+                        if ([string]::IsNullOrWhiteSpace($key)) { return $style }
+                        switch ($key.ToLowerInvariant()) {
+                            "common" { return $style }
+                            "uncommon" {
+                                $style.ForeColor = [System.Drawing.Color]::FromArgb(102, 194, 255)
+                                $style.BackColor = [System.Drawing.Color]::FromArgb(25, 56, 85)
+                            }
+                            "rare" {
+                                $style.ForeColor = [System.Drawing.Color]::FromArgb(120, 214, 140)
+                                $style.BackColor = [System.Drawing.Color]::FromArgb(27, 72, 43)
+                            }
+                            "epic" {
+                                $style.ForeColor = [System.Drawing.Color]::FromArgb(196, 150, 255)
+                                $style.BackColor = [System.Drawing.Color]::FromArgb(63, 37, 95)
+                            }
+                            "legendary" {
+                                $style.ForeColor = [System.Drawing.Color]::FromArgb(255, 210, 92)
+                                $style.BackColor = [System.Drawing.Color]::FromArgb(92, 68, 24)
+                            }
+                            "mythic" {
+                                $style.ForeColor = [System.Drawing.Color]::FromArgb(255, 163, 104)
+                                $style.BackColor = [System.Drawing.Color]::FromArgb(94, 50, 30)
+                            }
+                            "transcendent" {
+                                $style.ForeColor = [System.Drawing.Color]::FromArgb(255, 135, 201)
+                                $style.BackColor = [System.Drawing.Color]::FromArgb(89, 40, 69)
+                            }
+                            "ascended" {
+                                $style.ForeColor = [System.Drawing.Color]::FromArgb(255, 122, 122)
+                                $style.BackColor = [System.Drawing.Color]::FromArgb(88, 34, 34)
+                            }
+                            "celestial" {
+                                $style.ForeColor = [System.Drawing.Color]::FromArgb(138, 234, 255)
+                                $style.BackColor = [System.Drawing.Color]::FromArgb(27, 74, 88)
+                            }
+                            "cosmic" {
+                                $style.ForeColor = [System.Drawing.Color]::FromArgb(120, 255, 225)
+                                $style.BackColor = [System.Drawing.Color]::FromArgb(21, 80, 68)
+                            }
+                            "beyond" {
+                                $style.ForeColor = [System.Drawing.Color]::FromArgb(255, 255, 255)
+                                $style.BackColor = [System.Drawing.Color]::FromArgb(78, 78, 78)
+                            }
+                        }
+                        return $style
+                    }
+                    $setBadgeFontWeight = {
+                        param($control, [string]$rarity)
+                        if (-not $control) { return }
+                        try {
+                            if (-not $script:SettingsBadgeBaseFont) {
+                                $script:SettingsBadgeBaseFont = $control.Font
+                            }
+                            $rarityKey = ""
+                            try { $rarityKey = [string]$rarity } catch { $rarityKey = "" }
+                            $isBold = $false
+                            if (-not [string]::IsNullOrWhiteSpace($rarityKey)) {
+                                switch ($rarityKey.ToLowerInvariant()) {
+                                    "legendary" { $isBold = $true }
+                                    "mythic" { $isBold = $true }
+                                    "transcendent" { $isBold = $true }
+                                    "ascended" { $isBold = $true }
+                                    "celestial" { $isBold = $true }
+                                    "cosmic" { $isBold = $true }
+                                    "beyond" { $isBold = $true }
+                                }
+                            }
+                            $baseFont = $script:SettingsBadgeBaseFont
+                            if (-not $baseFont) { return }
+                            $targetStyle = if ($isBold) { [System.Drawing.FontStyle]::Bold } else { [System.Drawing.FontStyle]::Regular }
+                            if ($control.Font -and $control.Font.Style -eq $targetStyle) { return }
+                            $newFont = New-Object System.Drawing.Font($baseFont, $targetStyle)
+                            $oldFont = $control.Font
+                            $control.Font = $newFont
+                            if ($oldFont -and -not [object]::ReferenceEquals($oldFont, $baseFont)) {
+                                try { $oldFont.Dispose() } catch { }
+                            }
+                        } catch {
+                        }
+                    }
+                    $funMilestoneControl = & $getSettingsControl 'SettingsFunMilestoneValue'
+                    if ($funMilestoneControl) {
+                        if ($script:SettingsSetText -is [scriptblock]) { & $script:SettingsSetText $funMilestoneControl $milestoneText }
+                        if ($script:SettingsSetForeColor -is [scriptblock]) { & $script:SettingsSetForeColor $funMilestoneControl $baseStatsColor }
+                    }
+                    $funCurrentBadgeControl = & $getSettingsControl 'SettingsFunCurrentBadgeValue'
+                    if ($funCurrentBadgeControl) {
+                        $currentBadgeStyle = & $getRarityStyle $currentBadgeRarity $baseStatsColor $baseStatsBackColor
+                        if ($script:SettingsSetText -is [scriptblock]) { & $script:SettingsSetText $funCurrentBadgeControl $currentBadgeText }
+                        if ($script:SettingsSetForeColor -is [scriptblock]) { & $script:SettingsSetForeColor $funCurrentBadgeControl $currentBadgeStyle.ForeColor }
+                        if ($script:SettingsSetBackColor -is [scriptblock]) { & $script:SettingsSetBackColor $funCurrentBadgeControl $currentBadgeStyle.BackColor }
+                        & $setBadgeFontWeight $funCurrentBadgeControl $currentBadgeRarity
+                    }
+                    $funNextBadgeControl = & $getSettingsControl 'SettingsFunNextBadgeValue'
+                    if ($funNextBadgeControl) {
+                        if ($script:SettingsSetText -is [scriptblock]) { & $script:SettingsSetText $funNextBadgeControl $nextBadgeText }
+                        if ($script:SettingsSetForeColor -is [scriptblock]) { & $script:SettingsSetForeColor $funNextBadgeControl $baseStatsColor }
+                        if ($script:SettingsSetBackColor -is [scriptblock]) { & $script:SettingsSetBackColor $funNextBadgeControl $baseStatsBackColor }
+                    }
+                    $funMilestonePctControl = & $getSettingsControl 'SettingsFunMilestonePctValue'
+                    if ($funMilestonePctControl) {
+                        if ($script:SettingsSetText -is [scriptblock]) { & $script:SettingsSetText $funMilestonePctControl $milestonePctText }
+                        if ($script:SettingsSetForeColor -is [scriptblock]) { & $script:SettingsSetForeColor $funMilestonePctControl $baseStatsColor }
+                    }
+                    $funBonusBadgesControl = & $getSettingsControl 'SettingsFunBonusBadgesValue'
+                    if ($funBonusBadgesControl) {
+                        if ($script:SettingsSetText -is [scriptblock]) { & $script:SettingsSetText $funBonusBadgesControl $bonusBadgeText }
+                        if ($script:SettingsSetForeColor -is [scriptblock]) { & $script:SettingsSetForeColor $funBonusBadgesControl $baseStatsColor }
+                        if ($script:SettingsSetBackColor -is [scriptblock]) { & $script:SettingsSetBackColor $funBonusBadgesControl $baseStatsBackColor }
+                    }
+                    $funSeasonalBadgeControl = & $getSettingsControl 'SettingsFunSeasonalBadgeValue'
+                    if ($funSeasonalBadgeControl) {
+                        if ($script:SettingsSetText -is [scriptblock]) { & $script:SettingsSetText $funSeasonalBadgeControl $seasonalBadgeText }
+                        if ($script:SettingsSetForeColor -is [scriptblock]) { & $script:SettingsSetForeColor $funSeasonalBadgeControl $baseStatsColor }
+                    }
+                    $funComboBadgeControl = & $getSettingsControl 'SettingsFunComboBadgeValue'
+                    if ($funComboBadgeControl) {
+                        if ($script:SettingsSetText -is [scriptblock]) { & $script:SettingsSetText $funComboBadgeControl $comboBadgeText }
+                        if ($script:SettingsSetForeColor -is [scriptblock]) { & $script:SettingsSetForeColor $funComboBadgeControl $baseStatsColor }
+                    }
+                    $funResilienceBadgeControl = & $getSettingsControl 'SettingsFunResilienceBadgeValue'
+                    if ($funResilienceBadgeControl) {
+                        if ($script:SettingsSetText -is [scriptblock]) { & $script:SettingsSetText $funResilienceBadgeControl $resilienceBadgeText }
+                        if ($script:SettingsSetForeColor -is [scriptblock]) { & $script:SettingsSetForeColor $funResilienceBadgeControl $baseStatsColor }
+                    }
+                    $funBadgeCatalogControl = & $getSettingsControl 'SettingsFunBadgeCatalogValue'
+                    if ($funBadgeCatalogControl) {
+                        if ($script:SettingsSetText -is [scriptblock]) { & $script:SettingsSetText $funBadgeCatalogControl $badgeCatalogText }
+                        if ($script:SettingsSetForeColor -is [scriptblock]) { & $script:SettingsSetForeColor $funBadgeCatalogControl $baseStatsColor }
+                    }
+                    $funBadgeLevelControl = & $getSettingsControl 'SettingsFunBadgeLevelValue'
+                    if ($funBadgeLevelControl) {
+                        if ($script:SettingsSetText -is [scriptblock]) { & $script:SettingsSetText $funBadgeLevelControl $badgeLevelText }
+                        if ($script:SettingsSetForeColor -is [scriptblock]) { & $script:SettingsSetForeColor $funBadgeLevelControl $baseStatsColor }
+                    }
+                    if ($tierProgressPct -lt 0) { $tierProgressPct = 0.0 }
+                    if ($tierProgressPct -gt 100) { $tierProgressPct = 100.0 }
+                    $tierProgressControl = & $getSettingsControl 'SettingsFunTierProgressBar'
+                    if ($tierProgressControl) {
+                        try {
+                            $tierProgressValueScaled = [int][Math]::Round([double]$tierProgressPct * 10.0, 0)
+                            if ($tierProgressValueScaled -lt $tierProgressControl.Minimum) { $tierProgressValueScaled = $tierProgressControl.Minimum }
+                            if ($tierProgressValueScaled -gt $tierProgressControl.Maximum) { $tierProgressValueScaled = $tierProgressControl.Maximum }
+                            if ($tierProgressControl.Value -ne $tierProgressValueScaled) { $tierProgressControl.Value = $tierProgressValueScaled }
+                        } catch {
+                        }
+                    }
+                    $tierProgressLabelControl = & $getSettingsControl 'SettingsFunTierProgressValue'
+                    if ($tierProgressLabelControl) {
+                        if ($script:SettingsSetText -is [scriptblock]) { & $script:SettingsSetText $tierProgressLabelControl ("{0:N1}%" -f [double]$tierProgressPct) }
+                        if ($script:SettingsSetForeColor -is [scriptblock]) { & $script:SettingsSetForeColor $tierProgressLabelControl $baseStatsColor }
+                    }
+                    $funBadgeModeControl = & $getSettingsControl 'SettingsFunBadgeModeValue'
+                    if ($funBadgeModeControl) {
+                        if ($script:SettingsSetText -is [scriptblock]) { & $script:SettingsSetText $funBadgeModeControl $badgeModeText }
+                        if ($script:SettingsSetForeColor -is [scriptblock]) { & $script:SettingsSetForeColor $funBadgeModeControl $baseStatsColor }
+                    }
+                    $funRecentUnlockControl = & $getSettingsControl 'SettingsFunRecentUnlockValue'
+                    if ($funRecentUnlockControl) {
+                        if ($script:SettingsSetText -is [scriptblock]) { & $script:SettingsSetText $funRecentUnlockControl $recentUnlockText }
+                        if ($script:SettingsSetForeColor -is [scriptblock]) { & $script:SettingsSetForeColor $funRecentUnlockControl $baseStatsColor }
+                    }
                 } catch {
-                    # swallow to avoid UI spam; outer logger will still catch severe issues elsewhere
+                    $funStatsError = if ($_.Exception) { [string]$_.Exception.Message } else { "Unknown error" }
+                    Write-LogThrottled "SettingsStatus-FunStats" ("Status tab fun-stats refresh failed: {0}" -f $funStatsError) "WARN" 15
                 }
                 $step = "StatusTab-Schedule"
                 $scheduleText = Format-ScheduleStatus
@@ -6922,7 +8201,8 @@ $clearLogButton = New-Object System.Windows.Forms.Button
                 $safeModeStatusControl = & $getSettingsControl 'SettingsSafeModeStatusValue'
                 try {
                     if ($safeModeStatusControl -and ($script:SettingsSetText -is [scriptblock])) {
-                        & $script:SettingsSetText $safeModeStatusControl (if ($script:safeModeActive) { "On (Fails=$($script:toggleFailCount))" } else { "Off" })
+                        $safeModeStatusText = if ($script:safeModeActive) { "On (Fails=$($script:toggleFailCount))" } else { "Off" }
+                        & $script:SettingsSetText $safeModeStatusControl $safeModeStatusText
                     }
                 } catch {
                     # ignore transient UI updates
@@ -6983,6 +8263,8 @@ $clearLogButton = New-Object System.Windows.Forms.Button
                     $diagLogSizeControl = & $getSettingsControl 'SettingsDiagLogSizeValue'
                     $diagLogRotateControl = & $getSettingsControl 'SettingsDiagLogRotateValue'
                     $diagLogWriteControl = & $getSettingsControl 'SettingsDiagLogWriteValue'
+                    $diagSelfHealQueueControl = & $getSettingsControl 'SettingsDiagSelfHealQueueValue'
+                    $diagSelfHealLastControl = & $getSettingsControl 'SettingsDiagSelfHealLastValue'
                     if ($script:LastErrorMessage) {
                         $errorTime = if ($script:LastErrorTime) { Format-LocalTime $script:LastErrorTime } else { "Unknown" }
                         if ($diagErrorControl -and ($script:SettingsSetText -is [scriptblock])) { & $script:SettingsSetText $diagErrorControl "$errorTime - $($script:LastErrorMessage)" }
@@ -6990,8 +8272,14 @@ $clearLogButton = New-Object System.Windows.Forms.Button
                         if ($diagErrorControl -and ($script:SettingsSetText -is [scriptblock])) { & $script:SettingsSetText $diagErrorControl "None" }
                     }
                     if ($diagRestartControl -and ($script:SettingsSetText -is [scriptblock])) { & $script:SettingsSetText $diagRestartControl (Format-LocalTime $script:AppStartTime) }
-                    if ($diagSafeModeControl -and ($script:SettingsSetText -is [scriptblock])) { & $script:SettingsSetText $diagSafeModeControl ($(if ($script:safeModeActive) { "On" } else { "Off" })) }
-                    if ($debugModeStatusControl -and ($script:SettingsSetText -is [scriptblock])) { & $script:SettingsSetText $debugModeStatusControl (if ($script:DebugModeUntil) { "On (10 min)" } else { "Off" }) }
+                    if ($diagSafeModeControl -and ($script:SettingsSetText -is [scriptblock])) {
+                        $diagSafeModeText = if ($script:safeModeActive) { "On" } else { "Off" }
+                        & $script:SettingsSetText $diagSafeModeControl $diagSafeModeText
+                    }
+                    if ($debugModeStatusControl -and ($script:SettingsSetText -is [scriptblock])) {
+                        $debugModeText = if ($script:DebugModeUntil) { "On (10 min)" } else { "Off" }
+                        & $script:SettingsSetText $debugModeStatusControl $debugModeText
+                    }
                     if ($script:LastToggleResultTime) {
                         if ($diagLastToggleControl -and ($script:SettingsSetText -is [scriptblock])) { & $script:SettingsSetText $diagLastToggleControl "$($script:LastToggleResult) - $(Format-LocalTime $script:LastToggleResultTime)" }
                     } else {
@@ -7009,6 +8297,20 @@ $clearLogButton = New-Object System.Windows.Forms.Button
                         if ($diagLogWriteControl -and ($script:SettingsSetText -is [scriptblock])) { & $script:SettingsSetText $diagLogWriteControl (Format-LocalTime $script:LastLogWriteTime) }
                     } else {
                         if ($diagLogWriteControl -and ($script:SettingsSetText -is [scriptblock])) { & $script:SettingsSetText $diagLogWriteControl "N/A" }
+                    }
+                    $selfHealQueueDepth = if ($script:SelfHealActionQueue) { @($script:SelfHealActionQueue).Count } else { 0 }
+                    if ($diagSelfHealQueueControl -and ($script:SettingsSetText -is [scriptblock])) {
+                        & $script:SettingsSetText $diagSelfHealQueueControl ([string]$selfHealQueueDepth)
+                    }
+                    $selfHealLastText = "None"
+                    if ($script:SelfHealRecentActions -and $script:SelfHealRecentActions.Count -gt 0) {
+                        $lastSelfHeal = $script:SelfHealRecentActions[$script:SelfHealRecentActions.Count - 1]
+                        if ($lastSelfHeal) {
+                            $selfHealLastText = ("{0} [{1}] {2}" -f (Format-LocalTime $lastSelfHeal.Time), [string]$lastSelfHeal.Status, [string]$lastSelfHeal.Name)
+                        }
+                    }
+                    if ($diagSelfHealLastControl -and ($script:SettingsSetText -is [scriptblock])) {
+                        & $script:SettingsSetText $diagSelfHealLastControl $selfHealLastText
                     }
                 } catch {
                     # swallow to avoid UI spam on diagnostics refresh

@@ -48,10 +48,12 @@
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseSingularNouns', '', Scope='Function', Target='*', Justification='Legacy function names are intentionally retained for compatibility.')]
 # --- Runtime setup and WinForms initialization (load assemblies, set UI defaults) ---
 param(
-    [switch]$SettingsOnly
+    [switch]$SettingsOnly,
+    [switch]$RelaunchedFromRestart
 )
 
 $script:SettingsOnly = $SettingsOnly
+$script:RelaunchedFromRestart = [bool]$RelaunchedFromRestart
 
 Set-StrictMode -Version Latest
 $proc = $null
@@ -61,6 +63,15 @@ $script:TrayMenuToolTip = $null
 $script:TrayMenuOpening = $false
 $script:TrayMenuHeavyInitialized = $false
 $script:TrayMenuNeedsRefresh = $true
+$script:TrayTooltipTimer = $null
+$script:TrayTooltipPendingText = $null
+$script:TrayTooltipDelayMs = 900
+$script:TrayTooltipHookedItems = @{}
+$script:TrayTooltipEventsHooked = $false
+$script:TrayStatusStateItem = $null
+$script:TrayStatusNextItem = $null
+$script:TrayStatusProfileItem = $null
+$script:TrayStatusSummaryItem = $null
 $script:DeferredStartupTimer = $null
 $script:DeferredStartupDone = $false
 $script:DeferredMaintenanceTimer = $null
@@ -102,6 +113,27 @@ $script:SelfHealStats = @{
     SettingsRepairCount  = 0
     CrashTierActions     = 0
     TrayFallbackCount    = 0
+    TimerRecoveryQueued  = 0
+    TimerRecoverySuccess = 0
+    TimerRecoveryFailed  = 0
+    QueueSuppressedCount = 0
+    HeartbeatRecoveries  = 0
+    RepairAllRuns        = 0
+}
+$script:SelfHealRecentActions = New-Object System.Collections.ArrayList
+$script:SelfHealRecentActionsMax = 30
+$script:SelfHealActionQueue = New-Object System.Collections.ArrayList
+$script:SelfHealActionQueueMax = 64
+$script:SelfHealActionTimer = $null
+$script:SelfHealActionThrottle = @{}
+$script:SelfHealBackoffBaseSeconds = 5
+$script:SelfHealActionThrottleWindowSeconds = 300
+$script:ComponentHeartbeat = @{}
+$script:ComponentHeartbeatThresholdSeconds = @{
+    WatchdogTimer      = 20
+    PauseTimer         = 20
+    LogFlushTimer      = 60
+    HealthMonitorTimer = 420
 }
 $script:ProfileSwitchSelectedKeys = @()
 $script:ProfileApplySelectionPending = $false
@@ -948,6 +980,12 @@ $script:SettingsVersionsDir = Join-Path $script:MetaDir "SettingsVersions"
 $script:ProfileVersionsDir = Join-Path $script:MetaDir "ProfileVersions"
 $script:FirstRunWizardMarkerPath = Join-Path $script:MetaDir "Teams-Always-Green.first-run.complete"
 $script:IntegrityManifestPath = Join-Path $script:MetaDir "Teams-Always-Green.integrity.json"
+$script:MinimalModeStatePath = Join-Path $script:MetaDir "Teams-Always-Green.minimalmode.state.json"
+$script:RestartRequestMarkerPath = Join-Path $script:MetaDir "Teams-Always-Green.restart.request.txt"
+$script:LifetimeStatsPath = Join-Path $script:MetaDir "Teams-Always-Green.lifetime.json"
+$script:BadgeShareCardsDir = Join-Path $script:MetaDir "BadgeCards"
+$script:LifetimeToggleHighWater = -1L
+$script:LifetimeToggleHighWaterLoaded = $false
 $script:IntegrityStatus = "Unknown"
 $script:IntegrityIssues = @()
 $script:IntegrityFailed = $false
@@ -1036,6 +1074,112 @@ function Save-CrashState($state) {
             OverrideMinimalModeLogged = [bool]$state.OverrideMinimalModeLogged
         }
         $payload | ConvertTo-Json -Depth 3 | Set-Content -Path $script:CrashStatePath -Encoding UTF8
+    } catch {
+    }
+}
+
+function Get-MinimalModeState {
+    $result = [ordered]@{
+        Active = $false
+        Reason = $null
+        CrashCount = 0
+        RecoveryTier = 0
+        Override = $false
+        IntegrityFailed = $false
+    }
+
+    try { $result.Active = [bool]$script:MinimalModeActive } catch { }
+    try { $result.Reason = [string]$script:MinimalModeReason } catch { }
+    try { $result.Override = [bool]$script:OverrideMinimalMode } catch { }
+    try { $result.IntegrityFailed = [bool]$script:IntegrityFailed } catch { }
+
+    $crashState = $null
+    try { $crashState = Get-CrashState } catch { }
+    if ($crashState) {
+        if ($crashState.PSObject.Properties.Name -contains "Count") {
+            try { $result.CrashCount = [Math]::Max(0, [int]$crashState.Count) } catch { }
+        }
+        if ($crashState.PSObject.Properties.Name -contains "OverrideMinimalMode") {
+            try { $result.Override = [bool]$crashState.OverrideMinimalMode } catch { }
+        }
+    }
+
+    if ($result.CrashCount -gt 0) {
+        try { $result.RecoveryTier = [int](Get-CrashRecoveryTier $result.CrashCount) } catch { }
+    }
+
+    if ($result.Override) {
+        $result.Active = $false
+        if ([string]::IsNullOrWhiteSpace($result.Reason)) {
+            $result.Reason = "Minimal mode override is enabled."
+        }
+    } elseif (-not $result.Active) {
+        if ($result.IntegrityFailed) {
+            $result.Active = $true
+            if ([string]::IsNullOrWhiteSpace($result.Reason)) {
+                $result.Reason = "Integrity check failed."
+            }
+        } elseif ($result.RecoveryTier -ge 1) {
+            $result.Active = $true
+            if ([string]::IsNullOrWhiteSpace($result.Reason)) {
+                $result.Reason = "Crash recovery tier $($result.RecoveryTier)."
+            }
+        }
+    }
+
+    return [pscustomobject]$result
+}
+
+function Save-MinimalModeState {
+    param(
+        [bool]$Active,
+        [string]$Reason = $null,
+        [bool]$Override = $false,
+        [string]$Source = "Runtime"
+    )
+    try {
+        Ensure-Directory $script:MetaDir "Meta" | Out-Null
+    } catch {
+    }
+    try {
+        $payload = [pscustomobject]@{
+            Active = [bool]$Active
+            Reason = if ([string]::IsNullOrWhiteSpace($Reason)) { $null } else { [string]$Reason }
+            Override = [bool]$Override
+            Source = [string]$Source
+            UpdatedUtc = (Get-Date).ToUniversalTime().ToString("o")
+        }
+        $json = $payload | ConvertTo-Json -Depth 3
+        Write-AtomicTextFile -Path $script:MinimalModeStatePath -Content $json -Encoding UTF8 -VerifyJson
+    } catch {
+    }
+}
+
+function Get-SavedMinimalModeState {
+    if ([string]::IsNullOrWhiteSpace([string]$script:MinimalModeStatePath)) { return $null }
+    if (-not (Test-Path -LiteralPath $script:MinimalModeStatePath)) { return $null }
+    try {
+        $raw = Get-Content -LiteralPath $script:MinimalModeStatePath -Raw -ErrorAction Stop
+        if ([string]::IsNullOrWhiteSpace($raw)) { return $null }
+        $loaded = $raw | ConvertFrom-Json -ErrorAction Stop
+        if (-not $loaded) { return $null }
+        return $loaded
+    } catch {
+        return $null
+    }
+}
+
+function Sync-MinimalModeState {
+    param([string]$Source = "Runtime")
+    try {
+        $state = Get-MinimalModeState
+        if ($state) {
+            $overrideValue = $false
+            if ($state.PSObject.Properties.Name -contains "Override") {
+                $overrideValue = [bool]$state.Override
+            }
+            Save-MinimalModeState -Active ([bool]$state.Active) -Reason ([string]$state.Reason) -Override $overrideValue -Source $Source
+        }
     } catch {
     }
 }
@@ -1243,6 +1387,40 @@ function Get-ShutdownMarker {
         }
     } catch { }
     return $null
+}
+
+function Set-RestartRequestMarker {
+    try {
+        Ensure-Directory $script:MetaDir "Meta" | Out-Null
+        $stamp = (Get-Date).ToUniversalTime().ToString("o")
+        Write-AtomicTextFile -Path $script:RestartRequestMarkerPath -Content $stamp -Encoding ASCII
+    } catch {
+        Write-BootstrapLog "Failed to write restart request marker." "WARN"
+    }
+}
+
+function Consume-RestartRequestMarker([int]$maxAgeSeconds = 180) {
+    if ([string]::IsNullOrWhiteSpace([string]$script:RestartRequestMarkerPath)) { return $false }
+    if (-not (Test-Path -LiteralPath $script:RestartRequestMarkerPath)) { return $false }
+    $raw = ""
+    try {
+        $raw = (Get-Content -LiteralPath $script:RestartRequestMarkerPath -Raw -ErrorAction Stop).Trim()
+    } catch {
+        $raw = ""
+    }
+    try {
+        Remove-Item -LiteralPath $script:RestartRequestMarkerPath -Force -ErrorAction SilentlyContinue
+    } catch {
+    }
+    if ([string]::IsNullOrWhiteSpace($raw)) { return $true }
+    try {
+        $stampUtc = [DateTime]::Parse($raw).ToUniversalTime()
+        $ageSeconds = ((Get-Date).ToUniversalTime() - $stampUtc).TotalSeconds
+        if ($ageSeconds -lt -15) { return $false }
+        return ($ageSeconds -le [Math]::Max(30, [int]$maxAgeSeconds))
+    } catch {
+        return $true
+    }
 }
 
 # --- Logging stubs for early startup (safe logging pre-settings) ---
@@ -1472,10 +1650,19 @@ function Invoke-SafeTimerAction([string]$name, [ScriptBlock]$action) {
     if ($script:TimerGuards.ContainsKey($name) -and $script:TimerGuards[$name]) { return }
     $script:TimerGuards[$name] = $true
     try {
+        if (-not [string]::IsNullOrWhiteSpace($name)) {
+            $script:ComponentHeartbeat[$name] = Get-Date
+        }
         & $action
     } catch {
         $safeName = if ([string]::IsNullOrWhiteSpace($name)) { "Timer" } else { "Timer-$name" }
         Write-LogThrottled $safeName ("Timer handler failed: {0}" -f $_.Exception.Message) "WARN" 15
+        if (-not [string]::IsNullOrWhiteSpace($name) -and (Get-Command Request-TimerSelfHeal -ErrorAction SilentlyContinue)) {
+            try {
+                Request-TimerSelfHeal -TimerName $name -Reason $_.Exception.Message | Out-Null
+            } catch {
+            }
+        }
     } finally {
         $script:TimerGuards[$name] = $false
     }
@@ -1910,6 +2097,131 @@ function Apply-RuntimeOverridesToState($state, $runtime) {
         if ($currentStats.Count -eq 0 -and $incomingStats.Count -gt 0) {
             $state.Stats = $incomingStats
             $changed = $true
+        } elseif ($incomingStats.Count -gt 0) {
+            $incomingLifetime = 0
+            $currentLifetime = 0
+            try {
+                if ($incomingStats.ContainsKey("LifetimeToggleCount")) { $incomingLifetime = [int64]$incomingStats["LifetimeToggleCount"] }
+            } catch {
+                $incomingLifetime = 0
+            }
+            try {
+                if ($currentStats.ContainsKey("LifetimeToggleCount")) { $currentLifetime = [int64]$currentStats["LifetimeToggleCount"] }
+            } catch {
+                $currentLifetime = 0
+            }
+            if ($incomingLifetime -lt 0) { $incomingLifetime = 0 }
+            if ($currentLifetime -lt 0) { $currentLifetime = 0 }
+            if ($incomingLifetime -gt $currentLifetime) {
+                $currentStats["LifetimeToggleCount"] = $incomingLifetime
+                $changed = $true
+            }
+            try {
+                $incomingPointsHighWater = 0
+                $currentPointsHighWater = 0
+                if ($incomingStats.ContainsKey("BadgePointsHighWater")) { $incomingPointsHighWater = [int][Math]::Max(0, [int]$incomingStats["BadgePointsHighWater"]) }
+                if ($currentStats.ContainsKey("BadgePointsHighWater")) { $currentPointsHighWater = [int][Math]::Max(0, [int]$currentStats["BadgePointsHighWater"]) }
+                if ($incomingPointsHighWater -gt $currentPointsHighWater) {
+                    $currentStats["BadgePointsHighWater"] = $incomingPointsHighWater
+                    $changed = $true
+                }
+            } catch {
+            }
+            try {
+                $incomingUnlocked = Convert-ToHashtable $incomingStats["BadgeUnlocked"]
+                $currentUnlocked = Convert-ToHashtable $currentStats["BadgeUnlocked"]
+                $unlockMerged = $false
+                foreach ($unlockKey in @($incomingUnlocked.Keys)) {
+                    if (-not $currentUnlocked.ContainsKey($unlockKey)) {
+                        $currentUnlocked[$unlockKey] = $incomingUnlocked[$unlockKey]
+                        $unlockMerged = $true
+                    }
+                }
+                if ($unlockMerged) {
+                    $currentStats["BadgeUnlocked"] = $currentUnlocked
+                    $changed = $true
+                }
+            } catch {
+            }
+            try {
+                $incomingHistory = @($incomingStats["BadgeHistory"])
+                $currentHistory = @($currentStats["BadgeHistory"])
+                if ($incomingHistory.Count -gt 0) {
+                    $historyById = @{}
+                    foreach ($entry in $currentHistory) {
+                        if (-not $entry) { continue }
+                        $entryId = ""
+                        try { $entryId = [string]$entry.Id } catch { $entryId = "" }
+                        if ([string]::IsNullOrWhiteSpace($entryId)) { continue }
+                        $historyById[$entryId] = $entry
+                    }
+                    $historyMerged = $false
+                    foreach ($entry in $incomingHistory) {
+                        if (-not $entry) { continue }
+                        $entryId = ""
+                        try { $entryId = [string]$entry.Id } catch { $entryId = "" }
+                        if ([string]::IsNullOrWhiteSpace($entryId)) { continue }
+                        if (-not $historyById.ContainsKey($entryId)) {
+                            $historyById[$entryId] = $entry
+                            $historyMerged = $true
+                        }
+                    }
+                    if ($historyMerged) {
+                        $mergedHistory = @($historyById.Values)
+                        if ($mergedHistory.Count -gt 300) { $mergedHistory = @($mergedHistory | Select-Object -Last 300) }
+                        $currentStats["BadgeHistory"] = $mergedHistory
+                        $changed = $true
+                    }
+                }
+            } catch {
+            }
+            try {
+                $incomingProfileMap = Convert-ToHashtable $incomingStats["ProfileLifetimeToggles"]
+                $currentProfileMap = Convert-ToHashtable $currentStats["ProfileLifetimeToggles"]
+                $profileChanged = $false
+                foreach ($profileKey in @($incomingProfileMap.Keys)) {
+                    $incomingValue = 0L
+                    $currentValue = 0L
+                    try { $incomingValue = [int64][Math]::Max(0, [int64]$incomingProfileMap[$profileKey]) } catch { $incomingValue = 0L }
+                    if ($currentProfileMap.ContainsKey($profileKey)) {
+                        try { $currentValue = [int64][Math]::Max(0, [int64]$currentProfileMap[$profileKey]) } catch { $currentValue = 0L }
+                    }
+                    if ($incomingValue -gt $currentValue) {
+                        $currentProfileMap[$profileKey] = $incomingValue
+                        $profileChanged = $true
+                    }
+                }
+                if ($profileChanged) {
+                    $currentStats["ProfileLifetimeToggles"] = $currentProfileMap
+                    $changed = $true
+                }
+            } catch {
+            }
+            try {
+                $incomingProfileHigh = Convert-ToHashtable $incomingStats["ProfileLifetimeHighWater"]
+                $currentProfileHigh = Convert-ToHashtable $currentStats["ProfileLifetimeHighWater"]
+                $profileHighChanged = $false
+                foreach ($profileKey in @($incomingProfileHigh.Keys)) {
+                    $incomingValue = 0L
+                    $currentValue = 0L
+                    try { $incomingValue = [int64][Math]::Max(0, [int64]$incomingProfileHigh[$profileKey]) } catch { $incomingValue = 0L }
+                    if ($currentProfileHigh.ContainsKey($profileKey)) {
+                        try { $currentValue = [int64][Math]::Max(0, [int64]$currentProfileHigh[$profileKey]) } catch { $currentValue = 0L }
+                    }
+                    if ($incomingValue -gt $currentValue) {
+                        $currentProfileHigh[$profileKey] = $incomingValue
+                        $profileHighChanged = $true
+                    }
+                }
+                if ($profileHighChanged) {
+                    $currentStats["ProfileLifetimeHighWater"] = $currentProfileHigh
+                    $changed = $true
+                }
+            } catch {
+            }
+            if ($changed) {
+                $state.Stats = $currentStats
+            }
         }
     }
     return $changed
@@ -1958,9 +2270,11 @@ $script:LastSettingsSnapshot = $null
 $script:LastSettingsSnapshotHash = $null
 $script:isShuttingDown = $false
 $script:CleanupDone = $false
+$script:SessionEndingHandler = $null
+$script:SessionEndingSubscribed = $false
 $script:SettingsForm = $null
 $script:SettingsFormIcon = $null
-$script:SettingsSchemaVersion = 9
+$script:SettingsSchemaVersion = 10
 $script:StateSchemaVersion = 1
 $script:SettingsRuntimeKeys = @("ToggleCount", "LastToggleTime", "Stats")
 $script:SettingsNonDiffKeys = @("LastSaved", "LastSavedBy", "SettingsOrigin", "AppVersion") + $script:SettingsRuntimeKeys
@@ -2488,8 +2802,8 @@ function Log-StateSummary([string]$reason) {
 }
 
 function Log-StartupSummary {
-    Write-Log ("Startup summary: Profile={0} Interval={1}s LogLevel={2} QuietMode={3} StartOnLaunch={4} RunOnceOnLaunch={5} ScheduleEnabled={6} Paused={7}" -f `
-        $settings.ActiveProfile, $settings.IntervalSeconds, $settings.LogLevel, $settings.QuietMode, $settings.StartOnLaunch, $settings.RunOnceOnLaunch, $settings.ScheduleEnabled, $script:isPaused) `
+    Write-Log ("Startup summary: Profile={0} Interval={1}s LogLevel={2} QuietMode={3} StartOnLaunch={4} RunOnceOnLaunch={5} AutoStartOnRestart={6} RelaunchedFromRestart={7} ScheduleEnabled={8} Paused={9}" -f `
+        $settings.ActiveProfile, $settings.IntervalSeconds, $settings.LogLevel, $settings.QuietMode, $settings.StartOnLaunch, $settings.RunOnceOnLaunch, (Get-SettingsPropertyValue $settings "AutoStartOnRestart" $false), $script:RelaunchedFromRestart, $settings.ScheduleEnabled, $script:isPaused) `
         "DEBUG" $null "Startup"
 }
 
@@ -2504,6 +2818,130 @@ function Log-ShutdownSummary([string]$reason) {
     Write-Log ("Session end: SessionID={0} LogWrites={1} Rotations={2} LastLogWrite={3} UptimeMinutes={4} PeakMB={5} TogglesPerMin={6}" -f `
         $script:RunId, $script:LogWriteCount, $script:LogRotationCount, (Format-DateTime $script:LastLogWriteTime), $uptimeMinutes, $peakMb, $toggleRate) "INFO" $null "Shutdown"
     Update-FunStatsOnShutdown $uptimeMinutes
+}
+
+function Unregister-SystemSessionEndingHandler {
+    if (-not $script:SessionEndingSubscribed -or -not $script:SessionEndingHandler) { return }
+    try {
+        [Microsoft.Win32.SystemEvents]::remove_SessionEnding($script:SessionEndingHandler)
+    } catch {
+    } finally {
+        $script:SessionEndingSubscribed = $false
+        $script:SessionEndingHandler = $null
+    }
+}
+
+function Register-SystemSessionEndingHandler {
+    if ($script:SessionEndingSubscribed) { return }
+    try {
+        $script:SessionEndingHandler = [Microsoft.Win32.SessionEndingEventHandler]{
+            param($sender, $eventArgs)
+            if ($script:CleanupDone -or $script:isShuttingDown) { return }
+            $reason = "WindowsSessionEnding"
+            try {
+                if ($eventArgs -and $eventArgs.Reason -eq [Microsoft.Win32.SessionEndReasons]::Logoff) {
+                    $reason = "WindowsLogoff"
+                } elseif ($eventArgs -and $eventArgs.Reason -eq [Microsoft.Win32.SessionEndReasons]::SystemShutdown) {
+                    $reason = "WindowsShutdown"
+                }
+            } catch {
+            }
+            Write-Log ("System session ending detected. Reason={0}" -f $reason) "INFO" $null "Shutdown"
+            Invoke-AppShutdownCleanup -Reason $reason
+        }
+        [Microsoft.Win32.SystemEvents]::add_SessionEnding($script:SessionEndingHandler)
+        $script:SessionEndingSubscribed = $true
+        Write-Log "Registered Windows session-ending shutdown handler." "DEBUG" $null "Startup"
+    } catch {
+        Write-Log "Failed to register session-ending handler." "WARN" $_.Exception "Startup"
+        $script:SessionEndingSubscribed = $false
+        $script:SessionEndingHandler = $null
+    }
+}
+
+function Invoke-AppShutdownCleanup {
+    param(
+        [string]$Reason = "Exit",
+        [switch]$SkipAppExit
+    )
+    if ($script:CleanupDone) { return }
+    if ($script:isShuttingDown -and -not $SkipAppExit) { return }
+
+    $script:isShuttingDown = $true
+    try {
+        Log-ShutdownSummary $Reason
+    } catch {
+    }
+    try { Set-ShutdownMarker "clean" } catch { }
+    try { Flush-SettingsSave } catch { }
+    try { Flush-LogBuffer } catch { }
+
+    try {
+        if (Get-Command -Name Set-StatusUpdateTimerEnabled -ErrorAction SilentlyContinue) {
+            Set-StatusUpdateTimerEnabled $false
+        }
+    } catch {
+    }
+
+    $stopTimer = {
+        param([string]$name)
+        $var = Get-Variable -Name $name -Scope Script -ErrorAction SilentlyContinue
+        if (-not $var -or -not $var.Value) { return }
+        $obj = $var.Value
+        try { if ($obj.PSObject.Methods.Name -contains "Stop") { $obj.Stop() } } catch { }
+    }
+    $disposeTimer = {
+        param([string]$name, [switch]$clearValue)
+        $var = Get-Variable -Name $name -Scope Script -ErrorAction SilentlyContinue
+        if (-not $var -or -not $var.Value) { return }
+        $obj = $var.Value
+        try { if ($obj.PSObject.Methods.Name -contains "Dispose") { $obj.Dispose() } } catch { }
+        if ($clearValue) { try { Set-Variable -Name $name -Scope Script -Value $null -Force } catch { } }
+    }
+
+    $timerNames = @(
+        "timer",
+        "statusUpdateTimer",
+        "StatusUpdateDebounceTimer",
+        "SaveSettingsTimer",
+        "pauseTimer",
+        "watchdogTimer",
+        "DeferredMaintenanceTimer",
+        "FolderCheckTimer",
+        "DeferredStartupTimer",
+        "HealthMonitorTimer",
+        "LogSummaryTimer",
+        "LogFlushTimer",
+        "SelfHealActionTimer",
+        "PostShowStatusTimer"
+    )
+    foreach ($timerName in $timerNames) {
+        & $stopTimer $timerName
+    }
+
+    try { Unregister-Hotkeys } catch { }
+    try { Stop-Toggling } catch { }
+    foreach ($timerName in $timerNames) {
+        & $disposeTimer $timerName -clearValue
+    }
+    try { Stop-SelfHealQueueTimer } catch { }
+    try { if ($script:OverlayIcon) { $script:OverlayIcon.Dispose(); $script:OverlayIcon = $null } } catch { }
+    try {
+        if ($notifyIcon) {
+            try { $notifyIcon.Visible = $false } catch { }
+            try { $notifyIcon.Dispose() } catch { }
+            $notifyIcon = $null
+        }
+    } catch {
+    }
+
+    try { Unregister-SystemSessionEndingHandler } catch { }
+    try { Release-MutexOnce } catch { }
+    try { Flush-LogBuffer } catch { }
+    $script:CleanupDone = $true
+    if (-not $SkipAppExit) {
+        try { [System.Windows.Forms.Application]::Exit() } catch { }
+    }
 }
 
 function Load-AuditChainState {
@@ -2851,6 +3289,327 @@ function Get-RecentActionsLines {
         }
     }
     return $lines
+}
+
+function Add-SelfHealRecentAction([string]$name, [string]$status, [string]$detail = "") {
+    if ([string]::IsNullOrWhiteSpace($name)) { return }
+    if ([string]::IsNullOrWhiteSpace($status)) { $status = "Info" }
+    if (-not $script:SelfHealRecentActions) {
+        $script:SelfHealRecentActions = New-Object System.Collections.ArrayList
+    }
+    $entry = [pscustomobject]@{
+        Time   = Get-Date
+        Name   = [string]$name
+        Status = [string]$status
+        Detail = [string]$detail
+    }
+    [void]$script:SelfHealRecentActions.Add($entry)
+    $max = [Math]::Max(10, [int]$script:SelfHealRecentActionsMax)
+    while ($script:SelfHealRecentActions.Count -gt $max) {
+        $script:SelfHealRecentActions.RemoveAt(0) | Out-Null
+    }
+}
+
+function Get-SelfHealRecentActionLines {
+    $lines = New-Object System.Collections.Generic.List[string]
+    if (-not $script:SelfHealRecentActions -or $script:SelfHealRecentActions.Count -eq 0) {
+        $lines.Add("  None")
+        return $lines
+    }
+    foreach ($entry in $script:SelfHealRecentActions) {
+        $time = Format-DateTime $entry.Time
+        $detail = if ([string]::IsNullOrWhiteSpace([string]$entry.Detail)) { "" } else { " - $([string]$entry.Detail)" }
+        $lines.Add(("  {0} [{1}] {2}{3}" -f $time, [string]$entry.Status, [string]$entry.Name, $detail))
+    }
+    return $lines
+}
+
+function Test-SelfHealQueueThreshold([string]$key, [int]$windowSeconds = 300, [int]$maxEvents = 6) {
+    if ([string]::IsNullOrWhiteSpace($key)) { return $true }
+    $windowSeconds = [Math]::Max(30, $windowSeconds)
+    $maxEvents = [Math]::Max(1, $maxEvents)
+    if (-not $script:SelfHealActionThrottle) { $script:SelfHealActionThrottle = @{} }
+    $now = Get-Date
+    $entry = $null
+    if ($script:SelfHealActionThrottle.ContainsKey($key)) {
+        $entry = $script:SelfHealActionThrottle[$key]
+    }
+    if (-not $entry) {
+        $entry = [pscustomobject]@{
+            WindowStart = $now
+            Count       = 0
+        }
+        $script:SelfHealActionThrottle[$key] = $entry
+    }
+    if (-not $entry.WindowStart -or (($now - $entry.WindowStart).TotalSeconds -ge $windowSeconds)) {
+        $entry.WindowStart = $now
+        $entry.Count = 0
+    }
+    if ([int]$entry.Count -ge $maxEvents) {
+        $script:SelfHealStats.QueueSuppressedCount = [int]$script:SelfHealStats.QueueSuppressedCount + 1
+        return $false
+    }
+    $entry.Count = [int]$entry.Count + 1
+    return $true
+}
+
+function Start-SelfHealQueueTimer {
+    if ($script:SelfHealActionTimer) { return }
+    $script:SelfHealActionTimer = New-Object System.Windows.Forms.Timer
+    $script:SelfHealActionTimer.Interval = 1000
+    $script:SelfHealActionTimer.Add_Tick({
+        Invoke-SafeTimerAction "SelfHealActionTimer" {
+            if ($script:isShuttingDown -or $script:CleanupDone) {
+                if ($script:SelfHealActionTimer) { $script:SelfHealActionTimer.Stop() }
+                return
+            }
+            Invoke-SelfHealQueue
+        }
+    })
+    $script:SelfHealActionTimer.Start()
+}
+
+function Stop-SelfHealQueueTimer {
+    if (-not $script:SelfHealActionTimer) { return }
+    try { $script:SelfHealActionTimer.Stop() } catch { }
+    try { $script:SelfHealActionTimer.Dispose() } catch { }
+    $script:SelfHealActionTimer = $null
+}
+
+function Enqueue-SelfHealAction {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Name,
+        [Parameter(Mandatory = $true)]
+        [ScriptBlock]$Action,
+        [string]$Reason = "",
+        [int]$InitialDelaySeconds = 1,
+        [int]$MaxAttempts = 3,
+        [int]$WindowSeconds = 300,
+        [int]$MaxPerWindow = 6,
+        [switch]$AllowDuplicate
+    )
+    if ($script:isShuttingDown -or $script:CleanupDone) { return $false }
+    if (-not $script:SelfHealActionQueue) {
+        $script:SelfHealActionQueue = New-Object System.Collections.ArrayList
+    }
+    if (-not $AllowDuplicate) {
+        $existing = @($script:SelfHealActionQueue | Where-Object { $_.Name -eq $Name -and $_.Reason -eq $Reason })
+        if ($existing.Count -gt 0) { return $false }
+    }
+    if (-not (Test-SelfHealQueueThreshold -key ("Queue:{0}" -f $Name) -windowSeconds $WindowSeconds -maxEvents $MaxPerWindow)) {
+        Add-SelfHealRecentAction $Name "Suppressed" "Queue threshold reached"
+        Write-LogThrottled ("SelfHeal-QueueSuppressed-{0}" -f $Name) ("Self-heal queue suppressed for {0} (threshold reached)." -f $Name) "WARN" 60
+        return $false
+    }
+    while ($script:SelfHealActionQueue.Count -ge [Math]::Max(10, [int]$script:SelfHealActionQueueMax)) {
+        $script:SelfHealActionQueue.RemoveAt(0) | Out-Null
+    }
+    $delay = [Math]::Max(0, $InitialDelaySeconds)
+    $item = [pscustomobject]@{
+        Id         = [Guid]::NewGuid().ToString("N")
+        Name       = $Name
+        Reason     = [string]$Reason
+        Action     = $Action
+        Attempts   = 0
+        MaxAttempts = [Math]::Max(1, $MaxAttempts)
+        CreatedUtc = [DateTime]::UtcNow
+        NextRunUtc = [DateTime]::UtcNow.AddSeconds($delay)
+    }
+    [void]$script:SelfHealActionQueue.Add($item)
+    Add-SelfHealRecentAction $Name "Queued" $Reason
+    Start-SelfHealQueueTimer
+    return $true
+}
+
+function Invoke-SelfHealQueue([switch]$Force) {
+    if (-not $script:SelfHealActionQueue -or $script:SelfHealActionQueue.Count -eq 0) { return }
+    if ($script:isShuttingDown -or $script:CleanupDone) { return }
+    $nowUtc = [DateTime]::UtcNow
+    $snapshot = @($script:SelfHealActionQueue)
+    foreach ($item in $snapshot) {
+        if (-not $item) { continue }
+        if (-not $Force -and $item.NextRunUtc -gt $nowUtc) { continue }
+        for ($idx = $script:SelfHealActionQueue.Count - 1; $idx -ge 0; $idx--) {
+            if ($script:SelfHealActionQueue[$idx].Id -eq $item.Id) {
+                $script:SelfHealActionQueue.RemoveAt($idx) | Out-Null
+                break
+            }
+        }
+        try {
+            Add-SelfHealRecentAction $item.Name "Started" $item.Reason
+            & $item.Action
+            if ($item.Name -like "Timer:*") {
+                $script:SelfHealStats.TimerRecoverySuccess = [int]$script:SelfHealStats.TimerRecoverySuccess + 1
+            }
+            Add-SelfHealRecentAction $item.Name "Succeeded" $item.Reason
+            Write-LogThrottled ("SelfHeal-Succeeded-{0}" -f $item.Name) ("Self-heal succeeded: {0}" -f $item.Name) "INFO" 20
+        } catch {
+            $attempts = [int]$item.Attempts + 1
+            $item.Attempts = $attempts
+            $message = [string]$_.Exception.Message
+            if ($attempts -lt [int]$item.MaxAttempts) {
+                $delaySeconds = [Math]::Max(1, [int]($script:SelfHealBackoffBaseSeconds * [Math]::Pow(2, $attempts - 1)))
+                $item.NextRunUtc = [DateTime]::UtcNow.AddSeconds($delaySeconds)
+                [void]$script:SelfHealActionQueue.Add($item)
+                Add-SelfHealRecentAction $item.Name "Retry" ("Attempt {0}/{1}: {2}" -f $attempts, $item.MaxAttempts, $message)
+                Write-LogThrottled ("SelfHeal-Retry-{0}" -f $item.Name) ("Self-heal retry scheduled for {0} in {1}s (attempt {2}/{3})." -f $item.Name, $delaySeconds, $attempts, $item.MaxAttempts) "WARN" 20
+            } else {
+                if ($item.Name -like "Timer:*") {
+                    $script:SelfHealStats.TimerRecoveryFailed = [int]$script:SelfHealStats.TimerRecoveryFailed + 1
+                }
+                Add-SelfHealRecentAction $item.Name "Failed" $message
+                Write-LogExceptionDeduped ("Self-heal failed permanently: {0}" -f $item.Name) "ERROR" $_.Exception "SelfHeal" 20
+            }
+        }
+    }
+}
+
+function Invoke-TimerSelfHeal([string]$TimerName) {
+    if ([string]::IsNullOrWhiteSpace($TimerName)) { return $false }
+    $timerMap = @{
+        MainToggleTimer           = "timer"
+        StatusUpdateTimer         = "statusUpdateTimer"
+        PauseTimer                = "pauseTimer"
+        WatchdogTimer             = "watchdogTimer"
+        SaveSettingsTimer         = "SaveSettingsTimer"
+        StatusUpdateDebounceTimer = "StatusUpdateDebounceTimer"
+        LogFlushTimer             = "LogFlushTimer"
+        DeferredMaintenanceTimer  = "DeferredMaintenanceTimer"
+        SettingsStatusTimer       = "SettingsStatusTimer"
+        HealthMonitorTimer        = "HealthMonitorTimer"
+        DeferredStartupTimer      = "DeferredStartupTimer"
+        FolderCheckTimer          = "FolderCheckTimer"
+        PostShowStatusTimer       = "PostShowStatusTimer"
+    }
+    if ($TimerName -eq "HealthMonitorTimer" -and (-not (Get-Variable -Name HealthMonitorTimer -Scope Script -ErrorAction SilentlyContinue))) {
+        try {
+            Start-HealthMonitor
+            $script:SelfHealStats.HeartbeatRecoveries = [int]$script:SelfHealStats.HeartbeatRecoveries + 1
+            return $true
+        } catch {
+            Write-LogExceptionDeduped "Health monitor self-heal failed." "WARN" $_.Exception "SelfHeal" 30
+            return $false
+        }
+    }
+    $varName = if ($timerMap.ContainsKey($TimerName)) { [string]$timerMap[$TimerName] } else { [string]$TimerName }
+    $timerVar = Get-Variable -Name $varName -Scope Script -ErrorAction SilentlyContinue
+    if (-not $timerVar -or -not $timerVar.Value) {
+        Write-LogThrottled ("SelfHeal-TimerMissing-{0}" -f $TimerName) ("Self-heal could not find timer variable for {0}." -f $TimerName) "WARN" 30
+        return $false
+    }
+    $timer = $timerVar.Value
+    if (-not ($timer -is [System.Windows.Forms.Timer])) { return $false }
+    try {
+        try { $timer.Stop() } catch { }
+        $timer.Start()
+        $script:ComponentHeartbeat[$TimerName] = Get-Date
+        $script:SelfHealStats.HeartbeatRecoveries = [int]$script:SelfHealStats.HeartbeatRecoveries + 1
+        return $true
+    } catch {
+        Write-LogExceptionDeduped ("Timer self-heal failed for {0}." -f $TimerName) "WARN" $_.Exception "SelfHeal" 30
+        return $false
+    }
+}
+
+function Request-TimerSelfHeal {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$TimerName,
+        [string]$Reason = "Timer handler failure"
+    )
+    if ([string]::IsNullOrWhiteSpace($TimerName)) { return $false }
+    $timerNameCopy = [string]$TimerName
+    $reasonCopy = [string]$Reason
+    $queued = Enqueue-SelfHealAction -Name ("Timer:{0}" -f $timerNameCopy) -Reason $reasonCopy -InitialDelaySeconds 2 -MaxAttempts 4 -WindowSeconds 300 -MaxPerWindow 6 -Action {
+        Invoke-TimerSelfHeal -TimerName $timerNameCopy | Out-Null
+    }
+    if ($queued) {
+        $script:SelfHealStats.TimerRecoveryQueued = [int]$script:SelfHealStats.TimerRecoveryQueued + 1
+    }
+    return $queued
+}
+
+function Invoke-HeartbeatWatchdog([switch]$Force) {
+    if (-not $script:ComponentHeartbeatThresholdSeconds) { return }
+    $now = Get-Date
+    foreach ($component in @($script:ComponentHeartbeatThresholdSeconds.Keys)) {
+        $threshold = [Math]::Max(5, [int]$script:ComponentHeartbeatThresholdSeconds[$component])
+        $heartbeat = $null
+        if ($script:ComponentHeartbeat.ContainsKey($component)) {
+            $heartbeat = $script:ComponentHeartbeat[$component]
+        }
+        if (-not $Force) {
+            if (-not $heartbeat) {
+                $uptimeSeconds = 0
+                if ($script:AppStartTime) {
+                    $uptimeSeconds = [int]((Get-Date) - $script:AppStartTime).TotalSeconds
+                }
+                if ($uptimeSeconds -lt ($threshold * 2)) { continue }
+            } elseif (($now - $heartbeat).TotalSeconds -lt $threshold) {
+                continue
+            }
+        }
+        if (Request-TimerSelfHeal -TimerName $component -Reason "Heartbeat stale") {
+            Write-LogThrottled ("SelfHeal-Heartbeat-{0}" -f $component) ("Heartbeat watchdog queued self-heal for {0}." -f $component) "WARN" 30
+        }
+        $script:ComponentHeartbeat[$component] = $now
+    }
+}
+
+function Invoke-RepairAll([string]$Source = "manual") {
+    if ($script:isShuttingDown -or $script:CleanupDone) { return $false }
+    $script:SelfHealStats.RepairAllRuns = [int]$script:SelfHealStats.RepairAllRuns + 1
+    Add-SelfHealRecentAction "RepairAll" "Started" ("Source={0}" -f $Source)
+    $completed = @()
+    try {
+        try { Flush-SettingsSave; $completed += "Flushed pending settings save" } catch { }
+        try { Validate-RequiredFiles; $completed += "Validated required files" } catch { }
+        try { Start-RepairMode; $completed += "Applied repair mode snapshot recovery" } catch { }
+        try { [void](Ensure-SettingsUiLoaded); $completed += "Validated Settings UI module" } catch { }
+        try { [void](Ensure-HistoryUiLoaded); $completed += "Validated History UI module" } catch { }
+        foreach ($component in @("WatchdogTimer", "PauseTimer", "HealthMonitorTimer", "LogFlushTimer", "StatusUpdateDebounceTimer")) {
+            try {
+                if (Invoke-TimerSelfHeal -TimerName $component) {
+                    $completed += ("Restarted {0}" -f $component)
+                }
+            } catch { }
+        }
+        try { Invoke-HeartbeatWatchdog -Force } catch { }
+        try { Invoke-SelfHealQueue -Force } catch { }
+        try { Request-StatusUpdate } catch { }
+        try { Update-StatusText } catch { }
+        try { if (Get-Command Update-TrayLabels -ErrorAction SilentlyContinue) { Update-TrayLabels } } catch { }
+
+        $summary = if ($completed.Count -gt 0) { ($completed -join "; ") } else { "No repair actions were required." }
+        Add-SelfHealRecentAction "RepairAll" "Completed" $summary
+        Write-Log ("Repair all completed (source={0}): {1}" -f $Source, $summary) "INFO" $null "Recovery"
+        try {
+            Show-Balloon "Teams Always Green" "Repair all completed." ([System.Windows.Forms.ToolTipIcon]::Info)
+        } catch {
+        }
+        return $true
+    } catch {
+        Add-SelfHealRecentAction "RepairAll" "Failed" $_.Exception.Message
+        Write-LogExceptionDeduped ("Repair all failed (source={0})." -f $Source) "ERROR" $_.Exception "Recovery" 20
+        return $false
+    }
+}
+
+function Test-SettingsStateIntegrity {
+    try {
+        if (-not $script:AppState) { return $true }
+        $stateHash = $null
+        if ($script:AppState.PSObject.Properties.Name -contains "SettingsHash") {
+            $stateHash = [string]$script:AppState.SettingsHash
+        }
+        if ([string]::IsNullOrWhiteSpace($stateHash)) { return $true }
+        $currentHash = Get-SettingsFileHash
+        if ([string]::IsNullOrWhiteSpace($currentHash)) { return $true }
+        return ($currentHash -eq $stateHash)
+    } catch {
+        return $true
+    }
 }
 
 function Add-RecentError([string]$message, [string]$context, [Exception]$exception) {
@@ -3209,6 +3968,16 @@ function Write-DiagnosticsReport([string]$targetPath) {
     $lines += ""
     $lines += "Recent Actions:"
     $lines += (Get-RecentActionsLines)
+    $lines += ""
+    $lines += "Self-Healing:"
+    $queueDepth = if ($script:SelfHealActionQueue) { @($script:SelfHealActionQueue).Count } else { 0 }
+    $lines += "  Queue Depth: $queueDepth"
+    $lines += "  Repair-All Runs: $([int]$script:SelfHealStats.RepairAllRuns)"
+    $lines += "  Heartbeat Recoveries: $([int]$script:SelfHealStats.HeartbeatRecoveries)"
+    $lines += "  Timer Recoveries: queued=$([int]$script:SelfHealStats.TimerRecoveryQueued) succeeded=$([int]$script:SelfHealStats.TimerRecoverySuccess) failed=$([int]$script:SelfHealStats.TimerRecoveryFailed)"
+    $lines += "  Queue Suppressed: $([int]$script:SelfHealStats.QueueSuppressedCount)"
+    $lines += "  Recent Auto-Repairs:"
+    $lines += (Get-SelfHealRecentActionLines)
     $lines += ""
     $lines += "Date/Time Format: " + $(if ($settings.UseSystemDateTimeFormat) { "System ($($settings.SystemDateTimeFormatMode))" } else { [string]$settings.DateTimeFormat })
     if ($settings.ScrubDiagnostics) {
@@ -3726,6 +4495,7 @@ function Load-Settings {
     } catch {
         $script:SettingsLoadFailed = $true
         Write-Log "Failed to load settings." "ERROR" $_.Exception "Load-Settings"
+        Add-SelfHealRecentAction "LoadSettings" "Failed" $_.Exception.Message
         try {
             $rawFallback = if (Test-Path $settingsPath) { Get-Content -Path $settingsPath -Raw } else { "" }
             Save-CorruptSettingsCopy $rawFallback
@@ -3933,6 +4703,23 @@ function Normalize-State($state) {
     if (-not $stats.ContainsKey("HourlyToggles")) { $stats["HourlyToggles"] = @{} }
     if (-not $stats.ContainsKey("LongestPauseMinutes")) { $stats["LongestPauseMinutes"] = 0 }
     if (-not $stats.ContainsKey("LongestPauseAt")) { $stats["LongestPauseAt"] = $null }
+    if (-not $stats.ContainsKey("CrashFreeSince")) { $stats["CrashFreeSince"] = [string]$stats["InstallDate"] }
+    if (-not $stats.ContainsKey("ProfileUsageMinutes")) { $stats["ProfileUsageMinutes"] = @{} }
+    if (-not $stats.ContainsKey("ReliableMinutes")) { $stats["ReliableMinutes"] = 0 }
+    if (-not $stats.ContainsKey("DegradedMinutes")) { $stats["DegradedMinutes"] = 0 }
+    if (-not $stats.ContainsKey("LifetimeToggleCount")) { $stats["LifetimeToggleCount"] = 0 }
+    if (-not $stats.ContainsKey("ProfileLifetimeToggles")) { $stats["ProfileLifetimeToggles"] = @{} }
+    if (-not $stats.ContainsKey("ProfileLifetimeHighWater")) { $stats["ProfileLifetimeHighWater"] = @{} }
+    if (-not $stats.ContainsKey("BadgeUnlocked")) { $stats["BadgeUnlocked"] = @{} }
+    if (-not $stats.ContainsKey("BadgeHistory")) { $stats["BadgeHistory"] = @() }
+    if (-not $stats.ContainsKey("BadgePoints")) { $stats["BadgePoints"] = 0 }
+    if (-not $stats.ContainsKey("BadgeLevel")) { $stats["BadgeLevel"] = 1 }
+    if (-not $stats.ContainsKey("BadgeLevelProgressPct")) { $stats["BadgeLevelProgressPct"] = 0.0 }
+    if (-not $stats.ContainsKey("BadgeLastUnlockId")) { $stats["BadgeLastUnlockId"] = "" }
+    if (-not $stats.ContainsKey("BadgeLastUnlockAt")) { $stats["BadgeLastUnlockAt"] = $null }
+    if (-not $stats.ContainsKey("BadgeCurrentSeason")) { $stats["BadgeCurrentSeason"] = "" }
+    if (-not $stats.ContainsKey("BadgeCatalogVersion")) { $stats["BadgeCatalogVersion"] = 1 }
+    if (-not $stats.ContainsKey("BadgePointsHighWater")) { $stats["BadgePointsHighWater"] = 0 }
     Set-SettingsPropertyValue $state "Stats" $stats
     return $state
 }
@@ -3964,6 +4751,7 @@ function Load-State {
         return (Normalize-State $loaded)
     } catch {
         Write-Log "Failed to load state." "WARN" $_.Exception "Load-State"
+        Add-SelfHealRecentAction "LoadState" "Failed" $_.Exception.Message
         try {
             $rawFallback = if (Test-Path $script:StatePath) { Get-Content -Path $script:StatePath -Raw } else { "" }
             Save-CorruptStateCopy $rawFallback
@@ -4006,7 +4794,11 @@ function Get-StateSnapshot($state) {
     $snapshot = @{}
     foreach ($prop in $state.PSObject.Properties) {
         $value = $prop.Value
-        $snapshot[$prop.Name] = if ($null -eq $value) { "<null>" } else { [string]$value }
+        if (Get-Command -Name Convert-SettingsSnapshotValueToStableString -ErrorAction SilentlyContinue) {
+            $snapshot[$prop.Name] = Convert-SettingsSnapshotValueToStableString $value
+        } else {
+            $snapshot[$prop.Name] = if ($null -eq $value) { "<null>" } else { [string]$value }
+        }
     }
     return $snapshot
 }
@@ -4039,7 +4831,35 @@ function Sync-StateFromSettings($settings) {
         Set-SettingsPropertyValue $script:AppState "LastToggleTime" $settings.LastToggleTime
     }
     if ($settings.PSObject.Properties.Name -contains "Stats") {
-        Set-SettingsPropertyValue $script:AppState "Stats" (Convert-ToHashtable $settings.Stats)
+        $incomingStats = Convert-ToHashtable $settings.Stats
+        $baseStats = Convert-ToHashtable (Get-SettingsPropertyValue $script:AppState "Stats" @{})
+
+        if ($baseStats.Count -eq 0 -and $script:StatePath -and (Test-Path $script:StatePath)) {
+            try {
+                $stateFromDisk = Load-State
+                if ($stateFromDisk -and ($stateFromDisk.PSObject.Properties.Name -contains "Stats")) {
+                    $baseStats = Convert-ToHashtable $stateFromDisk.Stats
+                }
+            } catch {
+            }
+        }
+
+        if ($baseStats.Count -gt 0) {
+            $mergeState = [pscustomobject]@{
+                ToggleCount = [int](Get-SettingsPropertyValue $script:AppState "ToggleCount" 0)
+                LastToggleTime = (Get-SettingsPropertyValue $script:AppState "LastToggleTime" $null)
+                Stats = $baseStats
+            }
+            $runtime = @{ Stats = $incomingStats }
+            if ($settings.PSObject.Properties.Name -contains "ToggleCount") { $runtime["ToggleCount"] = [int]$settings.ToggleCount }
+            if ($settings.PSObject.Properties.Name -contains "LastToggleTime") { $runtime["LastToggleTime"] = $settings.LastToggleTime }
+            Apply-RuntimeOverridesToState $mergeState $runtime | Out-Null
+            Set-SettingsPropertyValue $script:AppState "ToggleCount" ([int]$mergeState.ToggleCount)
+            Set-SettingsPropertyValue $script:AppState "LastToggleTime" $mergeState.LastToggleTime
+            Set-SettingsPropertyValue $script:AppState "Stats" (Convert-ToHashtable $mergeState.Stats)
+        } else {
+            Set-SettingsPropertyValue $script:AppState "Stats" $incomingStats
+        }
     }
     $script:AppState = Normalize-State $script:AppState
 }
@@ -4074,6 +4894,7 @@ function Save-StateImmediate($state) {
         $script:LastStateSnapshotHash = $hash
     } catch {
         Write-Log "Failed to save state." "WARN" $_.Exception "Save-State"
+        Add-SelfHealRecentAction "SaveState" "Failed" $_.Exception.Message
     }
 }
 
@@ -4346,6 +5167,8 @@ function Normalize-Settings($settings) {
     if (-not ($settings.PSObject.Properties.Name -contains "LogToEventLog")) { Set-SettingsPropertyValue $settings "LogToEventLog" $false }
     if (-not ($settings.PSObject.Properties.Name -contains "ScrubDiagnostics")) { Set-SettingsPropertyValue $settings "ScrubDiagnostics" $true }
     if (-not ($settings.PSObject.Properties.Name -contains "FirstRunWizardCompleted")) { Set-SettingsPropertyValue $settings "FirstRunWizardCompleted" $false }
+    if (-not ($settings.PSObject.Properties.Name -contains "BadgeTrackingMode")) { Set-SettingsPropertyValue $settings "BadgeTrackingMode" "Global" }
+    if (-not ($settings.PSObject.Properties.Name -contains "AutoStartOnRestart")) { Set-SettingsPropertyValue $settings "AutoStartOnRestart" $false }
     if ([bool]$settings.SecurityModeEnabled) {
         $settings.StrictSettingsImport = $true
         $settings.StrictProfileImport = $true
@@ -4463,6 +5286,8 @@ function Validate-SettingsForSave($settings) {
     if (-not ($settings.PSObject.Properties.Name -contains "LogToEventLog")) { $settings.LogToEventLog = $false }
     if (-not ($settings.PSObject.Properties.Name -contains "ScrubDiagnostics")) { $settings.ScrubDiagnostics = $true }
     if (-not ($settings.PSObject.Properties.Name -contains "FirstRunWizardCompleted")) { $settings.FirstRunWizardCompleted = $false }
+    if (-not ($settings.PSObject.Properties.Name -contains "BadgeTrackingMode")) { $settings.BadgeTrackingMode = "Global" }
+    if (-not ($settings.PSObject.Properties.Name -contains "AutoStartOnRestart")) { $settings.AutoStartOnRestart = $false }
     if ([bool]$settings.SecurityModeEnabled) {
         $settings.StrictSettingsImport = $true
         $settings.StrictProfileImport = $true
@@ -4552,6 +5377,20 @@ function Validate-SettingsForSave($settings) {
             $issues += "TooltipStyle invalid; reset to Standard"
             $settings.TooltipStyle = "Standard"
         }
+    }
+    if ($settings.PSObject.Properties.Name -contains "BadgeTrackingMode") {
+        $badgeMode = [string]$settings.BadgeTrackingMode
+        if ([string]::IsNullOrWhiteSpace($badgeMode)) { $badgeMode = "Global" }
+        switch ($badgeMode.ToLowerInvariant()) {
+            "global" { $settings.BadgeTrackingMode = "Global" }
+            "profile" { $settings.BadgeTrackingMode = "Profile" }
+            default {
+                $issues += "BadgeTrackingMode invalid; reset to Global"
+                $settings.BadgeTrackingMode = "Global"
+            }
+        }
+    } else {
+        $settings.BadgeTrackingMode = "Global"
     }
     if ($settings.PSObject.Properties.Name -contains "SystemDateTimeFormatMode") {
         $allowedDateModes = @("Short", "Long")
@@ -4691,6 +5530,12 @@ function Migrate-Settings($settings) {
         if (-not ($settings.PSObject.Properties.Name -contains "HardenPermissions")) { Set-SettingsPropertyValue $settings "HardenPermissions" $true }
         $current = 9
     }
+    if ($current -lt 10) {
+        if (-not ($settings.PSObject.Properties.Name -contains "BadgeTrackingMode")) {
+            Set-SettingsPropertyValue $settings "BadgeTrackingMode" "Global"
+        }
+        $current = 10
+    }
     if (-not ($settings.PSObject.Properties.Name -contains "FirstRunWizardCompleted")) {
         Set-SettingsPropertyValue $settings "FirstRunWizardCompleted" $false
     }
@@ -4719,7 +5564,28 @@ function Save-SettingsImmediate($settings) {
             Write-Log ("Settings validation: " + ($validation.Issues -join "; ")) "WARN" $null "Settings-Validate"
         }
         $settings = Normalize-Settings $settings
+        $previousBadgeMode = ""
+        try {
+            if ($script:settings -and -not [object]::ReferenceEquals($script:settings, $settings)) {
+                $previousBadgeMode = [string](Get-SettingsPropertyValue $script:settings "BadgeTrackingMode" "")
+            }
+        } catch {
+            $previousBadgeMode = ""
+        }
+        if ([string]::IsNullOrWhiteSpace($previousBadgeMode)) {
+            try { $previousBadgeMode = [string]$script:BadgeTrackingModeLastApplied } catch { $previousBadgeMode = "" }
+        }
+        $newBadgeMode = [string](Get-SettingsPropertyValue $settings "BadgeTrackingMode" "Global")
+        if ([string]::IsNullOrWhiteSpace($newBadgeMode)) { $newBadgeMode = "Global" }
+        try {
+            if (Get-Command -Name Invoke-BadgeTrackingModeMigration -ErrorAction SilentlyContinue) {
+                Invoke-BadgeTrackingModeMigration $settings $previousBadgeMode $newBadgeMode | Out-Null
+            }
+        } catch {
+            Write-Log "Badge scope migration failed during settings save; preserving existing stats." "WARN" $_.Exception "Badges"
+        }
         Sync-StateFromSettings $settings
+        Apply-StateToSettings $settings $script:AppState
         if ($script:SettingsFutureVersion) {
             Write-LogThrottled "Settings-FutureVersion" ("Settings schema is newer than supported; preserving unknown fields where possible.") "WARN" 600
         }
@@ -4785,6 +5651,7 @@ function Save-SettingsImmediate($settings) {
             $saveVerify = Test-SavedSettingsFile -path $settingsPath -expectedSequence $nextSequence
             if (-not $saveVerify.IsValid) {
                 Write-Log ("Settings save verification failed: {0}" -f $saveVerify.Reason) "WARN" $null "Settings-Save"
+                Add-SelfHealRecentAction "SettingsSaveVerify" "Retry" $saveVerify.Reason
                 $script:SelfHealStats.SettingsRepairCount = [int]$script:SelfHealStats.SettingsRepairCount + 1
                 $fallbackBackup = Join-Path $script:SettingsDirectory "Teams-Always-Green.settings.json.bak1"
                 if (Test-Path $fallbackBackup) {
@@ -4796,17 +5663,19 @@ function Save-SettingsImmediate($settings) {
                     throw ("Settings save verification failed after repair attempt: {0}" -f $saveVerifyRetry.Reason)
                 }
                 Write-Log "Settings save self-heal succeeded after verification failure." "WARN" $null "Settings-Save"
+                Add-SelfHealRecentAction "SettingsSaveVerify" "Succeeded" "Self-heal rewrite succeeded"
             }
         } catch {
             $fallbackBackup = Join-Path $script:SettingsDirectory "Teams-Always-Green.settings.json.bak1"
             if (Test-Path $fallbackBackup) {
                 try { Copy-Item -Path $fallbackBackup -Destination $settingsPath -Force } catch { }
             }
+            Add-SelfHealRecentAction "SettingsSaveVerify" "Failed" $_.Exception.Message
             throw
         }
         if (@($changedKeys).Count -gt 0) {
             $categoryMap = @{
-                General     = @("IntervalSeconds", "StartWithWindows", "RememberChoice", "StartOnLaunch", "RunOnceOnLaunch", "QuietMode", "DisableBalloonTips", "OpenSettingsAtLastTab", "LastSettingsTab", "DateTimeFormat", "UseSystemDateTimeFormat", "SystemDateTimeFormatMode", "PauseUntil", "PauseDurationsMinutes", "SettingsDirectory", "DataRoot")
+                General     = @("IntervalSeconds", "StartWithWindows", "RememberChoice", "StartOnLaunch", "RunOnceOnLaunch", "AutoStartOnRestart", "QuietMode", "DisableBalloonTips", "OpenSettingsAtLastTab", "LastSettingsTab", "DateTimeFormat", "UseSystemDateTimeFormat", "SystemDateTimeFormatMode", "PauseUntil", "PauseDurationsMinutes", "SettingsDirectory", "DataRoot")
                 Appearance  = @("TooltipStyle", "ThemeMode", "FontSize", "SettingsFontSize", "StatusColorRunning", "StatusColorPaused", "StatusColorStopped", "CompactMode", "MinimalTrayTooltip")
                 Schedule    = @("ScheduleOverrideEnabled", "ScheduleEnabled", "ScheduleStart", "ScheduleEnd", "ScheduleWeekdays", "ScheduleSuspendUntil")
                 Hotkeys     = @("HotkeyToggle", "HotkeyStartStop", "HotkeyPauseResume")
@@ -4857,12 +5726,14 @@ function Save-SettingsImmediate($settings) {
             }
         } catch { }
         Sync-SettingsReference $settings
+        $script:BadgeTrackingModeLastApplied = [string](Get-SettingsPropertyValue $settings "BadgeTrackingMode" "Global")
         Save-StateImmediate $script:AppState
         Update-RollbackStateFromSettings $settings
     } catch {
         $stopwatch.Stop()
         $script:LastSettingsSaveOk = $false
         $script:LastSettingsSaveMessage = [string]$_.Exception.Message
+        Add-SelfHealRecentAction "SaveSettings" "Failed" $script:LastSettingsSaveMessage
         Write-LogExceptionDeduped "Failed to save settings." "ERROR" $_.Exception "Save-Settings" 20
         if ($_.InvocationInfo -and $_.InvocationInfo.PositionMessage) {
             $savePos = ("Save settings failure location: " + $_.InvocationInfo.PositionMessage.Trim())
@@ -5275,6 +6146,7 @@ function Get-ProfileDiffDisplayName([string]$key) {
         "RememberChoice" = (L "Remember Choice" "Remember Choice")
         "StartOnLaunch" = (L "Start on Launch" "Start on Launch")
         "RunOnceOnLaunch" = (L "Run Once on Launch" "Run Once on Launch")
+        "AutoStartOnRestart" = (L "Auto Start on Restart" "Auto Start on Restart")
         "QuietMode" = (L "Quiet Mode" "Quiet Mode")
         "MinimalTrayTooltip" = (L "Tray Tooltip Style" "Tray Tooltip Style")
         "TooltipStyle" = (L "Tray Tooltip Style" "Tray Tooltip Style")
@@ -5639,6 +6511,7 @@ $defaultSettings = [pscustomobject]@{
     StartWithWindows = $false
     RememberChoice = $true
     StartOnLaunch = $false
+    AutoStartOnRestart = $false
     QuietMode = $true
     DisableBalloonTips = $false
     OpenSettingsAtLastTab = $true
@@ -5651,6 +6524,7 @@ $defaultSettings = [pscustomobject]@{
     FirstRunWizardCompleted = $false
     AutoCorrectedNoticeSeen = $false
     UiLanguage = "auto"
+    BadgeTrackingMode = "Global"
     ToggleCount = 0
     LastToggleTime = $null
     Stats = @{
@@ -5660,6 +6534,23 @@ $defaultSettings = [pscustomobject]@{
         HourlyToggles = @{}
         LongestPauseMinutes = 0
         LongestPauseAt = $null
+        CrashFreeSince = (Get-Date).ToString("o")
+        ProfileUsageMinutes = @{}
+        ReliableMinutes = 0
+        DegradedMinutes = 0
+        LifetimeToggleCount = 0
+        ProfileLifetimeToggles = @{}
+        ProfileLifetimeHighWater = @{}
+        BadgeUnlocked = @{}
+        BadgeHistory = @()
+        BadgePoints = 0
+        BadgeLevel = 1
+        BadgeLevelProgressPct = 0.0
+        BadgeLastUnlockId = ""
+        BadgeLastUnlockAt = $null
+        BadgeCurrentSeason = ""
+        BadgeCatalogVersion = 1
+        BadgePointsHighWater = 0
     }
     RunOnceOnLaunch = $false
     PauseUntil = $null
@@ -5745,10 +6636,12 @@ $script:TabDefaultsMap = @{
         "RememberChoice",
         "StartOnLaunch",
         "RunOnceOnLaunch",
+        "AutoStartOnRestart",
         "DateTimeFormat",
         "UseSystemDateTimeFormat",
         "SystemDateTimeFormatMode",
-        "ShowFirstRunToast"
+        "ShowFirstRunToast",
+        "BadgeTrackingMode"
     )
     Scheduling = @(
         "ScheduleOverrideEnabled",
@@ -6146,6 +7039,7 @@ if ((Get-ObjectKeys $settings.Profiles) -contains $settings.ActiveProfile) {
 }
 
 Sync-SettingsReference $settings
+$script:BadgeTrackingModeLastApplied = [string](Get-SettingsPropertyValue $settings "BadgeTrackingMode" "Global")
 if (-not $script:SaveSettingsPending) {
     Update-RollbackStateFromSettings $settings
 }
@@ -6166,6 +7060,23 @@ if (-not $state) {
             HourlyToggles = @{}
             LongestPauseMinutes = 0
             LongestPauseAt = $null
+            CrashFreeSince = (Get-Date).ToString("o")
+            ProfileUsageMinutes = @{}
+            ReliableMinutes = 0
+            DegradedMinutes = 0
+            LifetimeToggleCount = 0
+            ProfileLifetimeToggles = @{}
+            ProfileLifetimeHighWater = @{}
+            BadgeUnlocked = @{}
+            BadgeHistory = @()
+            BadgePoints = 0
+            BadgeLevel = 1
+            BadgeLevelProgressPct = 0.0
+            BadgeLastUnlockId = ""
+            BadgeLastUnlockAt = $null
+            BadgeCurrentSeason = ""
+            BadgeCatalogVersion = 1
+            BadgePointsHighWater = 0
         }
     }
     if ($settings -and ($settings.PSObject.Properties.Name -contains "ToggleCount")) {
@@ -6300,16 +7211,37 @@ function Invoke-CrashRecoveryTierActions($settingsRef, $crashState) {
 }
 
 $previousShutdown = Get-ShutdownMarker
+$restartMarkerTriggered = $false
+try { $restartMarkerTriggered = Consume-RestartRequestMarker 300 } catch { $restartMarkerTriggered = $false }
+if (-not $script:RelaunchedFromRestart -and $restartMarkerTriggered) {
+    $script:RelaunchedFromRestart = $true
+}
+if ($script:RelaunchedFromRestart) {
+    Write-Log "Startup relaunch context detected." "INFO" $null "Startup"
+}
 $crashState = Get-CrashState
 $overrideMinimal = $false
 if ($crashState -and ($crashState.PSObject.Properties.Name -contains "OverrideMinimalMode")) {
     $overrideMinimal = [bool]$crashState.OverrideMinimalMode
+}
+$savedMinimalState = Get-SavedMinimalModeState
+if (-not $overrideMinimal -and $savedMinimalState -and ($savedMinimalState.PSObject.Properties.Name -contains "Override") -and [bool]$savedMinimalState.Override) {
+    $overrideMinimal = $true
+    try {
+        if ($crashState -and ($crashState.PSObject.Properties.Name -contains "OverrideMinimalMode")) {
+            $crashState.OverrideMinimalMode = $true
+            Save-CrashState $crashState
+        }
+    } catch {
+    }
+    Write-Log "Startup: minimal mode override restored from persisted state." "INFO" $null "Startup"
 }
 $script:OverrideMinimalMode = $overrideMinimal
 if ($previousShutdown -and $previousShutdown -ne "clean") {
     Write-Log "Crash detected: previous session did not exit cleanly." "WARN" $null "Startup"
     $recoveryTier = 0
     try {
+        try { Mark-FunStatsCrashEvent } catch { }
         $crashState.Count = [int]$crashState.Count + 1
         $crashState.LastCrash = (Get-Date).ToString("o")
         Save-CrashState $crashState
@@ -6366,6 +7298,7 @@ if ($script:OverrideMinimalMode) {
     $script:MinimalModeActive = $false
     $script:MinimalModeReason = $null
 }
+try { Sync-MinimalModeState "Startup" } catch { }
 Write-BootStage "Crash state handled"
 Set-ShutdownMarker "started"
 Write-Log "" "INFO" $null "Init"
@@ -6495,9 +7428,40 @@ public class StatusMenuRenderer : ToolStripProfessionalRenderer {
 
     protected override void OnRenderItemText(ToolStripItemTextRenderEventArgs e) {
         var item = e.Item as ToolStripMenuItem;
-        if (item != null && item.Name == "StatusStateItem") {
+        if (item != null && item.Name == "TopStatusSummaryItem") {
+            string text = item.Text ?? string.Empty;
+            string statusPrefix = "Status: ";
+            string statusValue = text;
+            int idx = text.IndexOf(':');
+            if (idx >= 0) {
+                statusPrefix = text.Substring(0, idx + 1) + " ";
+                statusValue = text.Substring(idx + 1).Trim();
+            } else {
+                statusValue = text.Trim();
+            }
+            if (statusValue == null) { statusValue = string.Empty; }
+            Color stateColor = item.ForeColor.IsEmpty ? Color.Red : item.ForeColor;
+            Rectangle rect = e.TextRectangle;
+            TextRenderer.DrawText(e.Graphics, statusPrefix, e.TextFont, rect, ThemeColors.MenuText, TextFormatFlags.Left);
+            Size prefixSize = TextRenderer.MeasureText(e.Graphics, statusPrefix, e.TextFont, rect.Size, TextFormatFlags.Left);
+            Rectangle statusRect = new Rectangle(rect.X + prefixSize.Width, rect.Y, rect.Width - prefixSize.Width, rect.Height);
+            TextRenderer.DrawText(e.Graphics, statusValue, e.TextFont, statusRect, stateColor, TextFormatFlags.Left);
+            return;
+        }
+        if (item != null && (item.Name == "StatusStateItem" || item.Name == "TopStatusStateItem")) {
+            string text = item.Text ?? string.Empty;
             string prefix = "Status: ";
-            string state = item.Tag as string;
+            string state = string.Empty;
+            int idx = text.IndexOf(':');
+            if (idx >= 0) {
+                prefix = text.Substring(0, idx + 1) + " ";
+                state = text.Substring(idx + 1).Trim();
+            } else if (!string.IsNullOrWhiteSpace(text)) {
+                state = text.Trim();
+            }
+            if (string.IsNullOrWhiteSpace(state) && item.Tag != null) {
+                state = item.Tag.ToString();
+            }
             if (state == null) { state = string.Empty; }
             Color stateColor = item.ForeColor.IsEmpty ? Color.Red : item.ForeColor;
             Rectangle rect = e.TextRectangle;
@@ -6618,6 +7582,8 @@ $script:tickCount = 0
 $script:lastToggleTime = $null
 $script:nextToggleTime = $null
 $script:StatsShutdownUpdated = $false
+$script:StatsLastSampleAt = $null
+$script:StatsLastSampleProfile = $null
 
 $toggleTimeValue = $null
 if ($script:AppState -and ($script:AppState.PSObject.Properties.Name -contains "LastToggleTime")) {
@@ -6664,6 +7630,1047 @@ function Convert-ToHashtable($obj) {
     return @{}
 }
 
+function Get-LifetimeCountFromStatsObject($stats, [int64]$fallback = 0) {
+    $safeFallback = [int64][Math]::Max(0, [int64]$fallback)
+    if (-not $stats) { return $safeFallback }
+    try {
+        if ($stats -is [System.Collections.IDictionary] -and $stats.ContainsKey("LifetimeToggleCount")) {
+            return [int64][Math]::Max(0, [int64]$stats["LifetimeToggleCount"])
+        }
+        if ($stats.PSObject.Properties.Match("LifetimeToggleCount").Count -gt 0) {
+            return [int64][Math]::Max(0, [int64]$stats.LifetimeToggleCount)
+        }
+    } catch {
+    }
+    return $safeFallback
+}
+
+function Get-PersistentLifetimeToggleCount {
+    if ($script:LifetimeToggleHighWaterLoaded -and $script:LifetimeToggleHighWater -ge 0) {
+        return [int64]$script:LifetimeToggleHighWater
+    }
+    $maxLifetime = 0L
+    $candidates = New-Object System.Collections.Generic.List[string]
+    foreach ($path in @($script:LifetimeStatsPath, $script:StatePath, $script:StateLastGoodPath)) {
+        if (-not [string]::IsNullOrWhiteSpace([string]$path)) { [void]$candidates.Add([string]$path) }
+    }
+    if (-not [string]::IsNullOrWhiteSpace([string]$script:SettingsDirectory)) {
+        foreach ($i in 1..3) {
+            [void]$candidates.Add((Join-Path $script:SettingsDirectory ("Teams-Always-Green.state.json.bak{0}" -f $i)))
+        }
+    }
+    foreach ($path in @($candidates | Select-Object -Unique)) {
+        if ([string]::IsNullOrWhiteSpace([string]$path)) { continue }
+        if (-not (Test-Path $path)) { continue }
+        try {
+            $raw = Get-Content -Path $path -Raw -ErrorAction Stop
+            if ([string]::IsNullOrWhiteSpace($raw)) { continue }
+            $obj = $raw | ConvertFrom-Json -ErrorAction Stop
+            $candidate = 0L
+            if ($path -eq $script:LifetimeStatsPath) {
+                if ($obj.PSObject.Properties.Match("LifetimeToggleCount").Count -gt 0) {
+                    $candidate = [int64]$obj.LifetimeToggleCount
+                }
+            } elseif ($obj -and $obj.PSObject.Properties.Match("Stats").Count -gt 0) {
+                $candidate = Get-LifetimeCountFromStatsObject $obj.Stats 0
+            }
+            if ($candidate -gt $maxLifetime) { $maxLifetime = $candidate }
+        } catch {
+        }
+    }
+
+    try {
+        if ($script:PendingRuntimeFromSettings -and $script:PendingRuntimeFromSettings.ContainsKey("Stats")) {
+            $pendingLifetime = Get-LifetimeCountFromStatsObject $script:PendingRuntimeFromSettings["Stats"] 0
+            if ($pendingLifetime -gt $maxLifetime) { $maxLifetime = $pendingLifetime }
+        }
+    } catch {
+    }
+
+    if ($maxLifetime -lt 0) { $maxLifetime = 0L }
+    $script:LifetimeToggleHighWater = [int64]$maxLifetime
+    $script:LifetimeToggleHighWaterLoaded = $true
+    return [int64]$script:LifetimeToggleHighWater
+}
+
+function Save-PersistentLifetimeToggleCount([int64]$count, [switch]$Force) {
+    $safeCount = [int64][Math]::Max(0, [int64]$count)
+    $currentHighWater = Get-PersistentLifetimeToggleCount
+    if (-not $Force -and $safeCount -le $currentHighWater) { return }
+    $script:LifetimeToggleHighWater = $safeCount
+    $script:LifetimeToggleHighWaterLoaded = $true
+    try {
+        Ensure-Directory $script:MetaDir "Meta" | Out-Null
+        $payload = [pscustomobject]@{
+            LifetimeToggleCount = [int64]$safeCount
+            UpdatedUtc = (Get-Date).ToUniversalTime().ToString("o")
+        }
+        $json = $payload | ConvertTo-Json -Depth 3
+        Write-AtomicTextFile -Path $script:LifetimeStatsPath -Content $json -Encoding UTF8 -VerifyJson
+    } catch {
+        Write-LogThrottled "Lifetime-HighWater-Save" "Failed to persist lifetime high-water counter." "WARN" 120
+    }
+}
+
+function Get-BadgeScopeKey([string]$trackingMode, [string]$profileName) {
+    $mode = if ([string]::IsNullOrWhiteSpace($trackingMode)) { "Global" } else { $trackingMode }
+    if ($mode -eq "Profile") {
+        $safeProfile = if ([string]::IsNullOrWhiteSpace($profileName)) { "default" } else { $profileName.Trim().ToLowerInvariant() }
+        return ("profile:{0}" -f $safeProfile)
+    }
+    return "global"
+}
+
+function Get-ScopedBadgeId([string]$baseId, [string]$trackingMode, [string]$profileName) {
+    $safeBase = if ([string]::IsNullOrWhiteSpace($baseId)) { "badge-unknown" } else { $baseId }
+    $scope = Get-BadgeScopeKey $trackingMode $profileName
+    return ("{0}::{1}" -f $safeBase, $scope)
+}
+
+function Invoke-BadgeTrackingModeMigration($settingsRef, [string]$previousMode, [string]$newMode) {
+    if (-not $settingsRef) { return $false }
+
+    $normalizeMode = {
+        param([string]$modeValue)
+        $raw = if ([string]::IsNullOrWhiteSpace($modeValue)) { "Global" } else { $modeValue.Trim() }
+        if ($raw.ToLowerInvariant() -eq "profile") { return "Profile" }
+        return "Global"
+    }
+    $fromMode = & $normalizeMode $previousMode
+    $toMode = & $normalizeMode $newMode
+    if ($fromMode -eq $toMode) { return $false }
+
+    $stats = Convert-ToHashtable (Get-SettingsPropertyValue $settingsRef "Stats" @{})
+    if (-not $stats) { $stats = @{} }
+    $stats = Ensure-BadgeStats $stats $settingsRef
+    $activeProfile = [string](Get-SettingsPropertyValue $settingsRef "ActiveProfile" "Default")
+    if ([string]::IsNullOrWhiteSpace($activeProfile)) { $activeProfile = "Default" }
+
+    $globalScope = "global"
+    $profileScope = Get-BadgeScopeKey "Profile" $activeProfile
+    $unlockedMap = Convert-ToHashtable $stats["BadgeUnlocked"]
+    $history = @($stats["BadgeHistory"])
+    $historyIds = @{}
+    foreach ($entry in @($history)) {
+        if (-not $entry) { continue }
+        $entryId = ""
+        try { $entryId = [string]$entry.Id } catch { $entryId = "" }
+        if (-not [string]::IsNullOrWhiteSpace($entryId)) { $historyIds[$entryId] = $true }
+    }
+
+    $newEntries = 0
+    $changed = $false
+
+    if ($fromMode -eq "Global" -and $toMode -eq "Profile") {
+        $globalLifetime = Get-LifetimeCountFromStatsObject $stats 0
+        $profileLifetime = Get-ProfileLifetimeToggleCount $stats $activeProfile $globalLifetime
+        if ($globalLifetime -gt $profileLifetime) {
+            Set-ProfileLifetimeToggleCount $stats $activeProfile ([int64]$globalLifetime)
+            $changed = $true
+        }
+
+        foreach ($id in @($unlockedMap.Keys)) {
+            $entry = Convert-ToHashtable $unlockedMap[$id]
+            if ($entry.Count -eq 0) { continue }
+            $entryScope = if ($entry.ContainsKey("Scope")) { [string]$entry["Scope"] } else { "" }
+            if ([string]::IsNullOrWhiteSpace($entryScope)) {
+                $entryScope = if ([string]$id -like "*::profile:*") { "profile:unknown" } else { "global" }
+            }
+            if ($entryScope -ne $globalScope) { continue }
+
+            $baseId = if ($entry.ContainsKey("BaseId") -and -not [string]::IsNullOrWhiteSpace([string]$entry["BaseId"])) {
+                [string]$entry["BaseId"]
+            } elseif ([string]$id -match "^(.*)::") {
+                [string]$Matches[1]
+            } else {
+                [string]$id
+            }
+            $profileId = Get-ScopedBadgeId $baseId "Profile" $activeProfile
+            if ($unlockedMap.ContainsKey($profileId)) { continue }
+
+            $newEntry = @{}
+            foreach ($key in @($entry.Keys)) { $newEntry[$key] = $entry[$key] }
+            $newEntry["Id"] = $profileId
+            $newEntry["BaseId"] = $baseId
+            $newEntry["Scope"] = $profileScope
+            $newEntry["Profile"] = $activeProfile
+            if (-not $newEntry.ContainsKey("UnlockedAt") -or [string]::IsNullOrWhiteSpace([string]$newEntry["UnlockedAt"])) {
+                $newEntry["UnlockedAt"] = (Get-Date).ToString("o")
+            }
+            $unlockedMap[$profileId] = $newEntry
+            if (-not $historyIds.ContainsKey($profileId)) {
+                $history += [pscustomobject]@{
+                    Id = $profileId
+                    Name = if ($newEntry.ContainsKey("Name")) { [string]$newEntry["Name"] } else { $profileId }
+                    Kind = if ($newEntry.ContainsKey("Kind")) { [string]$newEntry["Kind"] } else { "Milestone" }
+                    Rarity = if ($newEntry.ContainsKey("Rarity")) { [string]$newEntry["Rarity"] } else { "Common" }
+                    Tier = if ($newEntry.ContainsKey("Tier")) { [string]$newEntry["Tier"] } else { "Bronze" }
+                    Scope = if ($newEntry.ContainsKey("Scope")) { [string]$newEntry["Scope"] } else { $profileScope }
+                    Icon = if ($newEntry.ContainsKey("Icon")) { [string]$newEntry["Icon"] } else { (Get-BadgeRarityIcon "Common") }
+                    Points = if ($newEntry.ContainsKey("Points")) { [int]$newEntry["Points"] } else { 0 }
+                    UnlockedAt = if ($newEntry.ContainsKey("UnlockedAt")) { [string]$newEntry["UnlockedAt"] } else { (Get-Date).ToString("o") }
+                    Profile = if ($newEntry.ContainsKey("Profile")) { [string]$newEntry["Profile"] } else { $activeProfile }
+                }
+                $historyIds[$profileId] = $true
+            }
+            $newEntries++
+            $changed = $true
+        }
+    } elseif ($fromMode -eq "Profile" -and $toMode -eq "Global") {
+        $profileMap = Convert-ToHashtable $stats["ProfileLifetimeToggles"]
+        $maxProfileLifetime = 0L
+        foreach ($profileKey in @($profileMap.Keys)) {
+            $value = 0L
+            try { $value = [int64][Math]::Max(0, [int64]$profileMap[$profileKey]) } catch { $value = 0L }
+            if ($value -gt $maxProfileLifetime) { $maxProfileLifetime = $value }
+        }
+        $currentLifetime = Get-LifetimeCountFromStatsObject $stats 0
+        if ($maxProfileLifetime -gt $currentLifetime) {
+            $stats["LifetimeToggleCount"] = [int64]$maxProfileLifetime
+            Save-PersistentLifetimeToggleCount ([int64]$maxProfileLifetime)
+            $changed = $true
+        }
+
+        foreach ($id in @($unlockedMap.Keys)) {
+            $entry = Convert-ToHashtable $unlockedMap[$id]
+            if ($entry.Count -eq 0) { continue }
+            $entryScope = if ($entry.ContainsKey("Scope")) { [string]$entry["Scope"] } else { "" }
+            if ([string]::IsNullOrWhiteSpace($entryScope)) {
+                $entryScope = if ([string]$id -like "*::profile:*") { "profile:unknown" } else { "global" }
+            }
+            if (-not $entryScope.StartsWith("profile:", [System.StringComparison]::OrdinalIgnoreCase)) { continue }
+
+            $baseId = if ($entry.ContainsKey("BaseId") -and -not [string]::IsNullOrWhiteSpace([string]$entry["BaseId"])) {
+                [string]$entry["BaseId"]
+            } elseif ([string]$id -match "^(.*)::") {
+                [string]$Matches[1]
+            } else {
+                [string]$id
+            }
+            $globalId = Get-ScopedBadgeId $baseId "Global" $activeProfile
+            if ($unlockedMap.ContainsKey($globalId)) { continue }
+
+            $newEntry = @{}
+            foreach ($key in @($entry.Keys)) { $newEntry[$key] = $entry[$key] }
+            $newEntry["Id"] = $globalId
+            $newEntry["BaseId"] = $baseId
+            $newEntry["Scope"] = $globalScope
+            $newEntry["Profile"] = ""
+            if (-not $newEntry.ContainsKey("UnlockedAt") -or [string]::IsNullOrWhiteSpace([string]$newEntry["UnlockedAt"])) {
+                $newEntry["UnlockedAt"] = (Get-Date).ToString("o")
+            }
+            $unlockedMap[$globalId] = $newEntry
+            if (-not $historyIds.ContainsKey($globalId)) {
+                $history += [pscustomobject]@{
+                    Id = $globalId
+                    Name = if ($newEntry.ContainsKey("Name")) { [string]$newEntry["Name"] } else { $globalId }
+                    Kind = if ($newEntry.ContainsKey("Kind")) { [string]$newEntry["Kind"] } else { "Milestone" }
+                    Rarity = if ($newEntry.ContainsKey("Rarity")) { [string]$newEntry["Rarity"] } else { "Common" }
+                    Tier = if ($newEntry.ContainsKey("Tier")) { [string]$newEntry["Tier"] } else { "Bronze" }
+                    Scope = if ($newEntry.ContainsKey("Scope")) { [string]$newEntry["Scope"] } else { $globalScope }
+                    Icon = if ($newEntry.ContainsKey("Icon")) { [string]$newEntry["Icon"] } else { (Get-BadgeRarityIcon "Common") }
+                    Points = if ($newEntry.ContainsKey("Points")) { [int]$newEntry["Points"] } else { 0 }
+                    UnlockedAt = if ($newEntry.ContainsKey("UnlockedAt")) { [string]$newEntry["UnlockedAt"] } else { (Get-Date).ToString("o") }
+                    Profile = if ($newEntry.ContainsKey("Profile")) { [string]$newEntry["Profile"] } else { "" }
+                }
+                $historyIds[$globalId] = $true
+            }
+            $newEntries++
+            $changed = $true
+        }
+    }
+
+    if (-not $changed) { return $false }
+
+    if ($history.Count -gt 300) { $history = @($history | Select-Object -Last 300) }
+    $stats["BadgeUnlocked"] = $unlockedMap
+    $stats["BadgeHistory"] = $history
+    $stats = Ensure-BadgeStats $stats $settingsRef
+    $badgeRecalc = Update-BadgeProgress $stats $settingsRef (Get-Date)
+    if ($badgeRecalc -and $badgeRecalc.PSObject.Properties.Name -contains "Stats") {
+        $stats = Convert-ToHashtable $badgeRecalc.Stats
+    }
+    Set-SettingsPropertyValue $settingsRef "Stats" $stats
+    Write-Log ("Badge scope migration applied: {0} -> {1} (active={2}, cloned={3})" -f $fromMode, $toMode, $activeProfile, $newEntries) "INFO" $null "Badges"
+    return $true
+}
+
+function Get-ProfileLifetimeToggleCount($stats, [string]$profileName, [int64]$fallback = 0) {
+    if (-not $stats) { return [int64][Math]::Max(0, [int64]$fallback) }
+    $safeProfile = if ([string]::IsNullOrWhiteSpace($profileName)) { "Default" } else { $profileName }
+    $profileMap = Convert-ToHashtable $stats["ProfileLifetimeToggles"]
+    if ($profileMap.ContainsKey($safeProfile)) {
+        try { return [int64][Math]::Max(0, [int64]$profileMap[$safeProfile]) } catch { }
+    }
+    return [int64][Math]::Max(0, [int64]$fallback)
+}
+
+function Set-ProfileLifetimeToggleCount($stats, [string]$profileName, [int64]$count) {
+    if (-not $stats) { return }
+    $safeProfile = if ([string]::IsNullOrWhiteSpace($profileName)) { "Default" } else { $profileName }
+    $safeCount = [int64][Math]::Max(0, [int64]$count)
+    $profileMap = Convert-ToHashtable $stats["ProfileLifetimeToggles"]
+    $highWaterMap = Convert-ToHashtable $stats["ProfileLifetimeHighWater"]
+    $existingHigh = 0L
+    if ($highWaterMap.ContainsKey($safeProfile)) {
+        try { $existingHigh = [int64][Math]::Max(0, [int64]$highWaterMap[$safeProfile]) } catch { $existingHigh = 0L }
+    }
+    if ($safeCount -lt $existingHigh) { $safeCount = $existingHigh }
+    $profileMap[$safeProfile] = $safeCount
+    if ($safeCount -gt $existingHigh) { $highWaterMap[$safeProfile] = $safeCount }
+    $stats["ProfileLifetimeToggles"] = $profileMap
+    $stats["ProfileLifetimeHighWater"] = $highWaterMap
+}
+
+function Get-EffectiveBadgeToggleCount($stats, $settingsRef, [string]$profileName = "Default") {
+    $trackingMode = Get-BadgeTrackingMode $settingsRef
+    $globalCount = Get-LifetimeCountFromStatsObject $stats 0
+    if ($trackingMode -eq "Profile") {
+        return [int64][Math]::Max(0, (Get-ProfileLifetimeToggleCount $stats $profileName $globalCount))
+    }
+    return [int64][Math]::Max(0, $globalCount)
+}
+
+function Ensure-BadgeStats($stats, $settingsRef = $null) {
+    if (-not $stats) { $stats = @{} }
+    $trackingMode = Get-BadgeTrackingMode $settingsRef
+    $activeProfile = "Default"
+    try {
+        $activeProfile = [string](Get-SettingsPropertyValue $settingsRef "ActiveProfile" "Default")
+    } catch {
+        $activeProfile = "Default"
+    }
+    if ([string]::IsNullOrWhiteSpace($activeProfile)) { $activeProfile = "Default" }
+
+    $globalLifetime = Get-LifetimeCountFromStatsObject $stats 0
+    if (-not $stats.ContainsKey("ProfileLifetimeToggles")) { $stats["ProfileLifetimeToggles"] = @{} }
+    if (-not $stats.ContainsKey("ProfileLifetimeHighWater")) { $stats["ProfileLifetimeHighWater"] = @{} }
+    if (-not $stats.ContainsKey("BadgeUnlocked")) { $stats["BadgeUnlocked"] = @{} }
+    if (-not $stats.ContainsKey("BadgeHistory")) { $stats["BadgeHistory"] = @() }
+    if (-not $stats.ContainsKey("BadgePoints")) { $stats["BadgePoints"] = 0 }
+    if (-not $stats.ContainsKey("BadgeLevel")) { $stats["BadgeLevel"] = 1 }
+    if (-not $stats.ContainsKey("BadgeLevelProgressPct")) { $stats["BadgeLevelProgressPct"] = 0.0 }
+    if (-not $stats.ContainsKey("BadgeLastUnlockId")) { $stats["BadgeLastUnlockId"] = "" }
+    if (-not $stats.ContainsKey("BadgeLastUnlockAt")) { $stats["BadgeLastUnlockAt"] = $null }
+    if (-not $stats.ContainsKey("BadgeCurrentSeason")) { $stats["BadgeCurrentSeason"] = "" }
+    if (-not $stats.ContainsKey("BadgeCatalogVersion")) { $stats["BadgeCatalogVersion"] = 1 }
+    if (-not $stats.ContainsKey("BadgePointsHighWater")) { $stats["BadgePointsHighWater"] = 0 }
+
+    $profileMap = Convert-ToHashtable $stats["ProfileLifetimeToggles"]
+    $highWaterMap = Convert-ToHashtable $stats["ProfileLifetimeHighWater"]
+    if (-not $profileMap.ContainsKey($activeProfile)) {
+        $profileMap[$activeProfile] = $globalLifetime
+    }
+    foreach ($key in @($profileMap.Keys)) {
+        $value = 0L
+        try { $value = [int64][Math]::Max(0, [int64]$profileMap[$key]) } catch { $value = 0L }
+        $high = 0L
+        if ($highWaterMap.ContainsKey($key)) {
+            try { $high = [int64][Math]::Max(0, [int64]$highWaterMap[$key]) } catch { $high = 0L }
+        }
+        if ($value -lt $high) { $value = $high }
+        $profileMap[$key] = $value
+        if ($value -gt $high) { $highWaterMap[$key] = $value }
+    }
+    $stats["ProfileLifetimeToggles"] = $profileMap
+    $stats["ProfileLifetimeHighWater"] = $highWaterMap
+
+    $unlockedMap = Convert-ToHashtable $stats["BadgeUnlocked"]
+    $historyList = @()
+    foreach ($entry in @($stats["BadgeHistory"])) {
+        if (-not $entry) { continue }
+        $id = ""
+        $name = ""
+        $kind = "Unknown"
+        $rarity = "Common"
+        $tier = "Bronze"
+        $scope = "global"
+        $icon = "[C]"
+        $points = 0
+        $unlockedAt = (Get-Date).ToString("o")
+        $profile = ""
+        try {
+            $id = [string]$entry.Id
+            $name = [string]$entry.Name
+            if ($entry.PSObject.Properties.Match("Kind").Count -gt 0) { $kind = [string]$entry.Kind }
+            if ($entry.PSObject.Properties.Match("Rarity").Count -gt 0) { $rarity = [string]$entry.Rarity }
+            if ($entry.PSObject.Properties.Match("Tier").Count -gt 0) { $tier = [string]$entry.Tier }
+            if ($entry.PSObject.Properties.Match("Scope").Count -gt 0) { $scope = [string]$entry.Scope }
+            if ($entry.PSObject.Properties.Match("Icon").Count -gt 0) { $icon = [string]$entry.Icon }
+            if ($entry.PSObject.Properties.Match("Points").Count -gt 0) { $points = [int]$entry.Points }
+            if ($entry.PSObject.Properties.Match("UnlockedAt").Count -gt 0) { $unlockedAt = [string]$entry.UnlockedAt }
+            if ($entry.PSObject.Properties.Match("Profile").Count -gt 0) { $profile = [string]$entry.Profile }
+        } catch {
+        }
+        if ([string]::IsNullOrWhiteSpace($id)) { continue }
+        if ([string]::IsNullOrWhiteSpace($name)) { $name = $id }
+        if ([string]::IsNullOrWhiteSpace($scope)) { $scope = "global" }
+        if ([string]::IsNullOrWhiteSpace($icon)) { $icon = Get-BadgeRarityIcon $rarity }
+        if ($points -le 0) { $points = Get-BadgeRarityPoints $rarity $kind }
+        $normalized = [pscustomobject]@{
+            Id = $id
+            Name = $name
+            Kind = $kind
+            Rarity = $rarity
+            Tier = $tier
+            Scope = $scope
+            Icon = $icon
+            Points = $points
+            UnlockedAt = $unlockedAt
+            Profile = $profile
+        }
+        $historyList += $normalized
+        if (-not $unlockedMap.ContainsKey($id)) {
+            $unlockedMap[$id] = @{
+                Id = $id
+                Name = $name
+                Kind = $kind
+                Rarity = $rarity
+                Tier = $tier
+                Scope = $scope
+                Icon = $icon
+                Points = $points
+                UnlockedAt = $unlockedAt
+                Profile = $profile
+            }
+        }
+    }
+    if ($historyList.Count -gt 250) { $historyList = @($historyList | Select-Object -Last 250) }
+    $stats["BadgeHistory"] = $historyList
+    $stats["BadgeUnlocked"] = $unlockedMap
+    $stats["BadgeCurrentSeason"] = Get-BadgeSeasonName (Get-Date)
+
+    if ($trackingMode -eq "Global" -and $globalLifetime -gt 0 -and -not $profileMap.ContainsKey($activeProfile)) {
+        $profileMap[$activeProfile] = $globalLifetime
+        $stats["ProfileLifetimeToggles"] = $profileMap
+    }
+    return $stats
+}
+
+function Get-BadgeUnlockCandidates($stats, $settingsRef, [DateTime]$now = (Get-Date)) {
+    $activeProfile = [string](Get-SettingsPropertyValue $settingsRef "ActiveProfile" "Default")
+    if ([string]::IsNullOrWhiteSpace($activeProfile)) { $activeProfile = "Default" }
+    $trackingMode = Get-BadgeTrackingMode $settingsRef
+    $scopeKey = Get-BadgeScopeKey $trackingMode $activeProfile
+    $effectiveToggleCount = Get-EffectiveBadgeToggleCount $stats $settingsRef $activeProfile
+
+    $candidates = New-Object System.Collections.Generic.List[object]
+    foreach ($m in (Get-MilestoneDefinitions)) {
+        if ($effectiveToggleCount -ge [int64]$m.Value) {
+            [void]$candidates.Add([pscustomobject]@{
+                Id = Get-ScopedBadgeId ([string]$m.Id) $trackingMode $activeProfile
+                BaseId = [string]$m.Id
+                Name = [string]$m.Name
+                Kind = "Milestone"
+                Rarity = [string]$m.Rarity
+                Tier = [string]$m.Tier
+                Icon = [string]$m.Icon
+                Points = [int]$m.Points
+                Scope = $scopeKey
+                Profile = $activeProfile
+            })
+        }
+    }
+
+    $streaks = Get-ToggleStreaks $stats
+    $currentStreak = [int]$streaks.Current
+    $crashFreeDays = [int](Get-CrashFreeDays $stats $now)
+    $reliability = [double](Get-UptimeReliabilityPercent $stats)
+    $dailyCount = [int](Get-DailyToggleCount $stats $now)
+    $totalRunMinutes = 0.0
+    try { $totalRunMinutes = [double]$stats["TotalRunMinutes"] } catch { $totalRunMinutes = 0.0 }
+
+    foreach ($def in (Get-BonusBadgeDefinitions)) {
+        $unlock = $false
+        switch ([string]$def.Id) {
+            "bonus-streak-keeper" { $unlock = ($currentStreak -ge 7) }
+            "bonus-streak-master" { $unlock = ($currentStreak -ge 30) }
+            "bonus-crashfree-week" { $unlock = ($crashFreeDays -ge 7) }
+            "bonus-crashfree-month" { $unlock = ($crashFreeDays -ge 30) }
+            "bonus-reliable-ops" { $unlock = ($reliability -ge 98.0) }
+            "bonus-rock-solid" { $unlock = ($reliability -ge 99.9) }
+            "bonus-marathon" { $unlock = ($totalRunMinutes -ge 1440.0) }
+            "bonus-nosleep" { $unlock = ($totalRunMinutes -ge 43200.0) }
+            "bonus-million" { $unlock = ($effectiveToggleCount -ge 1000000) }
+        }
+        if ($unlock) {
+            [void]$candidates.Add([pscustomobject]@{
+                Id = Get-ScopedBadgeId ([string]$def.Id) $trackingMode $activeProfile
+                BaseId = [string]$def.Id
+                Name = [string]$def.Name
+                Kind = "Bonus"
+                Rarity = [string]$def.Rarity
+                Tier = [string]$def.Tier
+                Icon = [string]$def.Icon
+                Points = [int]$def.Points
+                Scope = $scopeKey
+                Profile = $activeProfile
+            })
+        }
+    }
+
+    $seasonDef = Get-SeasonalBadgeDefinition $now
+    if ($seasonDef -and $effectiveToggleCount -gt 0) {
+        [void]$candidates.Add([pscustomobject]@{
+            Id = Get-ScopedBadgeId ([string]$seasonDef.Id) $trackingMode $activeProfile
+            BaseId = [string]$seasonDef.Id
+            Name = [string]$seasonDef.Name
+            Kind = "Seasonal"
+            Rarity = [string]$seasonDef.Rarity
+            Tier = [string]$seasonDef.Tier
+            Icon = [string]$seasonDef.Icon
+            Points = [int]$seasonDef.Points
+            Scope = $scopeKey
+            Profile = $activeProfile
+        })
+    }
+
+    foreach ($def in (Get-ComboBadgeDefinitions)) {
+        $unlock = $false
+        switch ([string]$def.Id) {
+            "combo-precision-triple" { $unlock = ($currentStreak -ge 7 -and $dailyCount -ge 25 -and $reliability -ge 99.0) }
+            "combo-momentum-chain" { $unlock = ($currentStreak -ge 14 -and $dailyCount -ge 75) }
+            "combo-iron-marathon" { $unlock = ($currentStreak -ge 30 -and $totalRunMinutes -ge 10080.0) }
+        }
+        if ($unlock) {
+            [void]$candidates.Add([pscustomobject]@{
+                Id = Get-ScopedBadgeId ([string]$def.Id) $trackingMode $activeProfile
+                BaseId = [string]$def.Id
+                Name = [string]$def.Name
+                Kind = "Combo"
+                Rarity = [string]$def.Rarity
+                Tier = [string]$def.Tier
+                Icon = [string]$def.Icon
+                Points = [int]$def.Points
+                Scope = $scopeKey
+                Profile = $activeProfile
+            })
+        }
+    }
+
+    foreach ($def in (Get-ResilienceBadgeDefinitions)) {
+        $unlock = $false
+        switch ([string]$def.Id) {
+            "resilience-bounceback" { $unlock = ($crashFreeDays -ge 3) }
+            "resilience-hardened" { $unlock = ($crashFreeDays -ge 14 -and $reliability -ge 99.0) }
+            "resilience-unkillable" { $unlock = ($crashFreeDays -ge 60 -and $reliability -ge 99.9) }
+        }
+        if ($unlock) {
+            [void]$candidates.Add([pscustomobject]@{
+                Id = Get-ScopedBadgeId ([string]$def.Id) $trackingMode $activeProfile
+                BaseId = [string]$def.Id
+                Name = [string]$def.Name
+                Kind = "Resilience"
+                Rarity = [string]$def.Rarity
+                Tier = [string]$def.Tier
+                Icon = [string]$def.Icon
+                Points = [int]$def.Points
+                Scope = $scopeKey
+                Profile = $activeProfile
+            })
+        }
+    }
+
+    return @($candidates | Group-Object Id | ForEach-Object { $_.Group[0] })
+}
+
+function Update-BadgeProgress($stats, $settingsRef, [DateTime]$now = (Get-Date), [switch]$ShowToast) {
+    if (-not $stats) { return [pscustomobject]@{ NewUnlocks = @(); Stats = @{} } }
+    $stats = Ensure-BadgeStats $stats $settingsRef
+    $unlockedMap = Convert-ToHashtable $stats["BadgeUnlocked"]
+    $history = @($stats["BadgeHistory"])
+
+    $newUnlocks = New-Object System.Collections.Generic.List[object]
+    foreach ($candidate in @(Get-BadgeUnlockCandidates $stats $settingsRef $now)) {
+        if (-not $candidate) { continue }
+        $id = [string]$candidate.Id
+        if ([string]::IsNullOrWhiteSpace($id)) { continue }
+        if ($unlockedMap.ContainsKey($id)) { continue }
+        $stamp = $now.ToString("o")
+        $unlockedMap[$id] = @{
+            Id = $id
+            BaseId = [string]$candidate.BaseId
+            Name = [string]$candidate.Name
+            Kind = [string]$candidate.Kind
+            Rarity = [string]$candidate.Rarity
+            Tier = [string]$candidate.Tier
+            Icon = [string]$candidate.Icon
+            Points = [int]$candidate.Points
+            Scope = [string]$candidate.Scope
+            Profile = [string]$candidate.Profile
+            UnlockedAt = $stamp
+        }
+        $history += [pscustomobject]@{
+            Id = $id
+            Name = [string]$candidate.Name
+            Kind = [string]$candidate.Kind
+            Rarity = [string]$candidate.Rarity
+            Tier = [string]$candidate.Tier
+            Scope = [string]$candidate.Scope
+            Icon = [string]$candidate.Icon
+            Points = [int]$candidate.Points
+            UnlockedAt = $stamp
+            Profile = [string]$candidate.Profile
+        }
+        try {
+            Write-Log ("Badge unlocked: {0} [{1}] scope={2}" -f [string]$candidate.Name, [string]$candidate.Kind, [string]$candidate.Scope) "INFO" $null "Badges"
+        } catch {
+        }
+        [void]$newUnlocks.Add($candidate)
+    }
+
+    if ($history.Count -gt 300) {
+        $history = @($history | Select-Object -Last 300)
+    }
+
+    $totalPoints = 0
+    foreach ($entryObj in @($unlockedMap.Values)) {
+        $entry = Convert-ToHashtable $entryObj
+        $points = 0
+        if ($entry.ContainsKey("Points")) {
+            try { $points = [int]$entry["Points"] } catch { $points = 0 }
+        }
+        if ($points -le 0) {
+            $rarity = if ($entry.ContainsKey("Rarity")) { [string]$entry["Rarity"] } else { "Common" }
+            $kind = if ($entry.ContainsKey("Kind")) { [string]$entry["Kind"] } else { "Milestone" }
+            $points = Get-BadgeRarityPoints $rarity $kind
+        }
+        $totalPoints += [Math]::Max(0, $points)
+    }
+
+    $pointsHighWater = 0
+    try { $pointsHighWater = [int]$stats["BadgePointsHighWater"] } catch { $pointsHighWater = 0 }
+    if ($totalPoints -lt $pointsHighWater) {
+        $totalPoints = $pointsHighWater
+    } else {
+        $pointsHighWater = $totalPoints
+    }
+    $levelInfo = Get-BadgeLevelInfo $totalPoints
+
+    $stats["BadgeUnlocked"] = $unlockedMap
+    $stats["BadgeHistory"] = $history
+    $stats["BadgePoints"] = [int]$totalPoints
+    $stats["BadgePointsHighWater"] = [int]$pointsHighWater
+    $stats["BadgeLevel"] = [int]$levelInfo.Level
+    $stats["BadgeLevelProgressPct"] = [double]$levelInfo.ProgressPct
+    $stats["BadgeCurrentSeason"] = Get-BadgeSeasonName $now
+    $stats["BadgeCatalogVersion"] = 1
+
+    if ($newUnlocks.Count -gt 0) {
+        $last = $newUnlocks[$newUnlocks.Count - 1]
+        $stats["BadgeLastUnlockId"] = [string]$last.Id
+        $stats["BadgeLastUnlockAt"] = $now.ToString("o")
+    }
+
+    if ($ShowToast -and $newUnlocks.Count -gt 0) {
+        $showCount = [Math]::Min(2, $newUnlocks.Count)
+        for ($i = 0; $i -lt $showCount; $i++) {
+            $unlock = $newUnlocks[$i]
+            $toast = ("Badge unlocked: {0} {1} ({2})" -f [string]$unlock.Icon, [string]$unlock.Name, [string]$unlock.Kind)
+            try {
+                Show-ActionToast $toast "Badge Unlocked" -ForceBalloon
+            } catch {
+            }
+        }
+        if ($newUnlocks.Count -gt $showCount) {
+            $remaining = $newUnlocks.Count - $showCount
+            try { Show-ActionToast ("Badge streak: +{0} more unlocks" -f $remaining) "Badge Unlocked" -ForceBalloon } catch { }
+        }
+    }
+
+    $newUnlockArray = @()
+    try {
+        $newUnlockArray = @($newUnlocks.ToArray())
+    } catch {
+        $newUnlockArray = @($newUnlocks)
+    }
+    $resultObject = New-Object PSObject -Property ([ordered]@{
+        NewUnlocks = $newUnlockArray
+        Stats = $stats
+    })
+    return $resultObject
+}
+
+function Get-BadgeScopeUnlockedEntries($stats, $settingsRef, [string]$kindFilter = "") {
+    if (-not $stats) { return @() }
+    $activeProfile = [string](Get-SettingsPropertyValue $settingsRef "ActiveProfile" "Default")
+    if ([string]::IsNullOrWhiteSpace($activeProfile)) { $activeProfile = "Default" }
+    $trackingMode = Get-BadgeTrackingMode $settingsRef
+    $scopeKey = Get-BadgeScopeKey $trackingMode $activeProfile
+    $unlocked = @{}
+    try {
+        if ($stats -is [System.Collections.IDictionary] -and $stats.ContainsKey("BadgeUnlocked")) {
+            $unlocked = Convert-ToHashtable $stats["BadgeUnlocked"]
+        } elseif ($stats -and $stats.PSObject.Properties.Match("BadgeUnlocked").Count -gt 0) {
+            $unlocked = Convert-ToHashtable $stats.BadgeUnlocked
+        }
+    } catch {
+        $unlocked = @{}
+    }
+    $result = New-Object System.Collections.Generic.List[object]
+    $seenIds = @{}
+    foreach ($entryObj in @($unlocked.Values)) {
+        $entry = Convert-ToHashtable $entryObj
+        if (-not $entry -or @($entry.Keys).Count -eq 0) { continue }
+        $id = if ($entry.ContainsKey("Id")) { [string]$entry["Id"] } else { "" }
+        if ([string]::IsNullOrWhiteSpace($id)) { continue }
+        if ($seenIds.ContainsKey($id)) { continue }
+        $scope = if ($entry.ContainsKey("Scope")) { [string]$entry["Scope"] } else { "global" }
+        if ($scope -ne $scopeKey) { continue }
+        if (-not [string]::IsNullOrWhiteSpace($kindFilter)) {
+            $kind = if ($entry.ContainsKey("Kind")) { [string]$entry["Kind"] } else { "" }
+            if ($kind -ne $kindFilter) { continue }
+        }
+        $seenIds[$id] = $true
+        [void]$result.Add([pscustomobject]$entry)
+    }
+
+    # Legacy fallback: synthesize unlock entries from history when map is missing/partial.
+    if ($result.Count -eq 0) {
+        $history = @()
+        try {
+            if ($stats -is [System.Collections.IDictionary] -and $stats.ContainsKey("BadgeHistory")) {
+                $history = @($stats["BadgeHistory"])
+            } elseif ($stats -and $stats.PSObject.Properties.Match("BadgeHistory").Count -gt 0) {
+                $history = @($stats.BadgeHistory)
+            }
+        } catch {
+            $history = @()
+        }
+        foreach ($entryObj in $history) {
+            $entry = Convert-ToHashtable $entryObj
+            if (-not $entry -or @($entry.Keys).Count -eq 0) { continue }
+            $id = if ($entry.ContainsKey("Id")) { [string]$entry["Id"] } else { "" }
+            if ([string]::IsNullOrWhiteSpace($id)) { continue }
+            if ($seenIds.ContainsKey($id)) { continue }
+            $scope = if ($entry.ContainsKey("Scope")) { [string]$entry["Scope"] } else { "global" }
+            if ($scope -ne $scopeKey) { continue }
+            if (-not [string]::IsNullOrWhiteSpace($kindFilter)) {
+                $kind = if ($entry.ContainsKey("Kind")) { [string]$entry["Kind"] } else { "" }
+                if ($kind -ne $kindFilter) { continue }
+            }
+            $seenIds[$id] = $true
+            [void]$result.Add([pscustomobject]$entry)
+        }
+    }
+
+    # If milestone entries are still missing, derive from effective lifetime toggles.
+    if (($result.Count -eq 0) -and ([string]::IsNullOrWhiteSpace($kindFilter) -or $kindFilter -eq "Milestone")) {
+        $effectiveToggles = 0L
+        try { $effectiveToggles = [int64](Get-EffectiveBadgeToggleCount $stats $settingsRef $activeProfile) } catch { $effectiveToggles = 0L }
+        if ($effectiveToggles -gt 0) {
+            foreach ($def in @(Get-MilestoneDefinitions)) {
+                $value = 0L
+                try { $value = [int64]$def.Value } catch { $value = 0L }
+                if ($value -le 0 -or $effectiveToggles -lt $value) { continue }
+                $id = Get-ScopedBadgeId ([string]$def.Id) $trackingMode $activeProfile
+                if ([string]::IsNullOrWhiteSpace($id) -or $seenIds.ContainsKey($id)) { continue }
+                $seenIds[$id] = $true
+                [void]$result.Add([pscustomobject]@{
+                    Id = $id
+                    BaseId = [string]$def.Id
+                    Name = [string]$def.Name
+                    Kind = "Milestone"
+                    Rarity = [string]$def.Rarity
+                    Tier = [string]$def.Tier
+                    Icon = [string]$def.Icon
+                    Points = [int]$def.Points
+                    Scope = $scopeKey
+                    Profile = $activeProfile
+                })
+            }
+        }
+    }
+
+    try {
+        return @($result.ToArray())
+    } catch {
+        $fallback = New-Object System.Collections.ArrayList
+        foreach ($item in $result) { [void]$fallback.Add($item) }
+        return @($fallback)
+    }
+}
+
+function Get-BadgeSummary($stats, $settingsRef, [DateTime]$now = (Get-Date)) {
+    try {
+        $stats = Ensure-BadgeStats $stats $settingsRef
+        try {
+            $updateResult = Update-BadgeProgress $stats $settingsRef $now
+            if ($updateResult -and $updateResult.PSObject.Properties.Match("Stats").Count -gt 0 -and $updateResult.Stats) {
+                $stats = Convert-ToHashtable $updateResult.Stats
+            }
+        } catch {
+        }
+        $activeProfile = [string](Get-SettingsPropertyValue $settingsRef "ActiveProfile" "Default")
+        if ([string]::IsNullOrWhiteSpace($activeProfile)) { $activeProfile = "Default" }
+        $trackingMode = Get-BadgeTrackingMode $settingsRef
+        $effectiveToggles = Get-EffectiveBadgeToggleCount $stats $settingsRef $activeProfile
+        $milestoneInfo = Get-MilestoneInfo $effectiveToggles
+        $scopeEntries = @(Get-BadgeScopeUnlockedEntries $stats $settingsRef "")
+        $scopeEntries = @($scopeEntries | Group-Object Id | ForEach-Object { $_.Group[0] })
+        $catalogTotal = @(Get-BadgeCatalogDefinitions).Count
+        $catalogUnlocked = $scopeEntries.Count
+        $milestoneUnlockedByProgress = 0
+        foreach ($def in @(Get-MilestoneDefinitions)) {
+            try {
+                if ([int64]$effectiveToggles -ge [int64]$def.Value) { $milestoneUnlockedByProgress++ }
+            } catch {
+            }
+        }
+        if ($catalogUnlocked -lt $milestoneUnlockedByProgress) {
+            $catalogUnlocked = $milestoneUnlockedByProgress
+        }
+        $catalogLocked = [Math]::Max(0, ($catalogTotal - $catalogUnlocked))
+
+        $currentBadgeText = if ([int64]$milestoneInfo.CurrentValue -gt 0) {
+            [string]$milestoneInfo.CurrentName
+        } else {
+            "None yet"
+        }
+        $nextBadgeText = if ($milestoneInfo.IsMax) {
+            "MAX"
+        } else {
+            ("{0} ({1:N0}) [{2}] - {3:N0} left" -f [string]$milestoneInfo.NextName, [int64]$milestoneInfo.NextValue, [string]$milestoneInfo.NextTier, [int64]$milestoneInfo.LeftToNext)
+        }
+        $milestoneText = Get-MilestoneStatus ([int]$effectiveToggles)
+        $milestonePctText = if ($milestoneInfo.IsMax) { "100.0%" } else { ("{0:N1}%" -f [double]$milestoneInfo.ProgressToNextPct) }
+
+        $streaks = Get-ToggleStreaks $stats
+        $currentStreak = [int]$streaks.Current
+        $crashFreeDays = [int](Get-CrashFreeDays $stats $now)
+        $reliabilityPct = [double](Get-UptimeReliabilityPercent $stats)
+        $totalRunMinutes = 0.0
+        try { $totalRunMinutes = [double]$stats["TotalRunMinutes"] } catch { $totalRunMinutes = 0.0 }
+        $bonusBadgeText = Get-BonusBadgeLabel $stats $currentStreak $reliabilityPct $crashFreeDays $totalRunMinutes $effectiveToggles
+
+        $seasonDef = Get-SeasonalBadgeDefinition $now
+        $seasonalText = if ($seasonDef) { ("{0} {1}" -f [string]$seasonDef.Icon, [string]$seasonDef.Name) } else { "N/A" }
+        $comboEntries = @(Get-BadgeScopeUnlockedEntries $stats $settingsRef "Combo")
+        $resilienceEntries = @(Get-BadgeScopeUnlockedEntries $stats $settingsRef "Resilience")
+        $comboText = if ($comboEntries.Count -gt 0) { [string]$comboEntries[-1].Name } else { "None yet" }
+        $resilienceText = if ($resilienceEntries.Count -gt 0) { [string]$resilienceEntries[-1].Name } else { "None yet" }
+
+        $history = @($stats["BadgeHistory"])
+        $recent = if ($history.Count -gt 0) { $history[-1] } else { $null }
+        $recentUnlockText = "None"
+        if ($recent) {
+            $recentTime = ""
+            try { $recentTime = Format-LocalTime ([DateTime]::Parse([string]$recent.UnlockedAt)) } catch { $recentTime = [string]$recent.UnlockedAt }
+            $recentUnlockText = ("{0} ({1}) at {2}" -f [string]$recent.Name, [string]$recent.Kind, $recentTime)
+        }
+
+        $points = 0
+        $level = 1
+        $levelPct = 0.0
+        try { $points = [int]$stats["BadgePoints"] } catch { $points = 0 }
+        try { $level = [int]$stats["BadgeLevel"] } catch { $level = 1 }
+        try { $levelPct = [double]$stats["BadgeLevelProgressPct"] } catch { $levelPct = 0.0 }
+        $levelInfo = Get-BadgeLevelInfo $points
+
+        return [pscustomobject]@{
+            TrackingMode = $trackingMode
+            EffectiveToggleCount = [int64]$effectiveToggles
+            CurrentBadgeText = $currentBadgeText
+            CurrentBadgeRarity = [string]$milestoneInfo.CurrentRarity
+            NextBadgeText = $nextBadgeText
+            MilestoneText = $milestoneText
+            MilestonePctText = $milestonePctText
+            BonusBadgeText = $bonusBadgeText
+            SeasonalBadgeText = $seasonalText
+            ComboBadgeText = $comboText
+            ResilienceBadgeText = $resilienceText
+            CatalogText = ("{0}/{1} unlocked ({2} locked)" -f $catalogUnlocked, $catalogTotal, $catalogLocked)
+            BadgePoints = $points
+            BadgeLevel = $level
+            BadgeLevelProgressPct = [double]$levelPct
+            BadgeLevelText = ("Lvl {0} ({1:N0} pts, {2:N1}% to next)" -f $level, $points, $levelPct)
+            NextLevelAt = [int]$levelInfo.NextLevelAt
+            RecentUnlockText = $recentUnlockText
+        }
+    } catch {
+        $summaryError = if ($_.Exception) { [string]$_.Exception.Message } else { "Unknown error" }
+        $summaryErrorType = "System.Exception"
+        try {
+            if ($_.Exception -and $_.Exception.GetType()) { $summaryErrorType = [string]$_.Exception.GetType().FullName }
+        } catch {
+            $summaryErrorType = "System.Exception"
+        }
+        $summaryErrorPos = ""
+        try {
+            if ($_.InvocationInfo -and $_.InvocationInfo.PositionMessage) {
+                $summaryErrorPos = [string](($_.InvocationInfo.PositionMessage -split "`r?`n")[0])
+            }
+        } catch {
+            $summaryErrorPos = ""
+        }
+        if (-not [string]::IsNullOrWhiteSpace($summaryErrorPos)) {
+            $summaryError = ("{0}: {1} ({2})" -f $summaryErrorType, $summaryError, $summaryErrorPos)
+        } else {
+            $summaryError = ("{0}: {1}" -f $summaryErrorType, $summaryError)
+        }
+        try {
+            Write-LogThrottled "BadgeSummary-SafeFallback" ("Badge summary generation failed; using safe summary fallback: {0}" -f $summaryError) "WARN" 60
+        } catch {
+        }
+
+        $safeStats = Convert-ToHashtable $stats
+        $trackingMode = "Global"
+        try { $trackingMode = Get-BadgeTrackingMode $settingsRef } catch { $trackingMode = "Global" }
+        $activeProfile = "Default"
+        try { $activeProfile = [string](Get-SettingsPropertyValue $settingsRef "ActiveProfile" "Default") } catch { $activeProfile = "Default" }
+        if ([string]::IsNullOrWhiteSpace($activeProfile)) { $activeProfile = "Default" }
+
+        $effectiveToggles = 0L
+        try {
+            $effectiveToggles = [int64](Get-EffectiveBadgeToggleCount $safeStats $settingsRef $activeProfile)
+        } catch {
+            try { $effectiveToggles = [int64](Get-LifetimeCountFromStatsObject $safeStats 0) } catch { $effectiveToggles = 0L }
+        }
+        if ($effectiveToggles -lt 0) { $effectiveToggles = 0L }
+
+        $currentBadgeText = "None yet"
+        $nextBadgeText = ("Rookie (100) [Bronze] - {0:N0} left" -f [Math]::Max(0L, (100L - $effectiveToggles)))
+        $milestonePctText = "0.0%"
+        $currentRarity = "Common"
+        $currentTier = "Bronze"
+        $milestoneText = ("Next: Rookie (100) - {0:N0} left" -f [Math]::Max(0L, (100L - $effectiveToggles)))
+        try {
+            $milestoneInfo = Get-MilestoneInfo $effectiveToggles
+            if ($milestoneInfo) {
+                $currentRarity = [string]$milestoneInfo.CurrentRarity
+                $currentTier = [string]$milestoneInfo.CurrentTier
+                $currentBadgeText = if ([int64]$milestoneInfo.CurrentValue -gt 0) {
+                    [string]$milestoneInfo.CurrentName
+                } else {
+                    "None yet"
+                }
+                $nextBadgeText = if ($milestoneInfo.IsMax) {
+                    "MAX"
+                } else {
+                    ("{0} ({1:N0}) [{2}] - {3:N0} left" -f [string]$milestoneInfo.NextName, [int64]$milestoneInfo.NextValue, [string]$milestoneInfo.NextTier, [int64]$milestoneInfo.LeftToNext)
+                }
+                $milestonePctText = if ($milestoneInfo.IsMax) { "100.0%" } else { ("{0:N1}%" -f [double]$milestoneInfo.ProgressToNextPct) }
+                $milestoneText = if ($milestoneInfo.IsMax) {
+                    "Max milestone reached"
+                } else {
+                    ("Next: {0} ({1:N0}) - {2:N0} left" -f [string]$milestoneInfo.NextName, [int64]$milestoneInfo.NextValue, [int64]$milestoneInfo.LeftToNext)
+                }
+            }
+        } catch {
+        }
+
+        $scopeEntries = @()
+        try { $scopeEntries = @(Get-BadgeScopeUnlockedEntries $safeStats $settingsRef "") } catch { $scopeEntries = @() }
+        $catalogUnlocked = @($scopeEntries).Count
+        $catalogTotal = $catalogUnlocked
+        try { $catalogTotal = @(Get-BadgeCatalogDefinitions).Count } catch { }
+        if ($catalogTotal -lt $catalogUnlocked) { $catalogTotal = $catalogUnlocked }
+        $catalogLocked = [Math]::Max(0, ($catalogTotal - $catalogUnlocked))
+
+        $byKindNames = {
+            param([object[]]$entries, [string]$kind, [string]$noneText = "None yet")
+            $names = @()
+            foreach ($entryObj in @($entries)) {
+                $entry = Convert-ToHashtable $entryObj
+                $entryKind = if ($entry.ContainsKey("Kind")) { [string]$entry["Kind"] } else { "" }
+                if ($entryKind -ne $kind) { continue }
+                $entryName = if ($entry.ContainsKey("Name")) { [string]$entry["Name"] } else { "" }
+                if (-not [string]::IsNullOrWhiteSpace($entryName)) { $names += $entryName }
+            }
+            $names = @($names | Select-Object -Unique)
+            if ($names.Count -eq 0) { return $noneText }
+            return ($names -join ", ")
+        }
+        $bonusBadgeText = & $byKindNames @($scopeEntries) "Bonus" "None yet"
+        $seasonalText = & $byKindNames @($scopeEntries) "Seasonal" "N/A"
+        $comboText = & $byKindNames @($scopeEntries) "Combo" "None yet"
+        $resilienceText = & $byKindNames @($scopeEntries) "Resilience" "None yet"
+
+        $recentUnlockText = "None"
+        try {
+            $history = @($safeStats["BadgeHistory"])
+            if ($history.Count -gt 0) {
+                $recent = $history[-1]
+                if ($recent) {
+                    $recentName = [string]$recent.Name
+                    $recentKind = [string]$recent.Kind
+                    $recentAt = [string]$recent.UnlockedAt
+                    $recentUnlockText = if ([string]::IsNullOrWhiteSpace($recentAt)) {
+                        ("{0} ({1})" -f $recentName, $recentKind)
+                    } else {
+                        ("{0} ({1}) at {2}" -f $recentName, $recentKind, $recentAt)
+                    }
+                }
+            }
+        } catch {
+        }
+
+        $points = 0
+        try { $points = [int]$safeStats["BadgePoints"] } catch { $points = 0 }
+        if ($points -lt 0) { $points = 0 }
+        $levelInfo = $null
+        try { $levelInfo = Get-BadgeLevelInfo $points } catch { $levelInfo = $null }
+        $level = 1
+        $levelPct = 0.0
+        $nextLevelAt = 100
+        if ($levelInfo) {
+            try { $level = [int]$levelInfo.Level } catch { $level = 1 }
+            try { $levelPct = [double]$levelInfo.ProgressPct } catch { $levelPct = 0.0 }
+            try { $nextLevelAt = [int]$levelInfo.NextLevelAt } catch { $nextLevelAt = 100 }
+        }
+
+        return [pscustomobject]@{
+            TrackingMode = $trackingMode
+            EffectiveToggleCount = [int64]$effectiveToggles
+            CurrentBadgeText = $currentBadgeText
+            CurrentBadgeRarity = $currentRarity
+            NextBadgeText = $nextBadgeText
+            MilestoneText = $milestoneText
+            MilestonePctText = $milestonePctText
+            BonusBadgeText = $bonusBadgeText
+            SeasonalBadgeText = $seasonalText
+            ComboBadgeText = $comboText
+            ResilienceBadgeText = $resilienceText
+            CatalogText = ("{0}/{1} unlocked ({2} locked)" -f $catalogUnlocked, $catalogTotal, $catalogLocked)
+            BadgePoints = [int]$points
+            BadgeLevel = [int]$level
+            BadgeLevelProgressPct = [double]$levelPct
+            BadgeLevelText = ("Lvl {0} ({1:N0} pts, {2:N1}% to next)" -f $level, $points, $levelPct)
+            NextLevelAt = [int]$nextLevelAt
+            RecentUnlockText = $recentUnlockText
+        }
+    }
+}
+
+function Export-BadgeShareCard($settingsRef = $null, [switch]$OpenFolder) {
+    $targetSettings = if ($settingsRef) { $settingsRef } else { $settings }
+    $stats = Ensure-FunStats $targetSettings
+    $summary = Get-BadgeSummary $stats $targetSettings (Get-Date)
+    Ensure-Directory $script:BadgeShareCardsDir "BadgeCards" | Out-Null
+    $stamp = (Get-Date).ToString("yyyyMMdd-HHmmss")
+    $path = Join-Path $script:BadgeShareCardsDir ("BadgeCard-{0}.txt" -f $stamp)
+    $lines = @()
+    $lines += "Teams Always Green - Badge Card"
+    $lines += ("Generated: {0}" -f (Format-LocalTime (Get-Date)))
+    $lines += ("Mode: {0}" -f [string]$summary.TrackingMode)
+    $lines += ("Effective Toggles: {0:N0}" -f [int64]$summary.EffectiveToggleCount)
+    $lines += ("Current Badge: {0}" -f [string]$summary.CurrentBadgeText)
+    $lines += ("Next Badge: {0}" -f [string]$summary.NextBadgeText)
+    $lines += ("Points/Level: {0}" -f [string]$summary.BadgeLevelText)
+    $lines += ("Catalog: {0}" -f [string]$summary.CatalogText)
+    $lines += ("Seasonal: {0}" -f [string]$summary.SeasonalBadgeText)
+    $lines += ("Combo: {0}" -f [string]$summary.ComboBadgeText)
+    $lines += ("Resilience: {0}" -f [string]$summary.ResilienceBadgeText)
+    $lines += ("Bonus: {0}" -f [string]$summary.BonusBadgeText)
+    $lines += ("Recent Unlock: {0}" -f [string]$summary.RecentUnlockText)
+    $content = ($lines -join "`r`n")
+    Write-AtomicTextFile -Path $path -Content $content -Encoding UTF8
+    if ($OpenFolder) {
+        try { Start-Process -FilePath explorer.exe -ArgumentList ("`"{0}`"" -f $script:BadgeShareCardsDir) | Out-Null } catch { }
+    }
+    return $path
+}
+
 function Ensure-FunStats($settings) {
     if (-not $settings) { return @{} }
     $stats = Convert-ToHashtable (Get-SettingsPropertyValue $settings "Stats")
@@ -6672,6 +8679,10 @@ function Ensure-FunStats($settings) {
     if (-not $stats.ContainsKey("TotalRunMinutes")) { $stats["TotalRunMinutes"] = 0 }
     if (-not $stats.ContainsKey("LongestPauseMinutes")) { $stats["LongestPauseMinutes"] = 0 }
     if (-not $stats.ContainsKey("LongestPauseAt")) { $stats["LongestPauseAt"] = $null }
+    if (-not $stats.ContainsKey("CrashFreeSince")) { $stats["CrashFreeSince"] = [string]$stats["InstallDate"] }
+    if (-not $stats.ContainsKey("ReliableMinutes")) { $stats["ReliableMinutes"] = 0 }
+    if (-not $stats.ContainsKey("DegradedMinutes")) { $stats["DegradedMinutes"] = 0 }
+    if (-not $stats.ContainsKey("LifetimeToggleCount")) { $stats["LifetimeToggleCount"] = 0 }
 
     $daily = Convert-ToHashtable $stats["DailyToggles"]
     if (-not $daily) { $daily = @{} }
@@ -6681,8 +8692,120 @@ function Ensure-FunStats($settings) {
     if (-not $hourly) { $hourly = @{} }
     $stats["HourlyToggles"] = $hourly
 
+    $profileUsage = Convert-ToHashtable $stats["ProfileUsageMinutes"]
+    if (-not $profileUsage) { $profileUsage = @{} }
+    $stats["ProfileUsageMinutes"] = $profileUsage
+
+    # One-way migration: seed lifetime stat from ToggleCount for existing installs.
+    $seedLifetime = 0
+    try {
+        $rawSeed = Get-SettingsPropertyValue $settings "ToggleCount" 0
+        $parsedSeed = 0
+        if ($rawSeed -is [int]) {
+            $seedLifetime = [int]$rawSeed
+        } elseif ([int]::TryParse([string]$rawSeed, [ref]$parsedSeed)) {
+            $seedLifetime = [int]$parsedSeed
+        }
+    } catch {
+        $seedLifetime = 0
+    }
+    if ($seedLifetime -lt 0) { $seedLifetime = 0 }
+    $currentLifetime = 0
+    try { $currentLifetime = [int]$stats["LifetimeToggleCount"] } catch { $currentLifetime = 0 }
+    if ($currentLifetime -lt 0) { $currentLifetime = 0 }
+    $stateLifetime = 0
+    try {
+        if ($script:AppState -and $script:AppState.PSObject.Properties.Name -contains "Stats") {
+            $stateLifetime = [int](Get-LifetimeCountFromStatsObject $script:AppState.Stats 0)
+        }
+    } catch {
+        $stateLifetime = 0
+    }
+    $persistentLifetime = 0
+    try {
+        $persistentLifetime = [int](Get-PersistentLifetimeToggleCount)
+    } catch {
+        $persistentLifetime = 0
+    }
+    $finalLifetime = [int][Math]::Max([Math]::Max($currentLifetime, $seedLifetime), [Math]::Max($stateLifetime, $persistentLifetime))
+    if ($finalLifetime -lt 0) { $finalLifetime = 0 }
+    if ($finalLifetime -gt $currentLifetime) {
+        Write-LogThrottled "Lifetime-Recovered" ("Recovered lifetime toggles to {0:N0} (current={1:N0}, seed={2:N0}, state={3:N0}, persistent={4:N0})." -f $finalLifetime, $currentLifetime, $seedLifetime, $stateLifetime, $persistentLifetime) "INFO" 60
+    }
+    $stats["LifetimeToggleCount"] = $finalLifetime
+    Save-PersistentLifetimeToggleCount ([int64]$finalLifetime)
+    $activeProfile = [string](Get-SettingsPropertyValue $settings "ActiveProfile" "Default")
+    if ([string]::IsNullOrWhiteSpace($activeProfile)) { $activeProfile = "Default" }
+    Set-ProfileLifetimeToggleCount $stats $activeProfile ([int64]$finalLifetime)
+    $stats = Ensure-BadgeStats $stats $settings
+    $badgeInit = Update-BadgeProgress $stats $settings (Get-Date)
+    if ($badgeInit -and $badgeInit.PSObject.Properties.Name -contains "Stats") {
+        $stats = Convert-ToHashtable $badgeInit.Stats
+    }
+
     Set-SettingsPropertyValue $settings "Stats" $stats
     return $stats
+}
+
+function Mark-FunStatsCrashEvent {
+    if (-not $settings) { return }
+    $stats = Ensure-FunStats $settings
+    $stats["CrashFreeSince"] = (Get-Date).ToString("o")
+    $badgeUpdate = Update-BadgeProgress $stats $settings (Get-Date)
+    if ($badgeUpdate -and $badgeUpdate.PSObject.Properties.Name -contains "Stats") {
+        $stats = Convert-ToHashtable $badgeUpdate.Stats
+    }
+    Set-SettingsPropertyValue $settings "Stats" $stats
+    $script:FunStatsCache = $null
+}
+
+function Update-FunStatsRuntimeProgress([DateTime]$now = (Get-Date)) {
+    if (-not $settings) { return }
+    if (-not $script:StatsLastSampleAt) {
+        $script:StatsLastSampleAt = $now
+        $script:StatsLastSampleProfile = [string](Get-SettingsPropertyValue $settings "ActiveProfile" "Default")
+        return
+    }
+    $elapsedMinutes = ($now - $script:StatsLastSampleAt).TotalMinutes
+    if ($elapsedMinutes -le 0) {
+        $script:StatsLastSampleAt = $now
+        return
+    }
+
+    # Bound extreme samples (sleep/resume clock jumps) to avoid distorting long-term stats.
+    if ($elapsedMinutes -gt 15) { $elapsedMinutes = 15 }
+
+    $stats = Ensure-FunStats $settings
+    $profileUsage = Convert-ToHashtable $stats["ProfileUsageMinutes"]
+    $profileName = [string]$script:StatsLastSampleProfile
+    if ([string]::IsNullOrWhiteSpace($profileName)) {
+        $profileName = [string](Get-SettingsPropertyValue $settings "ActiveProfile" "Default")
+    }
+    if ([string]::IsNullOrWhiteSpace($profileName)) { $profileName = "Default" }
+    $currentProfileMinutes = 0.0
+    if ($profileUsage.ContainsKey($profileName)) {
+        try { $currentProfileMinutes = [double]$profileUsage[$profileName] } catch { $currentProfileMinutes = 0.0 }
+    }
+    $profileUsage[$profileName] = [Math]::Round(($currentProfileMinutes + $elapsedMinutes), 3)
+    $stats["ProfileUsageMinutes"] = $profileUsage
+
+    $reliable = 0.0
+    $degraded = 0.0
+    try { if ($stats.ContainsKey("ReliableMinutes")) { $reliable = [double]$stats["ReliableMinutes"] } } catch { $reliable = 0.0 }
+    try { if ($stats.ContainsKey("DegradedMinutes")) { $degraded = [double]$stats["DegradedMinutes"] } } catch { $degraded = 0.0 }
+    $isReliableSlice = (-not $script:safeModeActive -and -not $script:isPaused)
+    if ($isReliableSlice) {
+        $reliable += $elapsedMinutes
+    } else {
+        $degraded += $elapsedMinutes
+    }
+    $stats["ReliableMinutes"] = [Math]::Round($reliable, 3)
+    $stats["DegradedMinutes"] = [Math]::Round($degraded, 3)
+    Set-SettingsPropertyValue $settings "Stats" $stats
+
+    $script:StatsLastSampleAt = $now
+    $script:StatsLastSampleProfile = [string](Get-SettingsPropertyValue $settings "ActiveProfile" "Default")
+    $script:FunStatsCache = $null
 }
 
 function Update-FunStatsOnToggle([DateTime]$when) {
@@ -6702,7 +8825,39 @@ function Update-FunStatsOnToggle([DateTime]$when) {
     $hourly[$hourKey] = $currentHour + 1
     $stats["HourlyToggles"] = $hourly
 
+    $lifetime = 0
+    try { $lifetime = [int]$stats["LifetimeToggleCount"] } catch { $lifetime = 0 }
+    if ($lifetime -lt 0) { $lifetime = 0 }
+    $stats["LifetimeToggleCount"] = ($lifetime + 1)
+    Save-PersistentLifetimeToggleCount ([int64]$stats["LifetimeToggleCount"])
+    $activeProfile = [string](Get-SettingsPropertyValue $settings "ActiveProfile" "Default")
+    if ([string]::IsNullOrWhiteSpace($activeProfile)) { $activeProfile = "Default" }
+    $profileLifetime = Get-ProfileLifetimeToggleCount $stats $activeProfile ([int64]$stats["LifetimeToggleCount"])
+    Set-ProfileLifetimeToggleCount $stats $activeProfile ([int64]$profileLifetime + 1)
+    $badgeUpdate = Update-BadgeProgress $stats $settings $when -ShowToast
+    if ($badgeUpdate -and $badgeUpdate.PSObject.Properties.Name -contains "Stats") {
+        $stats = Convert-ToHashtable $badgeUpdate.Stats
+    }
+
     Set-SettingsPropertyValue $settings "Stats" $stats
+    $script:FunStatsCache = $null
+}
+
+function Get-LifetimeToggleCount($stats, [int]$fallback = 0) {
+    $safeFallback = [Math]::Max(0, [int]$fallback)
+    if (-not $stats) { return $safeFallback }
+    try {
+        if ($stats -is [System.Collections.IDictionary] -and $stats.ContainsKey("LifetimeToggleCount")) {
+            $count = [int]$stats["LifetimeToggleCount"]
+            return [Math]::Max(0, $count)
+        }
+        if ($stats.PSObject.Properties.Match("LifetimeToggleCount").Count -gt 0) {
+            $count = [int]$stats.LifetimeToggleCount
+            return [Math]::Max(0, $count)
+        }
+    } catch {
+    }
+    return $safeFallback
 }
 
 function Update-FunStatsOnPause([int]$minutes) {
@@ -6714,17 +8869,26 @@ function Update-FunStatsOnPause([int]$minutes) {
         $stats["LongestPauseMinutes"] = $minutes
         $stats["LongestPauseAt"] = (Get-Date).ToString("o")
         Set-SettingsPropertyValue $settings "Stats" $stats
+        $script:FunStatsCache = $null
     }
 }
 
 function Update-FunStatsOnShutdown([double]$uptimeMinutes) {
     if ($script:StatsShutdownUpdated) { return }
     if ($uptimeMinutes -le 0) { return }
+    Update-FunStatsRuntimeProgress (Get-Date)
     $stats = Ensure-FunStats $settings
     $total = 0.0
     if ($stats.ContainsKey("TotalRunMinutes")) { $total = [double]$stats["TotalRunMinutes"] }
     $stats["TotalRunMinutes"] = [Math]::Round(($total + $uptimeMinutes), 1)
+    $shutdownLifetime = Get-LifetimeCountFromStatsObject $stats 0
+    Save-PersistentLifetimeToggleCount ([int64]$shutdownLifetime)
+    $badgeUpdate = Update-BadgeProgress $stats $settings (Get-Date)
+    if ($badgeUpdate -and $badgeUpdate.PSObject.Properties.Name -contains "Stats") {
+        $stats = Convert-ToHashtable $badgeUpdate.Stats
+    }
     Set-SettingsPropertyValue $settings "Stats" $stats
+    $script:FunStatsCache = $null
     Sync-StateFromSettings $settings
     Apply-StateToSettings $settings $script:AppState
     Save-StateImmediate $script:AppState
@@ -6800,6 +8964,363 @@ function Get-ToggleStreaks($stats) {
     return $result
 }
 
+function Get-CrashFreeDays($stats, [DateTime]$now = (Get-Date)) {
+    if (-not $stats) { return 0 }
+    $sinceText = $null
+    if ($stats -is [System.Collections.IDictionary] -and $stats.ContainsKey("CrashFreeSince")) {
+        $sinceText = [string]$stats["CrashFreeSince"]
+    } elseif ($stats -and $stats.PSObject.Properties.Match("CrashFreeSince").Count -gt 0) {
+        $sinceText = [string]$stats.CrashFreeSince
+    }
+    if ([string]::IsNullOrWhiteSpace($sinceText)) { return 0 }
+    try {
+        $since = [DateTime]::Parse($sinceText)
+        return [Math]::Max(0, [int][Math]::Floor(($now - $since).TotalDays))
+    } catch {
+        return 0
+    }
+}
+
+function Get-ProfileUsageSplitLabel($stats, [string]$activeProfile = "Default") {
+    if (-not $stats) { return "N/A" }
+    $profileUsage = @{}
+    if ($stats -is [System.Collections.IDictionary] -and $stats.ContainsKey("ProfileUsageMinutes")) {
+        $profileUsage = Convert-ToHashtable $stats["ProfileUsageMinutes"]
+    } elseif ($stats -and $stats.PSObject.Properties.Match("ProfileUsageMinutes").Count -gt 0) {
+        $profileUsage = Convert-ToHashtable $stats.ProfileUsageMinutes
+    }
+    if (-not $profileUsage -or @($profileUsage.Keys).Count -eq 0) {
+        if ([string]::IsNullOrWhiteSpace($activeProfile)) { $activeProfile = "Default" }
+        return ("{0} 100%" -f $activeProfile)
+    }
+    $totals = New-Object System.Collections.Generic.List[object]
+    $totalMinutes = 0.0
+    foreach ($key in @($profileUsage.Keys)) {
+        $minutes = 0.0
+        try { $minutes = [double]$profileUsage[$key] } catch { $minutes = 0.0 }
+        if ($minutes -lt 0) { $minutes = 0.0 }
+        $totalMinutes += $minutes
+        [void]$totals.Add([pscustomobject]@{ Name = [string]$key; Minutes = $minutes })
+    }
+    if ($totalMinutes -le 0) { return "N/A" }
+    $top = @($totals | Sort-Object Minutes -Descending | Select-Object -First 3)
+    $parts = @()
+    foreach ($entry in $top) {
+        $pct = [int][Math]::Round(($entry.Minutes / $totalMinutes) * 100.0)
+        $parts += ("{0} {1}%" -f $entry.Name, $pct)
+    }
+    return ($parts -join " | ")
+}
+
+function Get-UptimeReliabilityPercent($stats) {
+    if (-not $stats) { return 100.0 }
+    $reliable = 0.0
+    $degraded = 0.0
+    try {
+        if ($stats -is [System.Collections.IDictionary]) {
+            if ($stats.ContainsKey("ReliableMinutes")) { $reliable = [double]$stats["ReliableMinutes"] }
+            if ($stats.ContainsKey("DegradedMinutes")) { $degraded = [double]$stats["DegradedMinutes"] }
+        } else {
+            if ($stats.PSObject.Properties.Match("ReliableMinutes").Count -gt 0) { $reliable = [double]$stats.ReliableMinutes }
+            if ($stats.PSObject.Properties.Match("DegradedMinutes").Count -gt 0) { $degraded = [double]$stats.DegradedMinutes }
+        }
+    } catch {
+        $reliable = 0.0
+        $degraded = 0.0
+    }
+    $total = $reliable + $degraded
+    if ($total -le 0) { return 100.0 }
+    return [Math]::Round((($reliable / $total) * 100.0), 1)
+}
+
+function Get-EstimatedTimeSavedMinutes([int]$toggleCount) {
+    $safeToggles = [Math]::Max(0, [int]$toggleCount)
+    $secondsPerToggleSaved = 2.0
+    return [Math]::Round((($safeToggles * $secondsPerToggleSaved) / 60.0), 1)
+}
+
+function Get-BadgeTrackingMode($settingsRef = $null) {
+    $target = if ($settingsRef) { $settingsRef } else { $settings }
+    $mode = "Global"
+    try {
+        $raw = [string](Get-SettingsPropertyValue $target "BadgeTrackingMode" "Global")
+        if (-not [string]::IsNullOrWhiteSpace($raw)) { $mode = $raw }
+    } catch {
+        $mode = "Global"
+    }
+    switch ($mode.ToLowerInvariant()) {
+        "profile" { return "Profile" }
+        default { return "Global" }
+    }
+}
+
+function Get-BadgeRarityIcon([string]$rarity) {
+    $key = if ([string]::IsNullOrWhiteSpace($rarity)) { "" } else { $rarity.ToLowerInvariant() }
+    switch ($key) {
+        "uncommon" { return "[U]" }
+        "rare" { return "[R]" }
+        "epic" { return "[E]" }
+        "legendary" { return "[L]" }
+        "mythic" { return "[M]" }
+        "transcendent" { return "[T]" }
+        "ascended" { return "[A]" }
+        "celestial" { return "[C*]" }
+        "cosmic" { return "[X]" }
+        "beyond" { return "[B]" }
+        default { return "[C]" }
+    }
+}
+
+function Get-BadgeRarityPoints([string]$rarity, [string]$kind = "Milestone") {
+    $key = if ([string]::IsNullOrWhiteSpace($rarity)) { "" } else { $rarity.ToLowerInvariant() }
+    $base = switch ($key) {
+        "uncommon" { 20 }
+        "rare" { 35 }
+        "epic" { 55 }
+        "legendary" { 85 }
+        "mythic" { 120 }
+        "transcendent" { 170 }
+        "ascended" { 240 }
+        "celestial" { 330 }
+        "cosmic" { 460 }
+        "beyond" { 640 }
+        default { 12 }
+    }
+    $multiplier = switch ([string]$kind) {
+        "Seasonal" { 1.1 }
+        "Combo" { 1.25 }
+        "Resilience" { 1.2 }
+        "Bonus" { 0.9 }
+        default { 1.0 }
+    }
+    return [int][Math]::Round(($base * $multiplier), 0)
+}
+
+function Get-BadgeTierName([long]$value) {
+    $safe = [int64][Math]::Max(0, [int64]$value)
+    if ($safe -ge 100000000) { return "Omega" }
+    if ($safe -ge 10000000) { return "Mythic" }
+    if ($safe -ge 1000000) { return "Diamond" }
+    if ($safe -ge 100000) { return "Platinum" }
+    if ($safe -ge 10000) { return "Gold" }
+    if ($safe -ge 1000) { return "Silver" }
+    return "Bronze"
+}
+
+function Get-MilestoneDefinitions {
+    $raw = @(
+        @{ Value = 100; Name = "Rookie"; Rarity = "Common" },
+        @{ Value = 250; Name = "Consistent"; Rarity = "Common" },
+        @{ Value = 500; Name = "Grinder"; Rarity = "Uncommon" },
+        @{ Value = 1000; Name = "Dedicated"; Rarity = "Uncommon" },
+        @{ Value = 2500; Name = "Streaker"; Rarity = "Rare" },
+        @{ Value = 5000; Name = "Engine"; Rarity = "Rare" },
+        @{ Value = 10000; Name = "Iron Will"; Rarity = "Epic" },
+        @{ Value = 25000; Name = "Relentless"; Rarity = "Epic" },
+        @{ Value = 50000; Name = "Unstoppable"; Rarity = "Legendary" },
+        @{ Value = 100000; Name = "Legend"; Rarity = "Legendary" },
+        @{ Value = 250000; Name = "Mythic"; Rarity = "Mythic" },
+        @{ Value = 500000; Name = "Titan"; Rarity = "Mythic" },
+        @{ Value = 1000000; Name = "Godmode"; Rarity = "Transcendent" },
+        @{ Value = 2500000; Name = "Warp Drive"; Rarity = "Transcendent" },
+        @{ Value = 5000000; Name = "Reality Bender"; Rarity = "Transcendent" },
+        @{ Value = 10000000; Name = "Time Lord"; Rarity = "Ascended" },
+        @{ Value = 25000000; Name = "Planetary"; Rarity = "Ascended" },
+        @{ Value = 50000000; Name = "Galactic"; Rarity = "Ascended" },
+        @{ Value = 100000000; Name = "Universal"; Rarity = "Celestial" },
+        @{ Value = 250000000; Name = "Multiversal"; Rarity = "Celestial" },
+        @{ Value = 500000000; Name = "Infinity"; Rarity = "Cosmic" },
+        @{ Value = 1000000000; Name = "Impossible"; Rarity = "Cosmic" },
+        @{ Value = 2000000000; Name = "Absurdity Achieved"; Rarity = "Beyond" }
+    )
+    $defs = @()
+    foreach ($entry in $raw) {
+        $value = [int64]$entry.Value
+        $rarity = [string]$entry.Rarity
+        $defs += [pscustomobject]@{
+            Id     = ("milestone-{0}" -f $value)
+            Kind   = "Milestone"
+            Value  = $value
+            Name   = [string]$entry.Name
+            Rarity = $rarity
+            Tier   = Get-BadgeTierName $value
+            Icon   = Get-BadgeRarityIcon $rarity
+            Points = Get-BadgeRarityPoints $rarity "Milestone"
+        }
+    }
+    return $defs
+}
+
+function Get-MilestoneInfo([long]$toggleCount) {
+    $safeToggles = [int64][Math]::Max(0, [int64]$toggleCount)
+    $milestones = Get-MilestoneDefinitions
+    $lastReached = $null
+    $next = $null
+    $previousValue = 0L
+    foreach ($m in $milestones) {
+        $value = [int64]$m.Value
+        if ($safeToggles -ge $value) {
+            $lastReached = $m
+            $previousValue = $value
+        } else {
+            $next = $m
+            break
+        }
+    }
+    if ($null -eq $next) {
+        $lastValue = if ($lastReached) { [int64]$lastReached.Value } else { 0L }
+        $lastName = if ($lastReached) { [string]$lastReached.Name } else { "None" }
+        $lastRarity = if ($lastReached) { [string]$lastReached.Rarity } else { "Common" }
+        return [pscustomobject]@{
+            CurrentId         = if ($lastReached) { [string]$lastReached.Id } else { "" }
+            CurrentValue      = $lastValue
+            CurrentName       = $lastName
+            CurrentRarity     = $lastRarity
+            CurrentTier       = if ($lastReached) { [string]$lastReached.Tier } else { "Bronze" }
+            CurrentIcon       = if ($lastReached) { [string]$lastReached.Icon } else { (Get-BadgeRarityIcon "Common") }
+            NextId            = $null
+            NextValue         = $null
+            NextName          = "MAX"
+            NextRarity        = $lastRarity
+            NextTier          = if ($lastReached) { [string]$lastReached.Tier } else { "Bronze" }
+            NextIcon          = if ($lastReached) { [string]$lastReached.Icon } else { (Get-BadgeRarityIcon "Common") }
+            LeftToNext        = 0L
+            ProgressToNextPct = 100.0
+            IsMax             = $true
+        }
+    }
+
+    $nextValue = [int64]$next.Value
+    $leftToNext = [int64][Math]::Max(0, ($nextValue - $safeToggles))
+    $range = [double]([Math]::Max(1L, ($nextValue - $previousValue)))
+    $progressRaw = (($safeToggles - $previousValue) / $range) * 100.0
+    $progress = [Math]::Round([Math]::Max(0.0, [Math]::Min(100.0, $progressRaw)), 1)
+
+    return [pscustomobject]@{
+        CurrentId         = if ($lastReached) { [string]$lastReached.Id } else { "" }
+        CurrentValue      = if ($lastReached) { [int64]$lastReached.Value } else { 0L }
+        CurrentName       = if ($lastReached) { [string]$lastReached.Name } else { "None yet" }
+        CurrentRarity     = if ($lastReached) { [string]$lastReached.Rarity } else { "Common" }
+        CurrentTier       = if ($lastReached) { [string]$lastReached.Tier } else { "Bronze" }
+        CurrentIcon       = if ($lastReached) { [string]$lastReached.Icon } else { (Get-BadgeRarityIcon "Common") }
+        NextId            = [string]$next.Id
+        NextValue         = $nextValue
+        NextName          = [string]$next.Name
+        NextRarity        = [string]$next.Rarity
+        NextTier          = [string]$next.Tier
+        NextIcon          = [string]$next.Icon
+        LeftToNext        = $leftToNext
+        ProgressToNextPct = $progress
+        IsMax             = $false
+    }
+}
+
+function Get-BonusBadgeDefinitions {
+    return @(
+        [pscustomobject]@{ Id = "bonus-streak-keeper"; Name = "Streak Keeper"; Kind = "Bonus"; Rarity = "Uncommon"; Tier = "Bronze"; Icon = (Get-BadgeRarityIcon "Uncommon"); Points = (Get-BadgeRarityPoints "Uncommon" "Bonus") },
+        [pscustomobject]@{ Id = "bonus-streak-master"; Name = "Streak Master"; Kind = "Bonus"; Rarity = "Rare"; Tier = "Silver"; Icon = (Get-BadgeRarityIcon "Rare"); Points = (Get-BadgeRarityPoints "Rare" "Bonus") },
+        [pscustomobject]@{ Id = "bonus-crashfree-week"; Name = "Crash-Free Week"; Kind = "Bonus"; Rarity = "Uncommon"; Tier = "Bronze"; Icon = (Get-BadgeRarityIcon "Uncommon"); Points = (Get-BadgeRarityPoints "Uncommon" "Bonus") },
+        [pscustomobject]@{ Id = "bonus-crashfree-month"; Name = "Crash-Free Month"; Kind = "Bonus"; Rarity = "Rare"; Tier = "Silver"; Icon = (Get-BadgeRarityIcon "Rare"); Points = (Get-BadgeRarityPoints "Rare" "Bonus") },
+        [pscustomobject]@{ Id = "bonus-reliable-ops"; Name = "Reliable Ops"; Kind = "Bonus"; Rarity = "Uncommon"; Tier = "Bronze"; Icon = (Get-BadgeRarityIcon "Uncommon"); Points = (Get-BadgeRarityPoints "Uncommon" "Bonus") },
+        [pscustomobject]@{ Id = "bonus-rock-solid"; Name = "Rock Solid"; Kind = "Bonus"; Rarity = "Epic"; Tier = "Gold"; Icon = (Get-BadgeRarityIcon "Epic"); Points = (Get-BadgeRarityPoints "Epic" "Bonus") },
+        [pscustomobject]@{ Id = "bonus-marathon"; Name = "Marathon"; Kind = "Bonus"; Rarity = "Uncommon"; Tier = "Bronze"; Icon = (Get-BadgeRarityIcon "Uncommon"); Points = (Get-BadgeRarityPoints "Uncommon" "Bonus") },
+        [pscustomobject]@{ Id = "bonus-nosleep"; Name = "No-Sleep Mode"; Kind = "Bonus"; Rarity = "Legendary"; Tier = "Platinum"; Icon = (Get-BadgeRarityIcon "Legendary"); Points = (Get-BadgeRarityPoints "Legendary" "Bonus") },
+        [pscustomobject]@{ Id = "bonus-million"; Name = "One-in-a-Million"; Kind = "Bonus"; Rarity = "Mythic"; Tier = "Diamond"; Icon = (Get-BadgeRarityIcon "Mythic"); Points = (Get-BadgeRarityPoints "Mythic" "Bonus") }
+    )
+}
+
+function Get-SeasonalBadgeDefinitions {
+    return @(
+        [pscustomobject]@{ Id = "season-winter"; Name = "Winter Operator"; Season = "Winter"; Kind = "Seasonal"; Rarity = "Rare"; Tier = "Silver"; Icon = (Get-BadgeRarityIcon "Rare"); Points = (Get-BadgeRarityPoints "Rare" "Seasonal") },
+        [pscustomobject]@{ Id = "season-spring"; Name = "Spring Operator"; Season = "Spring"; Kind = "Seasonal"; Rarity = "Rare"; Tier = "Silver"; Icon = (Get-BadgeRarityIcon "Rare"); Points = (Get-BadgeRarityPoints "Rare" "Seasonal") },
+        [pscustomobject]@{ Id = "season-summer"; Name = "Summer Operator"; Season = "Summer"; Kind = "Seasonal"; Rarity = "Epic"; Tier = "Gold"; Icon = (Get-BadgeRarityIcon "Epic"); Points = (Get-BadgeRarityPoints "Epic" "Seasonal") },
+        [pscustomobject]@{ Id = "season-autumn"; Name = "Autumn Operator"; Season = "Autumn"; Kind = "Seasonal"; Rarity = "Rare"; Tier = "Silver"; Icon = (Get-BadgeRarityIcon "Rare"); Points = (Get-BadgeRarityPoints "Rare" "Seasonal") }
+    )
+}
+
+function Get-ComboBadgeDefinitions {
+    return @(
+        [pscustomobject]@{ Id = "combo-precision-triple"; Name = "Precision Triple"; Kind = "Combo"; Rarity = "Epic"; Tier = "Gold"; Icon = (Get-BadgeRarityIcon "Epic"); Points = (Get-BadgeRarityPoints "Epic" "Combo") },
+        [pscustomobject]@{ Id = "combo-momentum-chain"; Name = "Momentum Chain"; Kind = "Combo"; Rarity = "Legendary"; Tier = "Platinum"; Icon = (Get-BadgeRarityIcon "Legendary"); Points = (Get-BadgeRarityPoints "Legendary" "Combo") },
+        [pscustomobject]@{ Id = "combo-iron-marathon"; Name = "Iron Marathon"; Kind = "Combo"; Rarity = "Mythic"; Tier = "Diamond"; Icon = (Get-BadgeRarityIcon "Mythic"); Points = (Get-BadgeRarityPoints "Mythic" "Combo") }
+    )
+}
+
+function Get-ResilienceBadgeDefinitions {
+    return @(
+        [pscustomobject]@{ Id = "resilience-bounceback"; Name = "Bounceback"; Kind = "Resilience"; Rarity = "Uncommon"; Tier = "Bronze"; Icon = (Get-BadgeRarityIcon "Uncommon"); Points = (Get-BadgeRarityPoints "Uncommon" "Resilience") },
+        [pscustomobject]@{ Id = "resilience-hardened"; Name = "Hardened"; Kind = "Resilience"; Rarity = "Epic"; Tier = "Gold"; Icon = (Get-BadgeRarityIcon "Epic"); Points = (Get-BadgeRarityPoints "Epic" "Resilience") },
+        [pscustomobject]@{ Id = "resilience-unkillable"; Name = "Unkillable"; Kind = "Resilience"; Rarity = "Legendary"; Tier = "Platinum"; Icon = (Get-BadgeRarityIcon "Legendary"); Points = (Get-BadgeRarityPoints "Legendary" "Resilience") }
+    )
+}
+
+function Get-BadgeCatalogDefinitions {
+    return @(
+        @(Get-MilestoneDefinitions) +
+        @(Get-BonusBadgeDefinitions) +
+        @(Get-SeasonalBadgeDefinitions) +
+        @(Get-ComboBadgeDefinitions) +
+        @(Get-ResilienceBadgeDefinitions)
+    )
+}
+
+function Get-BadgeSeasonName([DateTime]$now = (Get-Date)) {
+    switch ([int]$now.Month) {
+        { $_ -in 12,1,2 } { return "Winter" }
+        { $_ -in 3,4,5 } { return "Spring" }
+        { $_ -in 6,7,8 } { return "Summer" }
+        default { return "Autumn" }
+    }
+}
+
+function Get-SeasonalBadgeDefinition([DateTime]$now = (Get-Date)) {
+    $season = Get-BadgeSeasonName $now
+    foreach ($def in (Get-SeasonalBadgeDefinitions)) {
+        if ([string]$def.Season -eq $season) { return $def }
+    }
+    return $null
+}
+
+function Get-BadgeLevelInfo([int]$points) {
+    $safePoints = [Math]::Max(0, [int]$points)
+    $level = [Math]::Max(1, [int][Math]::Floor([Math]::Sqrt($safePoints / 25.0)) + 1)
+    $currentFloor = [int](25 * [Math]::Pow(($level - 1), 2))
+    $nextAt = [int](25 * [Math]::Pow($level, 2))
+    $delta = [Math]::Max(1, ($nextAt - $currentFloor))
+    $progress = [Math]::Round(([Math]::Max(0, ($safePoints - $currentFloor)) / [double]$delta) * 100.0, 1)
+    return [pscustomobject]@{
+        Level = $level
+        NextLevelAt = $nextAt
+        ProgressPct = [Math]::Max(0.0, [Math]::Min(100.0, $progress))
+    }
+}
+
+function Get-BonusBadgeLabel($stats, [int]$currentStreak = 0, [double]$reliabilityPercent = 100.0, [int]$crashFreeDays = 0, [double]$totalRunMinutes = 0.0, [long]$lifetimeToggleCount = 0) {
+    $badges = New-Object System.Collections.Generic.List[string]
+    if ($currentStreak -ge 30) { [void]$badges.Add("Streak Master") }
+    elseif ($currentStreak -ge 7) { [void]$badges.Add("Streak Keeper") }
+    if ($crashFreeDays -ge 30) { [void]$badges.Add("Crash-Free Month") }
+    elseif ($crashFreeDays -ge 7) { [void]$badges.Add("Crash-Free Week") }
+    if ($reliabilityPercent -ge 99.9) { [void]$badges.Add("Rock Solid") }
+    elseif ($reliabilityPercent -ge 98.0) { [void]$badges.Add("Reliable Ops") }
+    if ($totalRunMinutes -ge 43200) { [void]$badges.Add("No-Sleep Mode") }
+    elseif ($totalRunMinutes -ge 1440) { [void]$badges.Add("Marathon") }
+    if ($lifetimeToggleCount -ge 1000000) { [void]$badges.Add("One-in-a-Million") }
+    if ($badges.Count -eq 0) { return "None yet" }
+    return (($badges | Select-Object -Unique) -join ", ")
+}
+
+function Get-MilestoneStatus([int]$toggleCount) {
+    $info = Get-MilestoneInfo ([int64]$toggleCount)
+    if ($info.IsMax) {
+        return ("Max milestone reached: {0} {1:N0} ({2}) [{3}]" -f [string]$info.CurrentIcon, [int64]$info.CurrentValue, [string]$info.CurrentName, [string]$info.CurrentTier)
+    }
+    if ([int64]$info.CurrentValue -le 0) {
+        return ("Next: {0} {1:N0} ({2}) [{3}] [{4:N0} left]" -f [string]$info.NextIcon, [int64]$info.NextValue, [string]$info.NextName, [string]$info.NextTier, [int64]$info.LeftToNext)
+    }
+    return ("Reached: {0} {1:N0} ({2}) [{3}] | Next: {4} {5:N0} ({6}) [{7}] [{8:N0} left]" -f [string]$info.CurrentIcon, [int64]$info.CurrentValue, [string]$info.CurrentName, [string]$info.CurrentTier, [string]$info.NextIcon, [int64]$info.NextValue, [string]$info.NextName, [string]$info.NextTier, [int64]$info.LeftToNext)
+}
+
 function Format-TotalRunTime([double]$minutes) {
     if ($minutes -le 0) { return "0m" }
     $span = [TimeSpan]::FromMinutes($minutes)
@@ -6813,6 +9334,8 @@ function Format-TotalRunTime([double]$minutes) {
 }
 
 Ensure-FunStats $settings | Out-Null
+$script:StatsLastSampleAt = Get-Date
+$script:StatsLastSampleProfile = [string](Get-SettingsPropertyValue $settings "ActiveProfile" "Default")
 Sync-StateFromSettings $settings
 Apply-StateToSettings $settings $script:AppState
 Save-StateImmediate $script:AppState
@@ -6822,6 +9345,7 @@ function Save-Stats {
         Set-SettingsPropertyValue $settings "ToggleCount" 0
     }
     Set-SettingsPropertyValue $settings "LastToggleTime" $(if ($script:lastToggleTime) { $script:lastToggleTime.ToString("o") } else { $null })
+    Update-FunStatsRuntimeProgress (Get-Date)
     Ensure-FunStats $settings | Out-Null
     Sync-StateFromSettings $settings
     Apply-StateToSettings $settings $script:AppState
@@ -7314,6 +9838,10 @@ function Apply-ThemeToMenuItem($item, $palette) {
         $item.ForeColor = $palette.MenuSeparator
         return
     }
+    if ($item -is [System.Windows.Forms.ToolStripLabel]) {
+        $item.ForeColor = $palette.MenuFore
+        return
+    }
     if ($item -is [System.Windows.Forms.ToolStripMenuItem]) {
         if ($item.Name -ne "StatusStateItem") {
             $item.ForeColor = $palette.MenuFore
@@ -7654,6 +10182,7 @@ function Clear-LogFile {
 function Reset-SafeMode {
     $script:safeModeActive = $false
     $script:toggleFailCount = 0
+    try { Sync-MinimalModeState "ResetSafeMode" } catch { }
     Request-StatusUpdate
     Write-Log "Safe Mode reset." "INFO" $null "SafeMode"
 }
@@ -7676,6 +10205,7 @@ function Reset-CrashRecoveryState {
     $script:MinimalModeReason = $null
     $script:safeModeActive = $false
     $script:toggleFailCount = 0
+    try { Sync-MinimalModeState "ResetCrashRecoveryState" } catch { }
     Request-StatusUpdate
     Write-Log "Crash recovery state reset (crash counters and safe mode cleared)." "INFO" $null "SafeMode"
 }
@@ -7704,6 +10234,7 @@ function Recover-Now {
 function Start-RepairMode {
     if ($script:RepairModeActive) { return }
     $script:RepairModeActive = $true
+    Add-SelfHealRecentAction "RepairMode" "Started" ""
     try {
         Write-Log "Repair mode started." "WARN" $null "Recovery"
         try { Flush-SettingsSave } catch { }
@@ -7714,9 +10245,11 @@ function Start-RepairMode {
                 $settings = Normalize-Settings (Migrate-Settings $lastGoodSettings)
                 Save-SettingsImmediate $settings
                 Write-Log "Repair mode: restored settings from last known good snapshot." "WARN" $null "Recovery"
+                Add-SelfHealRecentAction "RepairMode" "Succeeded" "Restored settings snapshot"
             }
         } catch {
             Write-LogExceptionDeduped "Repair mode failed while restoring settings snapshot." "WARN" $_.Exception "Recovery" 20
+            Add-SelfHealRecentAction "RepairMode" "Retry" "Settings snapshot restore failed"
         }
         try {
             $lastGoodState = Load-LastGoodState
@@ -7725,9 +10258,11 @@ function Start-RepairMode {
                 Save-StateImmediate $script:AppState
                 Apply-StateToSettings $settings $script:AppState
                 Write-Log "Repair mode: restored runtime state from last known good snapshot." "WARN" $null "Recovery"
+                Add-SelfHealRecentAction "RepairMode" "Succeeded" "Restored runtime state snapshot"
             }
         } catch {
             Write-LogExceptionDeduped "Repair mode failed while restoring runtime state snapshot." "WARN" $_.Exception "Recovery" 20
+            Add-SelfHealRecentAction "RepairMode" "Retry" "State snapshot restore failed"
         }
         try { Apply-SettingsRuntime } catch { }
         try { Request-StatusUpdate } catch { }
@@ -7736,6 +10271,7 @@ function Start-RepairMode {
             Show-Balloon "Teams Always Green" "Repair mode completed. Recovery actions were applied." ([System.Windows.Forms.ToolTipIcon]::Info)
         } catch { }
         Write-Log "Repair mode completed." "INFO" $null "Recovery"
+        Add-SelfHealRecentAction "RepairMode" "Completed" "Recovery actions applied"
     } finally {
         $script:RepairModeActive = $false
     }
@@ -7758,12 +10294,23 @@ function Start-HealthMonitor {
                 Save-StateImmediate $script:AppState
                 return
             }
+            if (-not (Test-SettingsStateIntegrity)) {
+                Write-LogThrottled "HealthMonitor-SettingsStateMismatch" "Health monitor: settings/state integrity mismatch detected; queuing repair-all." "WARN" 120
+                Enqueue-SelfHealAction -Name "SettingsStateIntegrity" -Reason "Settings hash mismatch" -InitialDelaySeconds 1 -MaxAttempts 2 -WindowSeconds 600 -MaxPerWindow 3 -Action {
+                    Invoke-RepairAll -Source "integrity-watchdog" | Out-Null
+                } | Out-Null
+                return
+            }
             if ($script:SelfHealStats.SuppressedErrorCount -gt 0) {
                 Write-LogThrottled "HealthMonitor-SuppressedErrors" ("Health monitor: suppressed repeated errors={0}" -f [int]$script:SelfHealStats.SuppressedErrorCount) "INFO" 300
             }
+            try { Invoke-HeartbeatWatchdog } catch { }
+            try { Invoke-SelfHealQueue } catch { }
         }
     })
+    $script:ComponentHeartbeat["HealthMonitorTimer"] = Get-Date
     $script:HealthMonitorTimer.Start()
+    Start-SelfHealQueueTimer
 }
 
 function Update-LogLevelMenuChecks {
@@ -7811,6 +10358,9 @@ function Update-StatusText {
     $script:Now = Get-Date
     try {
         Update-ScheduleBlock | Out-Null
+        if ($script:isRunning -and -not $script:isPaused -and -not $script:isScheduleBlocked -and $null -eq $script:nextToggleTime) {
+            Update-NextToggleTime
+        }
         if ($script:isPaused) {
             $state = "Paused"
         } elseif ($script:isRunning -and $script:isScheduleSuspended) {
@@ -7828,9 +10378,28 @@ function Update-StatusText {
         $script:StatusStateColor = Get-StatusStateColor $state
         $showSeconds = ([int]$settings.IntervalSeconds -lt 60)
         $lastText = Format-TimeOrNever $script:lastToggleTime $showSeconds
-        $nextText = Format-NextInfo
         $pauseUntilText = Format-PauseUntilText
-        if ($script:isPaused) { $nextText = "Paused" }
+        $nextText = "N/A"
+        $nextRemainingSeconds = $null
+        if ($script:isPaused) {
+            $nextText = "Paused"
+        } elseif ($script:isRunning -and $script:isScheduleSuspended) {
+            $nextText = "Suspended"
+        } elseif ($script:isRunning -and $script:isScheduleBlocked) {
+            $nextText = "Scheduled"
+        } elseif ($script:isRunning) {
+            $nowRuntime = Get-Now
+            $intervalSeconds = [Math]::Max(1, [int]$settings.IntervalSeconds)
+            if ($null -eq $script:nextToggleTime) {
+                $script:nextToggleTime = $nowRuntime.AddSeconds($intervalSeconds)
+            } elseif ($script:nextToggleTime -le $nowRuntime) {
+                $script:nextToggleTime = $nowRuntime.AddSeconds($intervalSeconds)
+            }
+            $remaining = [int][Math]::Max(0, ($script:nextToggleTime - $nowRuntime).TotalSeconds)
+            $nextRemainingSeconds = $remaining
+            $nextTime = Format-TimeOrNever $script:nextToggleTime $showSeconds
+            $nextText = "$remaining s ($nextTime)"
+        }
         $snapshot = "$state|$($settings.IntervalSeconds)|$($script:tickCount)|$lastText|$nextText|$pauseUntilText"
         $now = $script:Now
         if ($script:LastStatusSnapshot -eq $snapshot -and (($now - $script:LastStatusUpdateTime).TotalMilliseconds -lt 500)) {
@@ -7848,7 +10417,85 @@ function Update-StatusText {
         $stateText = Localize-StatusValue $state
         $displayLast = Localize-StatusValue $lastText
         $displayNext = Localize-StatusValue $nextText
+        if ([string]::IsNullOrWhiteSpace($displayNext)) {
+            $displayNext = [string]$nextText
+        }
         $displayPause = Localize-StatusValue $pauseUntilText
+        $activeProfileName = [string]$settings.ActiveProfile
+        if ([string]::IsNullOrWhiteSpace($activeProfileName)) { $activeProfileName = "Default" }
+        $scheduleText = Format-ScheduleStatus
+        $displaySchedule = Localize-StatusValue $scheduleText
+
+        $summaryState = if ($script:isRunning -and -not $script:isPaused -and -not $script:isScheduleBlocked -and -not $script:isScheduleSuspended) {
+            "Running"
+        } elseif ($script:isRunning -or $script:isPaused) {
+            "Paused"
+        } else {
+            "Stopped"
+        }
+        $summaryStateText = Localize-StatusValue $summaryState
+        $summaryStateValue = $summaryStateText
+        $summaryNextCompact = if ($null -ne $nextRemainingSeconds) { "$nextRemainingSeconds s" } else { $nextText }
+        $summaryNextDisplay = Localize-StatusValue $summaryNextCompact
+        if ([string]::IsNullOrWhiteSpace($summaryNextDisplay)) {
+            $summaryNextDisplay = [string]$summaryNextCompact
+        }
+        $summaryStatusLabel = [string](L "Status")
+        if ([string]::IsNullOrWhiteSpace($summaryStatusLabel)) { $summaryStatusLabel = "Status" }
+        # Keep top summary compact: status only. "Next" appears on its own line below.
+        $summaryText = ("{0}: {1}" -f $summaryStatusLabel, $summaryStateValue)
+
+        $nextExactDetail = if ($script:isRunning -and -not $script:isPaused -and -not $script:isScheduleBlocked -and -not $script:isScheduleSuspended -and $script:nextToggleTime) {
+            Format-TimeOrNever $script:nextToggleTime $showSeconds
+        } else {
+            $nextText
+        }
+        $summaryTooltip = @(
+            ((L "Status: {0}") -f $stateText),
+            ((L "Next: {0}") -f $summaryNextDisplay),
+            ((L "Next At: {0}") -f (Localize-StatusValue $nextExactDetail)),
+            ((L "Interval: {0}s") -f $settings.IntervalSeconds),
+            ("{0}: {1}" -f (L "Active Profile"), $activeProfileName),
+            ((L "Schedule: {0}") -f $displaySchedule)
+        ) -join [Environment]::NewLine
+
+        if ($script:TrayStatusSummaryItem) {
+            $script:TrayStatusSummaryItem.Text = $summaryText
+            $script:TrayStatusSummaryItem.ForeColor = $script:StatusStateColor
+            $script:TrayStatusSummaryItem.Tag = $null
+            $script:TrayStatusSummaryItem.ToolTipText = $summaryTooltip
+        }
+        $topNextText = $summaryNextDisplay
+        if ($script:TrayStatusStateItem) {
+            $script:TrayStatusStateItem.Text = ((L "Status: {0}") -f $stateText)
+            $script:TrayStatusStateItem.ForeColor = $script:StatusStateColor
+            $script:TrayStatusStateItem.Tag = $null
+        }
+        if ($script:TrayStatusNextItem) {
+            if ([string]::IsNullOrWhiteSpace($topNextText)) {
+                $topNextText = (L "N/A")
+            }
+            $nextTemplate = [string](L "Next: {0}")
+            if ($nextTemplate -notlike "*{0}*") {
+                $nextTemplate = "Next: {0}"
+            }
+            $script:TrayStatusNextItem.Text = ($nextTemplate -f $topNextText)
+            if ($contextMenu) {
+                $script:TrayStatusNextItem.ForeColor = $contextMenu.ForeColor
+            } else {
+                $script:TrayStatusNextItem.ForeColor = [System.Drawing.Color]::Empty
+            }
+            $script:TrayStatusNextItem.Tag = $null
+        }
+        if ($script:TrayStatusProfileItem) {
+            $script:TrayStatusProfileItem.Text = ("{0}: {1}" -f (L "Active Profile"), $activeProfileName)
+            if ($contextMenu) {
+                $script:TrayStatusProfileItem.ForeColor = $contextMenu.ForeColor
+            } else {
+                $script:TrayStatusProfileItem.ForeColor = [System.Drawing.Color]::Empty
+            }
+            $script:TrayStatusProfileItem.Tag = $null
+        }
         $statusLineState.Text = ((L "Status: {0}") -f $stateText)
         $statusLineState.Tag = $state
         $statusLineState.ForeColor = $script:StatusStateColor
@@ -7857,8 +10504,6 @@ function Update-StatusText {
         $statusLineLast.Text = ((L "Last: {0}") -f $displayLast)
         $statusLineNext.Text = ((L "Next: {0}") -f $displayNext)
         $statusLinePauseUntil.Text = ((L "Paused Until: {0}") -f $displayPause)
-        $scheduleText = Format-ScheduleStatus
-        $displaySchedule = Localize-StatusValue $scheduleText
         if ($statusLineSchedule) { $statusLineSchedule.Text = ((L "Schedule: {0}") -f $displaySchedule) }
         if ($statusLineSafeMode) { $statusLineSafeMode.Text = ((L "Safe Mode: {0}") -f (Localize-StatusValue ($(if ($script:safeModeActive) { "On" } else { "Off" })))) }
         $statusLineLast.Visible = -not ([string]::IsNullOrWhiteSpace($lastText) -or $lastText -eq "Never")
@@ -7870,7 +10515,17 @@ function Update-StatusText {
         if ($startStopItem) { $startStopItem.Enabled = -not $script:safeModeActive }
         if ($toggleNowItem) { $toggleNowItem.Enabled = -not $script:safeModeActive }
         if ($pauseMenu) { $pauseMenu.Enabled = $script:isRunning }
-        if ($runOnceNowItem) { $runOnceNowItem.Enabled = -not $script:isRunning }
+        if ($runOnceNowItem) {
+            $runOnceNowItem.Enabled = -not $script:safeModeActive
+            if ([string]::IsNullOrWhiteSpace([string]$runOnceNowItem.Text)) {
+                $runOnceNowItem.Text = (L "Run Once (Next Cycle)" "Run Once Next Cycle")
+            }
+            if ($contextMenu) {
+                $runOnceNowItem.ForeColor = $contextMenu.ForeColor
+            } else {
+                $runOnceNowItem.ForeColor = [System.Drawing.Color]::Empty
+            }
+        }
         if ($script:pauseResumeItem) { $script:pauseResumeItem.Enabled = $script:isPaused }
         if ($script:pauseUntilItem) { $script:pauseUntilItem.Enabled = -not $script:isPaused }
         if ($resetSafeModeItem) { $resetSafeModeItem.Visible = $script:safeModeActive }
@@ -8151,9 +10806,12 @@ function Start-Toggling {
     $script:pauseUntil = $null
     $settings.PauseUntil = $null
     Save-Settings $settings
-    Update-NextToggleTime
-    if (Update-ScheduleBlock) {
+    Update-ScheduleBlock | Out-Null
+    if ($script:isScheduleBlocked) {
         $timer.Stop()
+        $script:nextToggleTime = $null
+    } else {
+        Update-NextToggleTime
     }
     Request-StatusUpdate
     if ($startStopItem) { $startStopItem.Enabled = $true }
@@ -8165,6 +10823,7 @@ function Start-Toggling {
     Log-StateSummary "Start-Toggling"
     Show-Balloon "Teams-Always-Green" "Started." ([System.Windows.Forms.ToolTipIcon]::Info)
     Update-TrayLabels
+    try { Update-StatusText } catch { }
 }
 
 function Stop-Toggling {
@@ -8183,6 +10842,7 @@ function Stop-Toggling {
     Log-StateSummary "Stop-Toggling"
     Show-Balloon "Teams-Always-Green" "Stopped." ([System.Windows.Forms.ToolTipIcon]::Info)
     Update-TrayLabels
+    try { Update-StatusText } catch { }
 }
 
 function Pause-Toggling([int]$minutes) {
@@ -8502,18 +11162,17 @@ function Ensure-TrayModuleFallback {
         } -Force
     }
 
-    Ensure-MenuItemVariable "startStopItem" "Start/Stop (Unavailable)" $false | Out-Null
-    Ensure-MenuItemVariable "toggleNowItem" "Toggle Once (Unavailable)" $false | Out-Null
-    Ensure-MenuItemVariable "pauseMenu" "Pause (Unavailable)" $false | Out-Null
-    Ensure-MenuItemVariable "intervalMenu" "Interval (Unavailable)" $false | Out-Null
-    Ensure-MenuItemVariable "runOnceNowItem" "Run Once (Unavailable)" $false | Out-Null
-    Ensure-MenuItemVariable "statusItem" "Status (Unavailable)" $false | Out-Null
-    Ensure-MenuItemVariable "profilesMenu" "Profiles (Unavailable)" $false | Out-Null
-    Ensure-MenuItemVariable "quickSettingsMenu" "Quick Options (Unavailable)" $false | Out-Null
-    Ensure-MenuItemVariable "logsMenu" "Logs (Unavailable)" $false | Out-Null
+    Ensure-MenuItemVariable "startStopItem" "Start/Stop" $false | Out-Null
+    Ensure-MenuItemVariable "toggleNowItem" "Toggle Once" $false | Out-Null
+    Ensure-MenuItemVariable "pauseMenu" "Pause" $false | Out-Null
+    Ensure-MenuItemVariable "intervalMenu" "Interval" $false | Out-Null
+    Ensure-MenuItemVariable "runOnceNowItem" "Run Once" $false | Out-Null
+    Ensure-MenuItemVariable "profilesMenu" "Profiles" $false | Out-Null
+    Ensure-MenuItemVariable "quickSettingsMenu" "Quick Options" $false | Out-Null
+    Ensure-MenuItemVariable "logsMenu" "Logs" $false | Out-Null
     Ensure-MenuItemVariable "openSettingsItem" "Settings" $true { Show-SettingsDialog } | Out-Null
     Ensure-MenuItemVariable "resetSafeModeItem" "Reset Safe Mode" $true { Reset-SafeMode } | Out-Null
-    Ensure-MenuItemVariable "recoverNowItem" "Recover now" $true { Recover-Now } | Out-Null
+    Ensure-MenuItemVariable "recoverNowItem" "Recover Now" $true { Recover-Now } | Out-Null
 }
 
 if (-not (Get-Command Set-MenuTooltip -ErrorAction SilentlyContinue)) {
@@ -8541,7 +11200,7 @@ $viewLogItem.Add_Click({
     }
 })
 
-$viewLogTailItem = New-Object System.Windows.Forms.ToolStripMenuItem("View Log (Tail)")
+$viewLogTailItem = New-Object System.Windows.Forms.ToolStripMenuItem("View Log Tail")
 $viewLogTailItem.Add_Click({
     Show-LogTailDialog
 })
@@ -8558,6 +11217,12 @@ $repairModeItem.Add_Click({
     Invoke-TrayAction "RepairMode" { Start-RepairMode }
 })
 
+$repairAllItem = New-Object System.Windows.Forms.ToolStripMenuItem("Repair All")
+Set-MenuTooltip $repairAllItem "Run full self-heal checks, module validation, timer recovery, and snapshot repair."
+$repairAllItem.Add_Click({
+    Invoke-TrayAction "RepairAll" { Invoke-RepairAll -Source "tray" | Out-Null }
+})
+
 $restartItem = New-Object System.Windows.Forms.ToolStripMenuItem("Restart")
 Set-MenuTooltip $restartItem "Restart the app."
 $restartItem.Add_Click({
@@ -8567,69 +11232,16 @@ $restartItem.Add_Click({
     Write-Log "=======================================================================" "INFO" $null "Restart"
     Write-Log "=                             APP RESTART                             =" "INFO" $null "Restart"
     Write-Log "=======================================================================" "INFO" $null "Restart"
-    Log-ShutdownSummary "Restart"
-    Set-ShutdownMarker "clean"
-    try { Flush-LogBuffer } catch { }
-    $script:isShuttingDown = $true
-    Flush-SettingsSave
-    Flush-LogBuffer
-    $statusUpdateTimer.Stop()
-    $pauseTimer.Stop()
-    $watchdogTimer.Stop()
-    if ($script:DeferredMaintenanceTimer) {
-        $script:DeferredMaintenanceTimer.Stop()
-    }
-    if ($script:FolderCheckTimer) {
-        $script:FolderCheckTimer.Stop()
-    }
-    if ($script:DeferredStartupTimer) {
-        $script:DeferredStartupTimer.Stop()
-    }
-    if ($script:HealthMonitorTimer) {
-        $script:HealthMonitorTimer.Stop()
-        $script:HealthMonitorTimer.Dispose()
-        $script:HealthMonitorTimer = $null
-    }
-    if ($script:LogSummaryTimer) {
-        $script:LogSummaryTimer.Stop()
-        $script:LogSummaryTimer.Dispose()
-        $script:LogSummaryTimer = $null
-    }
-    Unregister-Hotkeys
-    Stop-Toggling
-    if ($script:OverlayIcon) { $script:OverlayIcon.Dispose() }
-    if ($notifyIcon) {
-        try { $notifyIcon.Visible = $false } catch { }
-        try { $notifyIcon.Dispose() } catch { }
-        $notifyIcon = $null
-    }
-    Write-Log "Tray icon disposed." "INFO" $null "Tray"
-    $timer.Dispose()
-    $statusUpdateTimer.Dispose()
-    $pauseTimer.Dispose()
-    $watchdogTimer.Dispose()
-    if ($script:DeferredMaintenanceTimer) {
-        $script:DeferredMaintenanceTimer.Dispose()
-        $script:DeferredMaintenanceTimer = $null
-    }
-    if ($script:FolderCheckTimer) {
-        $script:FolderCheckTimer.Dispose()
-        $script:FolderCheckTimer = $null
-    }
-    if ($script:DeferredStartupTimer) {
-        $script:DeferredStartupTimer.Dispose()
-        $script:DeferredStartupTimer = $null
-    }
-    Release-MutexOnce
+    try { Set-RestartRequestMarker } catch { }
+    Invoke-AppShutdownCleanup -Reason "Restart" -SkipAppExit
     try {
         Write-Log "Restart spawn: launching new instance." "INFO" $null "Restart"
-        $proc = Start-Process -FilePath "powershell.exe" -WindowStyle Hidden -WorkingDirectory $script:AppRoot -ArgumentList "-NoProfile -ExecutionPolicy RemoteSigned -File `"$scriptPath`"" -PassThru
+        $proc = Start-Process -FilePath "powershell.exe" -WindowStyle Hidden -WorkingDirectory $script:AppRoot -ArgumentList "-NoProfile -ExecutionPolicy RemoteSigned -File `"$scriptPath`" -RelaunchedFromRestart" -PassThru
         if ($proc -and $proc.Id) { Write-Log ("Restart new PID={0}" -f $proc.Id) "INFO" $null "Restart" }
     } catch {
         Write-LogEx "Failed to restart app." "ERROR" $_.Exception "Restart" -Force
     }
     Write-Log "Restart requested via tray menu." "INFO" $null "Restart"
-    $script:CleanupDone = $true
     [System.Windows.Forms.Application]::Exit()
 })
 
@@ -8642,101 +11254,180 @@ $exitItem.Add_Click({
     Write-Log "=======================================================================" "INFO" $null "Exit"
     Write-Log "=                               APP EXIT                              =" "INFO" $null "Exit"
     Write-Log "=======================================================================" "INFO" $null "Exit"
-    Log-ShutdownSummary "Exit"
-    Set-ShutdownMarker "clean"
-    try { Flush-LogBuffer } catch { }
-    $script:isShuttingDown = $true
-    Flush-SettingsSave
-    Flush-LogBuffer
-    $statusUpdateTimer.Stop()
-    $pauseTimer.Stop()
-    $watchdogTimer.Stop()
-    if ($script:DeferredMaintenanceTimer) {
-        $script:DeferredMaintenanceTimer.Stop()
-    }
-    if ($script:FolderCheckTimer) {
-        $script:FolderCheckTimer.Stop()
-    }
-    if ($script:DeferredStartupTimer) {
-        $script:DeferredStartupTimer.Stop()
-    }
-    if ($script:HealthMonitorTimer) {
-        $script:HealthMonitorTimer.Stop()
-        $script:HealthMonitorTimer.Dispose()
-        $script:HealthMonitorTimer = $null
-    }
-    Unregister-Hotkeys
-    Stop-Toggling
-    if ($script:OverlayIcon) { $script:OverlayIcon.Dispose() }
-    if ($notifyIcon) {
-        try { $notifyIcon.Visible = $false } catch { }
-        try { $notifyIcon.Dispose() } catch { }
-        $notifyIcon = $null
-    }
-    Write-Log "Tray icon disposed." "INFO" $null "Tray"
-    $timer.Dispose()
-    $statusUpdateTimer.Dispose()
-    $pauseTimer.Dispose()
-    $watchdogTimer.Dispose()
-    if ($script:DeferredMaintenanceTimer) {
-        $script:DeferredMaintenanceTimer.Dispose()
-        $script:DeferredMaintenanceTimer = $null
-    }
-    if ($script:FolderCheckTimer) {
-        $script:FolderCheckTimer.Dispose()
-        $script:FolderCheckTimer = $null
-    }
-    if ($script:DeferredStartupTimer) {
-        $script:DeferredStartupTimer.Dispose()
-        $script:DeferredStartupTimer = $null
-    }
-    Release-MutexOnce
     Write-Log "Exit requested via tray menu." "INFO" $null "Exit"
-    $script:CleanupDone = $true
-    [System.Windows.Forms.Application]::Exit()
+    Invoke-AppShutdownCleanup -Reason "Exit"
 })
 
 if (-not (Get-Variable -Name contextMenu -Scope Script -ErrorAction SilentlyContinue) -or -not $script:contextMenu) {
     Ensure-TrayModuleFallback
 }
-Ensure-MenuItemVariable "startStopItem" "Start/Stop (Unavailable)" $false | Out-Null
-Ensure-MenuItemVariable "toggleNowItem" "Toggle Once (Unavailable)" $false | Out-Null
-Ensure-MenuItemVariable "pauseMenu" "Pause (Unavailable)" $false | Out-Null
-Ensure-MenuItemVariable "intervalMenu" "Interval (Unavailable)" $false | Out-Null
-Ensure-MenuItemVariable "runOnceNowItem" "Run Once (Unavailable)" $false | Out-Null
-Ensure-MenuItemVariable "statusItem" "Status (Unavailable)" $false | Out-Null
-Ensure-MenuItemVariable "profilesMenu" "Profiles (Unavailable)" $false | Out-Null
-Ensure-MenuItemVariable "quickSettingsMenu" "Quick Options (Unavailable)" $false | Out-Null
+Ensure-MenuItemVariable "startStopItem" "Start/Stop" $false | Out-Null
+Ensure-MenuItemVariable "toggleNowItem" "Toggle Once" $false | Out-Null
+Ensure-MenuItemVariable "pauseMenu" "Pause" $false | Out-Null
+Ensure-MenuItemVariable "intervalMenu" "Interval" $false | Out-Null
+Ensure-MenuItemVariable "runOnceNowItem" "Run Once" $false | Out-Null
+Ensure-MenuItemVariable "profilesMenu" "Profiles" $false | Out-Null
+Ensure-MenuItemVariable "quickSettingsMenu" "Quick Options" $false | Out-Null
 Ensure-MenuItemVariable "openSettingsItem" "Settings" $true { Show-SettingsDialog } | Out-Null
-Ensure-MenuItemVariable "logsMenu" "Logs (Unavailable)" $false | Out-Null
+Ensure-MenuItemVariable "logsMenu" "Logs" $false | Out-Null
 Ensure-MenuItemVariable "resetSafeModeItem" "Reset Safe Mode" $true { Reset-SafeMode } | Out-Null
-Ensure-MenuItemVariable "recoverNowItem" "Recover now" $true { Recover-Now } | Out-Null
+Ensure-MenuItemVariable "recoverNowItem" "Recover Now" $true { Recover-Now } | Out-Null
 
-$contextMenu.Items.AddRange(@(
-    $startStopItem,
-    $toggleNowItem,
-    $pauseMenu,
-    $intervalMenu,
-    $runOnceNowItem,
-    (New-Object System.Windows.Forms.ToolStripSeparator),
-    $statusItem,
-    $profilesMenu,
-    $quickSettingsMenu,
-    $openSettingsItem,
-    (New-Object System.Windows.Forms.ToolStripSeparator),
-    $logsMenu,
-    $historyItem,
+function New-TraySectionHeader([string]$text) {
+    $item = New-Object System.Windows.Forms.ToolStripLabel($text)
+    $item.AutoSize = $true
+    $item.TextAlign = [System.Drawing.ContentAlignment]::MiddleLeft
+    $item.Padding = New-Object System.Windows.Forms.Padding(24, 0, 0, 0)
+    $item.Margin = New-Object System.Windows.Forms.Padding(0, 4, 0, 2)
+    try {
+        $item.Font = New-Object System.Drawing.Font($contextMenu.Font, ([System.Drawing.FontStyle]::Bold -bor [System.Drawing.FontStyle]::Underline))
+    } catch {
+    }
+    return $item
+}
+
+function Get-TrayMenuDefaultTooltip([System.Windows.Forms.ToolStripItem]$item) {
+    if (-not $item) { return $null }
+    if ($item -is [System.Windows.Forms.ToolStripSeparator]) { return $null }
+    if ($item -is [System.Windows.Forms.ToolStripLabel]) { return $null }
+    $name = [string]$item.Name
+    $text = [string]$item.Text
+    if ($name -eq "TopStatusSummaryItem") {
+        return (L "Current app state. Hover for full details.")
+    }
+    if ($name -eq "TopStatusStateItem" -or $text -like "Status:*") {
+        return (L "Current app state.")
+    }
+    if ($name -eq "TopStatusNextItem" -or $text -like "Next:*") {
+        return (L "Time until the next automatic toggle.")
+    }
+    if ($name -eq "TopStatusProfileItem" -or $text -like "Active Profile:*") {
+        return (L "Currently active profile.")
+    }
+    if ($text -eq (L "Run Once Now") -or $text -eq (L "Run Once Next Cycle") -or $text -eq (L "Run Once (Next Cycle)")) {
+        return (L "Trigger one toggle now or queue it for the next cycle.")
+    }
+    if ($text -eq (L "History")) { return (L "View recent toggle history.") }
+    if ($text -eq (L "Logs")) { return (L "Open log tools and files.") }
+    if ($text -eq (L "Profiles")) { return (L "Switch between profiles.") }
+    if ($text -eq (L "Quick Options")) { return (L "Quick toggles for common settings.") }
+    if ($text -eq (L "Recovery")) { return (L "Safe-mode and self-healing actions.") }
+    if ($text -eq (L "Settings")) { return (L "Open the settings window.") }
+    if ($text -eq (L "Restart")) { return (L "Restart the app.") }
+    if ($text -eq (L "Exit")) { return (L "Exit the app.") }
+    if ($item -is [System.Windows.Forms.ToolStripMenuItem] -and $item.DropDownItems -and $item.DropDownItems.Count -gt 0) {
+        return (L "Open submenu.")
+    }
+    if (-not [string]::IsNullOrWhiteSpace($text)) {
+        return (L "Select this action.")
+    }
+    return $null
+}
+
+function Ensure-TrayTooltipHost {
+    if (-not $contextMenu) { return }
+    $contextMenu.ShowItemToolTips = $true
+}
+
+function Ensure-TrayMenuTooltips([System.Windows.Forms.ToolStripItemCollection]$items) {
+    if (-not $items) { return }
+    Ensure-TrayTooltipHost
+
+    foreach ($item in $items) {
+        if (-not ($item -is [System.Windows.Forms.ToolStripMenuItem])) { continue }
+
+        if ([string]::IsNullOrWhiteSpace([string]$item.ToolTipText)) {
+            $tip = Get-TrayMenuDefaultTooltip $item
+            if (-not [string]::IsNullOrWhiteSpace($tip)) {
+                $item.ToolTipText = $tip
+            }
+        }
+
+        if ($item.DropDownItems -and $item.DropDownItems.Count -gt 0) {
+            Ensure-TrayMenuTooltips $item.DropDownItems
+        }
+    }
+}
+
+if (-not $script:TrayStatusStateItem) {
+    $script:TrayStatusStateItem = New-Object System.Windows.Forms.ToolStripMenuItem("Status: Stopped")
+    $script:TrayStatusStateItem.Name = "TopStatusStateItem"
+    $script:TrayStatusStateItem.Enabled = $true
+}
+if (-not $script:TrayStatusNextItem) {
+    $script:TrayStatusNextItem = New-Object System.Windows.Forms.ToolStripMenuItem("Next: N/A")
+    $script:TrayStatusNextItem.Name = "TopStatusNextItem"
+    $script:TrayStatusNextItem.Enabled = $true
+}
+if (-not $script:TrayStatusProfileItem) {
+    $script:TrayStatusProfileItem = New-Object System.Windows.Forms.ToolStripMenuItem("Active Profile: Default")
+    $script:TrayStatusProfileItem.Name = "TopStatusProfileItem"
+    $script:TrayStatusProfileItem.Enabled = $true
+}
+if (-not $script:TrayStatusSummaryItem) {
+    $script:TrayStatusSummaryItem = New-Object System.Windows.Forms.ToolStripMenuItem("Status: Stopped")
+    $script:TrayStatusSummaryItem.Name = "TopStatusSummaryItem"
+    $script:TrayStatusSummaryItem.Enabled = $true
+    try {
+        $script:TrayStatusSummaryItem.Font = New-Object System.Drawing.Font("Consolas", $contextMenu.Font.Size, [System.Drawing.FontStyle]::Regular)
+    } catch {
+    }
+}
+
+$recoveryMenu = New-Object System.Windows.Forms.ToolStripMenuItem("Recovery")
+$recoveryMenu.DropDownItems.AddRange(@(
     $resetSafeModeItem,
     $recoverNowItem,
     $repairModeItem,
+    $repairAllItem
+))
+Set-MenuTooltip $recoveryMenu "Safe-mode and self-healing recovery actions."
+
+$toolsMenu = New-Object System.Windows.Forms.ToolStripMenuItem("Actions")
+$toolsMenu.DropDownItems.AddRange(@(
+    $profilesMenu,
+    $quickSettingsMenu,
+    $historyItem,
+    $logsMenu,
+    $recoveryMenu
+))
+Set-MenuTooltip $toolsMenu "Profiles, quick options, logs, and recovery actions."
+
+$controlMenu = New-Object System.Windows.Forms.ToolStripMenuItem("More")
+$controlMenu.DropDownItems.AddRange(@(
+    $toggleNowItem,
+    $runOnceNowItem,
+    $pauseMenu,
+    $intervalMenu
+))
+Set-MenuTooltip $controlMenu "Toggle once, run once, pause, and interval controls."
+
+$contextMenu.Items.AddRange(@(
+    (New-TraySectionHeader "Status"),
+    $script:TrayStatusSummaryItem,
+    $script:TrayStatusNextItem,
     (New-Object System.Windows.Forms.ToolStripSeparator),
+    (New-TraySectionHeader "Control"),
+    $startStopItem,
+    $controlMenu,
+    (New-Object System.Windows.Forms.ToolStripSeparator),
+    (New-TraySectionHeader "Tools"),
+    $toolsMenu,
+    $openSettingsItem,
+    (New-Object System.Windows.Forms.ToolStripSeparator),
+    (New-TraySectionHeader "System"),
     $restartItem,
     $exitItem
 ))
+$contextMenu.ShowItemToolTips = $true
+Ensure-TrayMenuTooltips $contextMenu.Items
+
+Register-SystemSessionEndingHandler
 
 if ($script:SettingsOnly) {
     Show-SettingsDialog
     [System.Windows.Forms.Application]::Run()
+    Invoke-AppShutdownCleanup -Reason "SettingsOnlyExit" -SkipAppExit
     return
 }
 
@@ -8789,6 +11480,18 @@ $contextMenu.Add_Opening({
             if (Get-Command Update-TrayLabels -ErrorAction SilentlyContinue) { Update-TrayLabels }
             Update-StatusText
         }
+        # Keep compact summary fresh and recover stale running "Next: N/A" visuals.
+        if ($script:isRunning -and -not $script:isPaused -and -not $script:isScheduleBlocked -and -not $script:isScheduleSuspended) {
+            $nowRuntime = Get-Now
+            $intervalSeconds = [Math]::Max(1, [int]$settings.IntervalSeconds)
+            if ($null -eq $script:nextToggleTime -or $script:nextToggleTime -le $nowRuntime) {
+                $script:nextToggleTime = $nowRuntime.AddSeconds($intervalSeconds)
+            }
+            if ($script:TrayStatusNextItem -and ([string]$script:TrayStatusNextItem.Text -like "*N/A*")) {
+                Update-StatusText
+            }
+        }
+        Ensure-TrayMenuTooltips $contextMenu.Items
         Set-StatusUpdateTimerEnabled $true
     } finally {
         $script:TrayMenuOpening = $false
@@ -8797,9 +11500,7 @@ $contextMenu.Add_Opening({
 
 $contextMenu.Add_Closed({
     Set-StatusUpdateTimerEnabled $false
-    try { $script:TrayTooltipTimer.Stop() } catch { }
-    $script:TrayTooltipPendingText = $null
-    try { $script:TrayMenuToolTip.Hide($contextMenu) } catch { }
+    try { if ($contextMenu) { $contextMenu.ShowItemToolTips = $true } } catch { }
 })
 
 function Refresh-TrayMenu([switch]$SkipHeavyBuild) {
@@ -8814,6 +11515,7 @@ function Refresh-TrayMenu([switch]$SkipHeavyBuild) {
     try { Apply-MenuFontSize ([int]$settings.FontSize) } catch { }
     try { Update-ThemePreference } catch { }
     try { Update-StatusText } catch { }
+    try { Ensure-TrayMenuTooltips $contextMenu.Items } catch { }
     if (-not $SkipHeavyBuild) {
         $script:TrayMenuHeavyInitialized = $true
         $script:TrayMenuNeedsRefresh = $false
@@ -8839,6 +11541,7 @@ $watchdogTimer.Add_Tick({
     Invoke-SafeTimerAction "WatchdogTimer" {
         if ($script:isShuttingDown -or $script:CleanupDone) { return }
         $script:WatchdogTickCounter = [int]$script:WatchdogTickCounter + 1
+        try { Update-FunStatsRuntimeProgress (Get-Date) } catch { }
         Update-PeakWorkingSet
         Request-StatusUpdate
         if (($script:WatchdogTickCounter % 2) -eq 0) {
@@ -9128,9 +11831,15 @@ if (-not $overrideAtStartup -and (Test-Path $script:CrashStatePath)) {
 }
 
 if ($script:MinimalModeActive -and -not $overrideAtStartup) {
-    Request-StatusUpdate
-    Show-Balloon "Teams-Always-Green" "Minimal mode enabled after repeated crashes. Open Settings to review." ([System.Windows.Forms.ToolTipIcon]::Warning)
-    Write-Log "Startup: minimal mode active (auto-start suppressed)." "WARN" $null "Startup"
+    $allowAutoStartInMinimal = ($script:RelaunchedFromRestart -and [bool](Get-SettingsPropertyValue $settings "AutoStartOnRestart" $false))
+    if ($allowAutoStartInMinimal) {
+        Write-Log "Startup: minimal mode is active, but Auto Start on Restart was requested; starting toggle." "WARN" $null "Startup"
+        Start-Toggling
+    } else {
+        Request-StatusUpdate
+        Show-Balloon "Teams-Always-Green" "Minimal mode enabled after repeated crashes. Open Settings to review." ([System.Windows.Forms.ToolTipIcon]::Warning)
+        Write-Log "Startup: minimal mode active (auto-start suppressed)." "WARN" $null "Startup"
+    }
 } elseif ($script:MinimalModeActive -and $overrideAtStartup) {
     $script:MinimalModeActive = $false
     $script:MinimalModeReason = $null
@@ -9146,6 +11855,9 @@ if ($script:MinimalModeActive -and -not $overrideAtStartup) {
 } elseif ($script:isPaused) {
     Request-StatusUpdate
     Show-Balloon "Teams-Always-Green" "Paused; will auto-resume when the timer expires." ([System.Windows.Forms.ToolTipIcon]::Info)
+} elseif ($script:RelaunchedFromRestart -and [bool](Get-SettingsPropertyValue $settings "AutoStartOnRestart" $false)) {
+    Write-Log "Startup: auto-starting toggle after app restart." "INFO" $null "Startup"
+    Start-Toggling
 } elseif ($settings.RememberChoice) {
     if ($settings.RunOnceOnLaunch) {
         Do-Toggle "startup"
@@ -9177,46 +11889,7 @@ if ($script:MinimalModeActive -and -not $overrideAtStartup) {
 
 # Cleanup if Application.Run exits unexpectedly
 try {
-    if ($script:CleanupDone) { return }
-    $script:isShuttingDown = $true
-    $statusUpdateTimer.Stop()
-    $pauseTimer.Stop()
-    $watchdogTimer.Stop()
-    if ($script:DeferredMaintenanceTimer) {
-        $script:DeferredMaintenanceTimer.Stop()
-    }
-    if ($script:FolderCheckTimer) {
-        $script:FolderCheckTimer.Stop()
-    }
-    if ($script:DeferredStartupTimer) {
-        $script:DeferredStartupTimer.Stop()
-    }
-    Unregister-Hotkeys
-    Stop-Toggling
-    if ($script:OverlayIcon) { $script:OverlayIcon.Dispose() }
-    if ($notifyIcon) {
-        try { $notifyIcon.Visible = $false } catch { }
-        try { $notifyIcon.Dispose() } catch { }
-        $notifyIcon = $null
-    }
-    $timer.Dispose()
-    $statusUpdateTimer.Dispose()
-    $pauseTimer.Dispose()
-    $watchdogTimer.Dispose()
-    if ($script:DeferredMaintenanceTimer) {
-        $script:DeferredMaintenanceTimer.Dispose()
-        $script:DeferredMaintenanceTimer = $null
-    }
-    if ($script:FolderCheckTimer) {
-        $script:FolderCheckTimer.Dispose()
-        $script:FolderCheckTimer = $null
-    }
-    if ($script:DeferredStartupTimer) {
-        $script:DeferredStartupTimer.Dispose()
-        $script:DeferredStartupTimer = $null
-    }
-    Release-MutexOnce
-    $script:CleanupDone = $true
+    Invoke-AppShutdownCleanup -Reason "RunLoopExit" -SkipAppExit
 } catch {
     Write-Log "Cleanup failed." "ERROR" $_.Exception "Cleanup"
 }

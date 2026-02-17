@@ -82,7 +82,7 @@ function Update-TrayLabels {
 
     if ($runOnceNowItem) {
         if ($script:isRunning -or $script:isPaused) {
-            $runOnceNowItem.Text = (L "Run Once (Next Cycle)")
+            $runOnceNowItem.Text = (L "Run Once (Next Cycle)" "Run Once Next Cycle")
             $runOnceNowItem.ToolTipText = (L "Queue one toggle on the next cycle.")
         } else {
             $runOnceNowItem.Text = (L "Run Once Now")
@@ -127,8 +127,8 @@ $toggleNowItem = New-Object System.Windows.Forms.ToolStripMenuItem("Toggle Once"
 Set-MenuTooltip $toggleNowItem (L "Trigger a single toggle immediately.")
 $toggleNowItem.Add_Click({ Invoke-TrayAction "ToggleOnce" { Do-Toggle "manual" } })
 
-$statusItem = New-Object System.Windows.Forms.ToolStripMenuItem("Status")
-Set-MenuTooltip $statusItem (L "View current status details.")
+$statusItem = New-Object System.Windows.Forms.ToolStripMenuItem("Detailed Status")
+Set-MenuTooltip $statusItem (L "View detailed status values.")
 $statusLineState = New-Object System.Windows.Forms.ToolStripMenuItem("Status: Stopped")
 $statusLineState.Name = "StatusStateItem"
 $statusLineInterval = New-Object System.Windows.Forms.ToolStripMenuItem("Interval: 60s")
@@ -225,7 +225,7 @@ $intervalMenu.DropDownItems.AddRange(@(
     (New-IntervalItem "5 minutes" 300)
 ))
 
-$customIntervalItem = New-Object System.Windows.Forms.ToolStripMenuItem("Custom...")
+$customIntervalItem = New-Object System.Windows.Forms.ToolStripMenuItem("Custom")
 $customIntervalItem.Add_Click({
     Invoke-TrayAction "IntervalCustom" {
         $value = Prompt-CustomIntervalSeconds
@@ -323,7 +323,7 @@ function Rebuild-PauseMenu {
         })
         $pauseMenu.DropDownItems.Add($item) | Out-Null
     }
-    $script:pauseUntilItem = New-Object System.Windows.Forms.ToolStripMenuItem((L "Pause until..."))
+    $script:pauseUntilItem = New-Object System.Windows.Forms.ToolStripMenuItem((L "Pause Until"))
     $script:pauseUntilItem.Add_Click({
         Invoke-TrayAction "PauseUntil" { Show-PauseUntilDialog }
     })
@@ -376,7 +376,7 @@ $openSettingsItem = $null
 $openSettingsVar = Get-Variable -Name openSettingsItem -Scope Script -ErrorAction SilentlyContinue
 if ($openSettingsVar) { $openSettingsItem = $openSettingsVar.Value }
 if (-not $openSettingsItem) {
-    $openSettingsItem = New-Object System.Windows.Forms.ToolStripMenuItem("Settings...")
+    $openSettingsItem = New-Object System.Windows.Forms.ToolStripMenuItem("Settings")
     Set-MenuTooltip $openSettingsItem (L "Open the settings window.")
     $openSettingsItem.Add_Click({
         Invoke-TrayAction "Settings" {
@@ -482,7 +482,7 @@ $viewLogItem.Add_Click({
     }
 })
 
-$viewLogTailItem = New-Object System.Windows.Forms.ToolStripMenuItem("View Log (Tail)")
+$viewLogTailItem = New-Object System.Windows.Forms.ToolStripMenuItem("View Log Tail")
 $viewLogTailItem.Add_Click({
     Show-LogTailDialog
 })
