@@ -299,7 +299,7 @@ Describe "Quality: Settings Migration Unit Tests" {
     It "migrates legacy settings to current schema and adds required keys" {
         $script:DateTimeFormatDefault = "yyyy-MM-dd HH:mm:ss"
         $script:DataRoot = "C:\\Temp\\TeamsAlwaysGreen"
-        $script:SettingsSchemaVersion = 9
+        $script:SettingsSchemaVersion = 10
         $script:SecurityDefaultUpdateOwner = "alexphillips-dev"
         $script:SecurityDefaultUpdateRepo = "Teams-Always-Green"
 
@@ -311,7 +311,7 @@ Describe "Quality: Settings Migration Unit Tests" {
         }
         $migrated = Migrate-Settings $legacy
 
-        [int]$migrated.SchemaVersion | Should -Be 9
+        [int]$migrated.SchemaVersion | Should -Be 10
         $migrated.PSObject.Properties.Name | Should -Contain "DateTimeFormat"
         $migrated.PSObject.Properties.Name | Should -Contain "UseSystemDateTimeFormat"
         $migrated.PSObject.Properties.Name | Should -Contain "DataRoot"
@@ -319,6 +319,7 @@ Describe "Quality: Settings Migration Unit Tests" {
         $migrated.PSObject.Properties.Name | Should -Contain "SecurityModeEnabled"
         $migrated.PSObject.Properties.Name | Should -Contain "StrictProfileImport"
         $migrated.PSObject.Properties.Name | Should -Contain "UpdateOwner"
+        $migrated.PSObject.Properties.Name | Should -Contain "BadgeTrackingMode"
     }
 
     It "preserves future schema versions without downgrading" {
@@ -332,7 +333,7 @@ Describe "Quality: Settings Migration Unit Tests" {
 
     It "adds update security keys when migrating from schema 8" {
         $script:DataRoot = "C:\\Temp\\TeamsAlwaysGreen"
-        $script:SettingsSchemaVersion = 9
+        $script:SettingsSchemaVersion = 10
         $script:SecurityDefaultUpdateOwner = "alexphillips-dev"
         $script:SecurityDefaultUpdateRepo = "Teams-Always-Green"
 
@@ -343,12 +344,13 @@ Describe "Quality: Settings Migration Unit Tests" {
         }
         $migrated = Migrate-Settings $legacy
 
-        [int]$migrated.SchemaVersion | Should -Be 9
+        [int]$migrated.SchemaVersion | Should -Be 10
         $migrated.PSObject.Properties.Name | Should -Contain "UpdateOwner"
         $migrated.PSObject.Properties.Name | Should -Contain "UpdateRepo"
         $migrated.PSObject.Properties.Name | Should -Contain "UpdateRequireHash"
         $migrated.PSObject.Properties.Name | Should -Contain "UpdateRequireSignature"
         $migrated.PSObject.Properties.Name | Should -Contain "HardenPermissions"
+        $migrated.PSObject.Properties.Name | Should -Contain "BadgeTrackingMode"
     }
 }
 

@@ -29,6 +29,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Verify parse gate
+        shell: pwsh
+        run: |
+          ./Tools/Verify.ps1 -SkipAnalyzer
+
       - name: Run privacy/security scan
         shell: pwsh
         run: |

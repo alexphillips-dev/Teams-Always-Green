@@ -10,7 +10,9 @@ $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $analyzerSettings = Join-Path $repoRoot "PSScriptAnalyzerSettings.psd1"
 $manifestScript = Join-Path $repoRoot "Tools/Generate-QuickSetupManifest.ps1"
 $privacyScanScript = Join-Path $repoRoot "Tools/Find-PrivacyLeaks.ps1"
-$pesterTests = Join-Path $repoRoot "Tools/Quality.Tests.ps1"
+$verifyScript = Join-Path $repoRoot "Tools/Verify.ps1"
+$pesterToolsTests = Join-Path $repoRoot "Tools/Quality.Tests.ps1"
+$pesterRepoTests = Join-Path $repoRoot "Tests"
 $versionPath = Join-Path $repoRoot "VERSION"
 $changelogPath = Join-Path $repoRoot "CHANGELOG.md"
 
@@ -22,6 +24,11 @@ if (-not (Get-Module -ListAvailable -Name PSScriptAnalyzer)) {
 }
 if (-not (Get-Module -ListAvailable -Name Pester)) {
     throw "Pester module is not installed."
+}
+
+if (Test-Path -LiteralPath $verifyScript -PathType Leaf) {
+    Write-Host "Running parse verification..."
+    & $verifyScript -SkipAnalyzer
 }
 
 Write-Host "Checking VERSION and changelog..."
@@ -84,7 +91,11 @@ Write-Host "Checking QuickSetup manifest freshness..."
 & $manifestScript -RepoRoot $repoRoot -Check
 
 Write-Host "Running Pester tests..."
-$pesterResult = Invoke-Pester -Path $pesterTests -PassThru -Output Detailed
+$pesterPaths = @()
+if (Test-Path -LiteralPath $pesterToolsTests -PathType Leaf) { $pesterPaths += $pesterToolsTests }
+if (Test-Path -LiteralPath $pesterRepoTests -PathType Container) { $pesterPaths += $pesterRepoTests }
+if ($pesterPaths.Count -eq 0) { throw "No Pester test paths found." }
+$pesterResult = Invoke-Pester -Path $pesterPaths -PassThru -Output Detailed
 if ($pesterResult.FailedCount -gt 0) {
     throw "Pester reported $($pesterResult.FailedCount) failing test(s)."
 }

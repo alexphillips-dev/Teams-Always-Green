@@ -1,5 +1,6 @@
 param(
-    [switch]$FailOnAnalyzer
+    [switch]$FailOnAnalyzer,
+    [switch]$SkipAnalyzer
 )
 
 Set-StrictMode -Version Latest
@@ -30,6 +31,7 @@ $targets = @(
     "Script\\Core\\AppInfo.ps1",
     "Script\\Core\\Paths.ps1",
     "Script\\Core\\Runtime.ps1",
+    "Script\\Core\\DateTime.ps1",
     "Script\\Core\\Settings.ps1",
     "Script\\Core\\Logging.ps1"
 )
@@ -41,7 +43,9 @@ foreach ($rel in $targets) {
 }
 Write-Step "PSScriptAnalyzer (if available)"
 try {
-    if (Get-Command Invoke-ScriptAnalyzer -ErrorAction SilentlyContinue) {
+    if ($SkipAnalyzer) {
+        Write-Host "  SKIP  Analyzer step disabled."
+    } elseif (Get-Command Invoke-ScriptAnalyzer -ErrorAction SilentlyContinue) {
         $settingsPath = Join-Path $repoRoot "PSScriptAnalyzerSettings.psd1"
         $result = Invoke-ScriptAnalyzer -Path (Join-Path $repoRoot "Script") -Recurse -Settings $settingsPath -Severity Warning,Error
         if ($result -and $result.Count -gt 0) {

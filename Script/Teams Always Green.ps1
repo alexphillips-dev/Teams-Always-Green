@@ -153,6 +153,7 @@ Add-Type -AssemblyName Microsoft.VisualBasic
 $script:CoreModuleLoadOrder = @(
     "Core\Paths.ps1",
     "Core\Runtime.ps1",
+    "Core\DateTime.ps1",
     "Core\Settings.ps1",
     "Core\Logging.ps1"
 )
@@ -242,6 +243,7 @@ $script:RuntimeModuleAllowList = @(
     "Core\Logging.ps1",
     "Core\Paths.ps1",
     "Core\Runtime.ps1",
+    "Core\DateTime.ps1",
     "Core\Settings.ps1",
     "Features\UpdateEngine.ps1",
     "I18n\UiStrings.ps1",
@@ -1270,11 +1272,7 @@ function Repair-FromStartupSnapshot($defaultSettings) {
                 }
     }
 }
-# --- Date/time formatting helpers (presets + locale) ---
-$script:DateTimeFormatDefault = "yyyy-MM-dd HH:mm:ss"
-$script:DateTimeFormat = $script:DateTimeFormatDefault
-$script:UseSystemDateTimeFormat = $true
-$script:SystemDateTimeFormatMode = "Short"
+# --- Date/time formatting helpers (Core\DateTime.ps1) ---
 $script:SettingsLoadFailed = $false
 $script:SettingsRecovered = $false
 $script:SettingsSaveInProgress = $false
@@ -1284,34 +1282,6 @@ $script:SettingsTampered = $false
 $script:SettingsTamperMessage = $null
 $script:MinimalModeActive = $false
 $script:MinimalModeReason = $null
-
-function Normalize-DateTimeFormat([string]$format) {
-    if ([string]::IsNullOrWhiteSpace($format)) { return $script:DateTimeFormatDefault }
-    try {
-        [DateTime]::Now.ToString($format) | Out-Null
-        return $format
-    } catch {
-        return $script:DateTimeFormatDefault
-    }
-}
-
-function Format-DateTime($value) {
-    if ($null -eq $value) { return "N/A" }
-    if ($script:UseSystemDateTimeFormat) {
-        $systemFormat = if ($script:SystemDateTimeFormatMode -eq "Long") { "F" } else { "g" }
-        try {
-            return ([DateTime]$value).ToString($systemFormat)
-        } catch {
-            return [string]$value
-        }
-    }
-    $format = Normalize-DateTimeFormat $script:DateTimeFormat
-    try {
-        return ([DateTime]$value).ToString($format)
-    } catch {
-        return [string]$value
-    }
-}
 
 function Normalize-IntervalSeconds([int]$seconds) {
     if ($seconds -lt 5) { return 5 }
