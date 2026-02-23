@@ -5473,6 +5473,15 @@ function Validate-SettingsForSave($settings) {
 function Migrate-Settings($settings) {
     if (-not $settings) { return $settings }
     $current = 1
+    $scrollLockDelayDefault = 50
+    try {
+        $delayDefaultVar = Get-Variable -Name ScrollLockReleaseDelayDefaultMs -Scope Script -ErrorAction SilentlyContinue
+        if ($delayDefaultVar -and $null -ne $delayDefaultVar.Value) {
+            $scrollLockDelayDefault = [int]$delayDefaultVar.Value
+        }
+    } catch {
+        $scrollLockDelayDefault = 50
+    }
     $schemaValue = Get-SettingsPropertyValue $settings "SchemaVersion"
     if ($null -ne $schemaValue) { $current = [int]$schemaValue }
     if ($current -lt 2) {
@@ -5536,7 +5545,7 @@ function Migrate-Settings($settings) {
     }
     if ($current -lt 11) {
         if (-not ($settings.PSObject.Properties.Name -contains "ScrollLockReleaseDelayMs")) {
-            Set-SettingsPropertyValue $settings "ScrollLockReleaseDelayMs" $script:ScrollLockReleaseDelayDefaultMs
+            Set-SettingsPropertyValue $settings "ScrollLockReleaseDelayMs" $scrollLockDelayDefault
         }
         $current = 11
     }
