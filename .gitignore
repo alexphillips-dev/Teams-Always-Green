@@ -24,5 +24,6 @@ Meta/SettingsHost.cs
 # OS/editor junk
 .DS_Store
 Thumbs.db
+/Teams Always Green.code-workspace
 
 Meta/*.settings.lastgood.json
