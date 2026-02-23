@@ -1199,6 +1199,7 @@ function Show-SetupWizard {
         IntegrityStatus = "Not verified"
         ShortcutsCreated = @()
         PortableMode = $false
+        FinalizeCompleted = $false
     }
 
     $form = New-Object System.Windows.Forms.Form
@@ -1221,7 +1222,7 @@ function Show-SetupWizard {
     $stepper.Font = New-Object System.Drawing.Font("Segoe UI", 8.5, [System.Drawing.FontStyle]::Regular)
     $stepper.ForeColor = [System.Drawing.Color]::FromArgb(90, 90, 90)
     $stepper.Location = New-Object System.Drawing.Point(120, 14)
-    $stepper.Text = "Step 1 of 4 Ã‚Â· Welcome"
+    $stepper.Text = "Step 1 of 4 - Welcome"
 
     $panelWelcome = New-Object System.Windows.Forms.Panel
     $panelWelcome.Location = New-Object System.Drawing.Point(16, 44)
@@ -1653,10 +1654,10 @@ function Show-SetupWizard {
         $panelDownload.Visible = ($index -eq 2)
         $panelSummary.Visible = ($index -eq 3)
         switch ($index) {
-            0 { $stepper.Text = "Step 1 of 4 Ã‚Â· Welcome" }
-            1 { $stepper.Text = "Step 1 of 4 Ã‚Â· Location" }
-            2 { $stepper.Text = "Step 2 of 4 Ã‚Â· Download" }
-            3 { $stepper.Text = "Step 4 of 4 Ã‚Â· Summary" }
+            0 { $stepper.Text = "Step 1 of 4 - Welcome" }
+            1 { $stepper.Text = "Step 1 of 4 - Location" }
+            2 { $stepper.Text = "Step 2 of 4 - Download" }
+            3 { $stepper.Text = "Step 4 of 4 - Summary" }
         }
         if ($index -eq 3) {
             $form.Height = $summaryFormHeight
@@ -1693,6 +1694,16 @@ function Show-SetupWizard {
             if (-not $state.DownloadComplete) {
                 Show-SetupInfo "Download is still running. Please wait until it finishes."
                 return
+            }
+            if (-not $state.FinalizeCompleted) {
+                try {
+                    $state.ShortcutsCreated = Finalize-Install -installPath $state.InstallPath -targetScript $targetScript -portableMode $state.PortableMode -enableStartup $state.EnableStartup
+                    $state.FinalizeCompleted = $true
+                } catch {
+                    Write-SetupLog ("Finalize-Install failed: {0}" -f $_.Exception.Message)
+                    $state.ShortcutsCreated = @("Install finalized with warnings")
+                    $state.FinalizeCompleted = $true
+                }
             }
             $sumInstall.Text = $state.InstallPath
             $sumMode.Text = if ($state.PortableMode) { "Portable (no shortcuts)" } else { "Standard" }
@@ -1915,7 +1926,7 @@ function Show-SetupWizard {
             Update-Progress $downloadUi $total $total "Step 2 of 4: Download complete. Click Next to continue."
             $state.DownloadComplete = $true
             $btnNext.Enabled = $true
-            $state.ShortcutsCreated = Finalize-Install -installPath $state.InstallPath -targetScript $targetScript -portableMode $state.PortableMode -enableStartup $state.EnableStartup
+            [System.Windows.Forms.Application]::DoEvents()
             return
         }
     })
