@@ -1,0 +1,7 @@
+{
+  "minCoveragePercent": 10.0,
+  "paths": [
+    "Script/Core/*.ps1",
+    "Script/Features/*.ps1"
+  ]
+}

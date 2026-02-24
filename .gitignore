@@ -27,3 +27,4 @@ Thumbs.db
 /Teams Always Green.code-workspace
 
 Meta/*.settings.lastgood.json
+coverage.xml

@@ -77,7 +77,7 @@ Optional: choose **portable mode** to skip shortcuts. Setup logs are saved to `%
 4) Run:
 
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File "Script\Teams Always Green.ps1"
+powershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File "Script\Teams Always Green.ps1"
 ```
 
 ---
@@ -92,6 +92,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File "Script\Teams Always Gre
 ## Architecture
 
 - See `docs/architecture.md` for startup flow, module boundaries, and data-path model.
+- See `docs/security-standards.md` for secure coding/release controls and branch protection guidance.
 
 ---
 
@@ -120,6 +121,7 @@ Teams Always Green\
     QuickSetup.ps1
     QuickSetup.cmd
     QuickSetup.manifest.json
+    QuickSetup.manifest.sig   (optional, detached signature)
   Teams Always Green.VBS
   CHANGELOG.md
   Debug\
@@ -161,6 +163,7 @@ Portable mode stores runtime data in the install folder (`Logs\`, `Settings\`, `
 - **Security Mode bundle:** A single toggle in **Settings -> Advanced** to enforce strict import/update policy, update hash/signature requirements, permission hardening, and safer path behavior.
 - **Strict imports:** `StrictSettingsImport` and `StrictProfileImport` can block unknown or malformed keys during imports.
 - **QuickSetup supply-chain checks:** QuickSetup only accepts trusted raw GitHub URLs for this repo and requires a valid manifest + per-file hash verification.
+- **Optional detached manifest signature:** QuickSetup supports `QuickSetup.manifest.sig` verification (RSA/SHA-256) when a trusted public key is configured.
 - **Trusted update source:** Updates are validated against configured `UpdateOwner`/`UpdateRepo` and trusted GitHub URLs.
 - **Update integrity gates:** `UpdateRequireHash` and `UpdateRequireSignature` can require SHA-256 and detached signature validation before applying updates.
 - **Safer update relaunch:** After update apply, restart uses an explicit system PowerShell path (`%WINDIR%\System32\WindowsPowerShell\v1.0\powershell.exe`).
@@ -197,12 +200,13 @@ Versioning discipline:
 - `VERSION` must be `major.minor.patch` (SemVer).
 - `CHANGELOG.md` must include both `## [Unreleased]` and a section for the current `VERSION`.
 
-1. Run local quality checks: `powershell -NoProfile -ExecutionPolicy Bypass -File .\Tools\Invoke-QualityChecks.ps1`
-2. Enable local pre-commit guardrails once per clone: `powershell -NoProfile -ExecutionPolicy Bypass -File .\Tools\Enable-GitHooks.ps1`
-3. Refresh installer manifest: `powershell -NoProfile -ExecutionPolicy Bypass -File .\Tools\Generate-QuickSetupManifest.ps1`
-4. Sign release scripts (certificate in cert store required): `powershell -NoProfile -ExecutionPolicy Bypass -File .\Tools\Sign-Release.ps1 -CertificateThumbprint <THUMBPRINT>`
-5. `.github/workflows/quality.yml` runs privacy/security scanning + analyzer + Pester + manifest freshness checks.
-6. `.github/workflows/release-prep.yml` regenerates and commits `Script/QuickSetup/QuickSetup.manifest.json` on demand before release.
+1. Run local quality checks: `powershell -NoProfile -ExecutionPolicy RemoteSigned -File .\Tools\Invoke-QualityChecks.ps1`
+2. Enable local pre-commit guardrails once per clone: `powershell -NoProfile -ExecutionPolicy RemoteSigned -File .\Tools\Enable-GitHooks.ps1`
+3. Refresh installer manifest: `powershell -NoProfile -ExecutionPolicy RemoteSigned -File .\Tools\Generate-QuickSetupManifest.ps1`
+4. Optional: create detached manifest signature (private key XML required): `powershell -NoProfile -ExecutionPolicy RemoteSigned -File .\Tools\Generate-QuickSetupManifest.ps1 -Sign -ManifestPrivateKeyPath <PRIVATE_KEY_XML_PATH>`
+5. Sign release scripts (certificate in cert store required): `powershell -NoProfile -ExecutionPolicy RemoteSigned -File .\Tools\Sign-Release.ps1 -CertificateThumbprint <THUMBPRINT>`
+6. `.github/workflows/quality.yml` runs privacy/security scanning + analyzer warning budget + Pester coverage gate + manifest freshness checks.
+7. `.github/workflows/release-prep.yml` verifies `QuickSetup.manifest.json` freshness before release (no direct auto-commit to `main`).
 
 ---
 

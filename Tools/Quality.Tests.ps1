@@ -301,8 +301,10 @@ Describe "Quality: QuickSetup Wizard Flow" {
         $script:quickSetupText | Should -Match 'function\s+Test-QuickSetupTrustedUrl'
         $script:quickSetupText | Should -Match 'raw\.githubusercontent\.com'
         $script:quickSetupText | Should -Match 'Blocked untrusted manifest URL'
+        $script:quickSetupText | Should -Match 'Blocked untrusted manifest signature URL'
         $script:quickSetupText | Should -Match 'Blocked untrusted download URL'
         $script:quickSetupText | Should -Match 'function\s+Test-QuickSetupManifest'
+        $script:quickSetupText | Should -Match 'function\s+Test-QuickSetupManifestSignature'
         $script:quickSetupText | Should -Match 'Manifest validation failed'
         $script:quickSetupText | Should -Match 'Manifest expected hash is missing for'
     }
@@ -316,7 +318,12 @@ Describe "Quality: QuickSetup Wizard Flow" {
     }
 
     It "unlocks summary step before advancing from step 2" {
-        $script:quickSetupText | Should -Match '\$allowSummary\s*=\s*\$true\s*[\r\n]+\s*&\s*\$showStep\s+3'
+        $script:quickSetupText | Should -Match '\$state\.AllowSummary\s*=\s*\$true\s*[\r\n]+\s*&\s*\$showStep\s+3'
+    }
+
+    It "avoids execution policy bypass in setup launchers" {
+        $script:quickSetupText | Should -Not -Match 'ExecutionPolicy\s+Bypass'
+        (Get-Content -Raw -Path (Join-Path $script:repoRoot "Script/QuickSetup/QuickSetup.cmd")) | Should -Not -Match 'ExecutionPolicy\s+Bypass'
     }
 }
 

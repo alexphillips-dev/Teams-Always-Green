@@ -11,6 +11,9 @@ trap {
 $script:QuickSetupStateDir = Join-Path $env:LOCALAPPDATA "TeamsAlwaysGreen"
 $script:QuickSetupLastPathFile = Join-Path $script:QuickSetupStateDir "QuickSetup.lastpath.txt"
 $script:QuickSetupManifestRelativePath = "Script\QuickSetup\QuickSetup.manifest.json"
+$script:QuickSetupManifestSignatureRelativePath = "Script\QuickSetup\QuickSetup.manifest.sig"
+$script:QuickSetupManifestSignaturePublicKeyXml = ""
+$script:QuickSetupRequireManifestSignature = $false
 $script:QuickSetupTrustedOwner = "alexphillips-dev"
 $script:QuickSetupTrustedRepo = "Teams-Always-Green"
 
@@ -181,7 +184,7 @@ function Cleanup-SetupTempFiles {
             ('Remove-Item -Force -ErrorAction SilentlyContinue "{0}"' -f $cleanupScript)
         )
         Set-Content -Path $cleanupScript -Value ($lines -join "`r`n") -Encoding ASCII
-        Start-Process "$env:WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe" -ArgumentList "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$cleanupScript`"" -WindowStyle Hidden
+        Start-Process "$env:WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe" -ArgumentList "-NoProfile -WindowStyle Hidden -File `"$cleanupScript`"" -WindowStyle Hidden
     } catch {
                 $null = $_
             }
@@ -291,6 +294,101 @@ function Load-Manifest([string]$path) {
         return $raw | ConvertFrom-Json
     } catch {
         return $null
+    }
+}
+
+function Load-ManifestSignature([string]$path) {
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { return $null }
+    try {
+        $raw = (Get-Content -Path $path -Raw -ErrorAction Stop).Trim()
+        if ([string]::IsNullOrWhiteSpace($raw)) { return $null }
+        return $raw
+    } catch {
+        return $null
+    }
+}
+
+function Get-ManifestCanonicalJson([object]$manifest) {
+    if (-not $manifest -or -not $manifest.files) { return $null }
+    $files = [ordered]@{}
+    foreach ($key in @($manifest.files.PSObject.Properties.Name | Sort-Object)) {
+        $files[[string]$key] = [string]$manifest.files.$key
+    }
+    $canonical = [ordered]@{
+        hashAlgorithm = [string]$manifest.hashAlgorithm
+        normalizedLineEndings = [string]$manifest.normalizedLineEndings
+        generatedAt = ""
+        files = $files
+    }
+    return ($canonical | ConvertTo-Json -Depth 8 -Compress)
+}
+
+function Convert-SignatureTextToBytes([string]$signatureText) {
+    if ([string]::IsNullOrWhiteSpace($signatureText)) { return $null }
+    $trimmed = $signatureText.Trim()
+    if ($trimmed -match '^[A-Fa-f0-9]+$') {
+        if (($trimmed.Length % 2) -ne 0) { return $null }
+        $bytes = New-Object byte[] ($trimmed.Length / 2)
+        for ($i = 0; $i -lt $bytes.Length; $i++) {
+            $bytes[$i] = [Convert]::ToByte($trimmed.Substring($i * 2, 2), 16)
+        }
+        return $bytes
+    }
+    try {
+        return [Convert]::FromBase64String($trimmed)
+    } catch {
+        return $null
+    }
+}
+
+function Test-QuickSetupManifestSignature {
+    param(
+        [object]$manifest,
+        [string]$signatureText,
+        [string]$publicKeyXml,
+        [switch]$RequireSignature
+    )
+
+    if ([string]::IsNullOrWhiteSpace($signatureText)) {
+        if ($RequireSignature) {
+            return [pscustomobject]@{ IsValid = $false; Status = "Missing"; Reason = "Manifest signature is required but missing." }
+        }
+        return [pscustomobject]@{ IsValid = $true; Status = "Missing"; Reason = "" }
+    }
+    if ([string]::IsNullOrWhiteSpace($publicKeyXml)) {
+        if ($RequireSignature) {
+            return [pscustomobject]@{ IsValid = $false; Status = "NoPublicKey"; Reason = "Manifest signature is present but no trusted public key is configured." }
+        }
+        return [pscustomobject]@{ IsValid = $true; Status = "NoPublicKey"; Reason = "" }
+    }
+
+    $signatureBytes = Convert-SignatureTextToBytes $signatureText
+    if (-not $signatureBytes -or $signatureBytes.Length -eq 0) {
+        return [pscustomobject]@{ IsValid = $false; Status = "InvalidSignatureFormat"; Reason = "Manifest signature format is invalid." }
+    }
+
+    $canonical = Get-ManifestCanonicalJson $manifest
+    if ([string]::IsNullOrWhiteSpace($canonical)) {
+        return [pscustomobject]@{ IsValid = $false; Status = "InvalidManifest"; Reason = "Manifest canonical payload is unavailable." }
+    }
+
+    try {
+        $data = [System.Text.Encoding]::UTF8.GetBytes($canonical)
+        $rsa = New-Object System.Security.Cryptography.RSACryptoServiceProvider
+        $rsa.FromXmlString($publicKeyXml)
+        $sha = [System.Security.Cryptography.SHA256]::Create()
+        try {
+            $ok = $rsa.VerifyData($data, $sha, $signatureBytes)
+        } finally {
+            $sha.Dispose()
+            $rsa.Dispose()
+        }
+        if ($ok) {
+            return [pscustomobject]@{ IsValid = $true; Status = "Verified"; Reason = "" }
+        }
+        return [pscustomobject]@{ IsValid = $false; Status = "InvalidSignature"; Reason = "Manifest signature verification failed." }
+    } catch {
+        return [pscustomobject]@{ IsValid = $false; Status = "VerificationError"; Reason = $_.Exception.Message }
     }
 }
 
@@ -985,8 +1083,10 @@ if ($localRoot) {
 }
 
 $manifest = $null
+$manifestSignature = $null
 if ($useLocal) {
     $manifest = Load-Manifest $localManifestPath
+    $manifestSignature = Load-ManifestSignature (Join-Path $localRoot $script:QuickSetupManifestSignatureRelativePath)
 } else {
     $manifestUrl = "$rawBase/Script/QuickSetup/QuickSetup.manifest.json?v=$cacheBuster"
     if (-not (Test-QuickSetupTrustedUrl $manifestUrl)) {
@@ -1001,13 +1101,35 @@ if ($useLocal) {
         Show-SetupError "Manifest download failed. Setup cannot continue without integrity validation."
         exit 1
     }
+    $manifestSignatureUrl = "$rawBase/Script/QuickSetup/QuickSetup.manifest.sig?v=$cacheBuster"
+    if (-not (Test-QuickSetupTrustedUrl $manifestSignatureUrl)) {
+        Show-SetupError ("Blocked untrusted manifest signature URL: {0}" -f $manifestSignatureUrl)
+        exit 1
+    }
+    $manifestSignatureTarget = Join-Path $installPath "Meta\QuickSetup.manifest.sig"
+    try {
+        Invoke-WebRequest -Uri $manifestSignatureUrl -OutFile $manifestSignatureTarget -UseBasicParsing -ErrorAction Stop
+        $manifestSignature = Load-ManifestSignature $manifestSignatureTarget
+    } catch {
+        Write-SetupLog "Manifest signature was not downloaded; proceeding with hash-manifest validation."
+    }
 }
 $manifestCheck = Test-QuickSetupManifest -manifest $manifest -files $filesToDownload
 if (-not $manifestCheck.IsValid) {
     Show-SetupError ("Manifest validation failed: {0}" -f $manifestCheck.Reason)
     exit 1
 }
+$manifestSignatureCheck = Test-QuickSetupManifestSignature -manifest $manifest -signatureText $manifestSignature -publicKeyXml $script:QuickSetupManifestSignaturePublicKeyXml -RequireSignature:$script:QuickSetupRequireManifestSignature
+if (-not $manifestSignatureCheck.IsValid) {
+    Show-SetupError ("Manifest signature validation failed: {0}" -f $manifestSignatureCheck.Reason)
+    exit 1
+}
 $integrityStatus = "Verified"
+if ($manifestSignatureCheck.Status -eq "Verified") {
+    $integrityStatus = "Verified (manifest signature)"
+} elseif ($manifestSignatureCheck.Status -eq "NoPublicKey") {
+    $integrityStatus = "Verified (signature present, key not configured)"
+}
 
 $total = $filesToDownload.Count
 $index = 0
@@ -1218,7 +1340,7 @@ Set shell = CreateObject("WScript.Shell")
 Set fso = CreateObject("Scripting.FileSystemObject")
 vbsPath = WScript.ScriptFullName
 uninstallPs1 = fso.BuildPath(fso.GetParentFolderName(vbsPath), "Uninstall-Teams-Always-Green.ps1")
-cmd = "powershell.exe -NoProfile -ExecutionPolicy Bypass -File """ & uninstallPs1 & """"
+cmd = "powershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File """ & uninstallPs1 & """"
 shell.Run cmd, 1, False
 '@
     try {
@@ -1269,6 +1391,7 @@ function Show-SetupWizard {
         ShortcutsCreated = @()
         PortableMode = $false
         FinalizeCompleted = $false
+        AllowSummary = $false
     }
 
     $form = New-Object System.Windows.Forms.Form
@@ -1712,13 +1835,12 @@ function Show-SetupWizard {
     $form.Controls.Add($btnCancel)
 
     $stepRef = [ref]0
-    $allowSummary = $false
     $state.DownloadComplete = $false
     $state.OpenAfterFinish = $false
 
     $showStep = {
         param([int]$index)
-        if ($index -eq 3 -and -not $allowSummary) { return }
+        if ($index -eq 3 -and -not $state.AllowSummary) { return }
         $stepRef.Value = $index
         $panelWelcome.Visible = ($index -eq 0)
         $panelLocation.Visible = ($index -eq 1)
@@ -1788,7 +1910,7 @@ function Show-SetupWizard {
             $sumShortcuts.Text = if ($state.ShortcutsCreated.Count -gt 0) { $state.ShortcutsCreated -join "; " } else { "None" }
             $sumLog.Text = $logPath
             $pinTip.Visible = (-not $state.PortableMode)
-            $allowSummary = $true
+            $state.AllowSummary = $true
             & $showStep 3
             return
         }
@@ -1885,8 +2007,10 @@ function Show-SetupWizard {
             }
 
             $manifest = $null
+            $manifestSignature = $null
             if ($useLocal) {
                 $manifest = Load-Manifest (Join-Path $localRoot $script:QuickSetupManifestRelativePath)
+                $manifestSignature = Load-ManifestSignature (Join-Path $localRoot $script:QuickSetupManifestSignatureRelativePath)
             } else {
                 $manifestUrl = "$script:QuickSetupRawBase/Script/QuickSetup/QuickSetup.manifest.json?v=$script:QuickSetupCacheBuster"
                 if (-not (Test-QuickSetupTrustedUrl $manifestUrl)) {
@@ -1905,6 +2029,20 @@ function Show-SetupWizard {
                     $form.Close()
                     return
                 }
+                $manifestSignatureUrl = "$script:QuickSetupRawBase/Script/QuickSetup/QuickSetup.manifest.sig?v=$script:QuickSetupCacheBuster"
+                if (-not (Test-QuickSetupTrustedUrl $manifestSignatureUrl)) {
+                    Show-SetupError ("Blocked untrusted manifest signature URL: {0}" -f $manifestSignatureUrl)
+                    $state.Cancelled = $true
+                    $form.Close()
+                    return
+                }
+                $manifestSignatureTarget = Join-Path $state.InstallPath "Meta\QuickSetup.manifest.sig"
+                try {
+                    Invoke-WebRequest -Uri $manifestSignatureUrl -OutFile $manifestSignatureTarget -UseBasicParsing -ErrorAction Stop
+                    $manifestSignature = Load-ManifestSignature $manifestSignatureTarget
+                } catch {
+                    Write-SetupLog "Manifest signature was not downloaded; proceeding with hash-manifest validation."
+                }
             }
             $manifestCheck = Test-QuickSetupManifest -manifest $manifest -files $script:QuickSetupFiles
             if (-not $manifestCheck.IsValid) {
@@ -1913,7 +2051,19 @@ function Show-SetupWizard {
                 $form.Close()
                 return
             }
+            $manifestSignatureCheck = Test-QuickSetupManifestSignature -manifest $manifest -signatureText $manifestSignature -publicKeyXml $script:QuickSetupManifestSignaturePublicKeyXml -RequireSignature:$script:QuickSetupRequireManifestSignature
+            if (-not $manifestSignatureCheck.IsValid) {
+                Show-SetupError ("Manifest signature validation failed: {0}" -f $manifestSignatureCheck.Reason)
+                $state.Cancelled = $true
+                $form.Close()
+                return
+            }
             $state.IntegrityStatus = "Verified"
+            if ($manifestSignatureCheck.Status -eq "Verified") {
+                $state.IntegrityStatus = "Verified (manifest signature)"
+            } elseif ($manifestSignatureCheck.Status -eq "NoPublicKey") {
+                $state.IntegrityStatus = "Verified (signature present, key not configured)"
+            }
 
     $downloadUi = @{
         Form = $form
@@ -2217,7 +2367,7 @@ Set shell = CreateObject("WScript.Shell")
 Set fso = CreateObject("Scripting.FileSystemObject")
 vbsPath = WScript.ScriptFullName
 uninstallPs1 = fso.BuildPath(fso.GetParentFolderName(vbsPath), "Uninstall-Teams-Always-Green.ps1")
-cmd = "powershell.exe -NoProfile -ExecutionPolicy Bypass -File """ & uninstallPs1 & """"
+cmd = "powershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File """ & uninstallPs1 & """"
 shell.Run cmd, 1, False
 '@
 try {

@@ -49,4 +49,4 @@ jobs:
       - name: Run quality checks
         shell: pwsh
         run: |
-          ./Tools/Invoke-QualityChecks.ps1 -Ci
+          ./Tools/Invoke-QualityChecks.ps1 -Ci -WarningBudgetFile "Tools/PSScriptAnalyzer.warning-budget.json" -CoverageConfigFile "Tools/Pester.coverage.json"

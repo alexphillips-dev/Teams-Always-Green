@@ -11,5 +11,5 @@ scriptDir = Left(WScript.ScriptFullName, InStrRev(WScript.ScriptFullName, "\") -
 scriptPath = Left(scriptDir, InStrRev(scriptDir, "\") - 1) & "\Script\Teams Always Green.ps1"
 logPath = scriptDir & "\Teams Always Green.debug.vbs.log"
 
-cmd = "cmd /c ""powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File """ & scriptPath & """ >> """ & logPath & """ 2>&1"""
+cmd = "cmd /c ""powershell.exe -NoProfile -ExecutionPolicy RemoteSigned -WindowStyle Hidden -File """ & scriptPath & """ >> """ & logPath & """ 2>&1"""
 shell.Run cmd, 0, False
