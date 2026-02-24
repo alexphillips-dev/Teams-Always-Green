@@ -210,6 +210,10 @@ Versioning discipline:
 5. Sign release scripts (certificate in cert store required): `powershell -NoProfile -ExecutionPolicy RemoteSigned -File .\Tools\Sign-Release.ps1 -CertificateThumbprint <THUMBPRINT>`
 6. `.github/workflows/quality.yml` runs privacy/security scanning + analyzer warning budget + Pester coverage gate + manifest freshness checks.
 7. `.github/workflows/release-prep.yml` verifies `QuickSetup.manifest.json` freshness and signature validity before release (no direct auto-commit to `main`).
+8. `.github/workflows/release.yml` automates release-time signing and publishing:
+   - Trigger: push tag `v*` (or manual dispatch).
+   - Required secret: `UPDATE_SIGNING_PRIVATE_KEY_XML` (private RSA XML key for update asset signing).
+   - Publishes signed release assets: `Script/Teams Always Green.ps1` and `Teams Always Green.ps1.sig`.
 
 ---
 

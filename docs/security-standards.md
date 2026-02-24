@@ -15,7 +15,7 @@ This project is built with secure-by-default behavior and explicit release gates
 ## Installer and Update Controls
 
 - QuickSetup validates trusted source URLs and per-file SHA-256 hashes from `QuickSetup.manifest.json`.
-- Optional detached manifest signatures (`QuickSetup.manifest.sig`) are supported with RSA/SHA-256 verification.
+- Detached manifest signatures (`QuickSetup.manifest.sig`) are required and verified with RSA/SHA-256.
 - Update checks enforce trusted owner/repo URL validation and can require hash/signature verification.
 - Script signature enforcement is supported via `RequireScriptSignature` and trusted signer thumbprints.
 
@@ -25,7 +25,8 @@ This project is built with secure-by-default behavior and explicit release gates
 - Privacy/security leak scanning (`Tools/Find-PrivacyLeaks.ps1`)
 - PSScriptAnalyzer warnings bounded by `Tools/PSScriptAnalyzer.warning-budget.json`
 - Pester tests with coverage gate from `Tools/Pester.coverage.json`
-- QuickSetup manifest freshness check (`Tools/Generate-QuickSetupManifest.ps1 -Check`)
+- QuickSetup manifest freshness + signature check (`Tools/Generate-QuickSetupManifest.ps1 -Check -RequireSignature`)
+- Automated tag-based release signing and publishing (`.github/workflows/release.yml`)
 
 ## Branch Protection Baseline (GitHub)
 

@@ -1,0 +1,112 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag (for example: v1.2.3)"
+        required: true
+        type: string
+      target:
+        description: "Branch or commit to release from"
+        required: false
+        default: "main"
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.target || github.ref }}
+
+      - name: Resolve release metadata
+        id: meta
+        shell: pwsh
+        run: |
+          if ("${{ github.event_name }}" -eq "workflow_dispatch") {
+            $tag = [string]"${{ github.event.inputs.tag }}"
+          } else {
+            $tag = [string]"${{ github.ref_name }}"
+          }
+          if ([string]::IsNullOrWhiteSpace($tag)) {
+            throw "Release tag is required."
+          }
+          if ($tag -notmatch '^v\d+\.\d+\.\d+([\-+][0-9A-Za-z\.-]+)?$') {
+            throw "Release tag must follow SemVer and start with 'v' (for example: v1.2.3)."
+          }
+          $version = (Get-Content -Path "VERSION" -Raw).Trim()
+          if ([string]::IsNullOrWhiteSpace($version)) {
+            throw "VERSION file is empty."
+          }
+          if ($version -ne $tag.TrimStart("v")) {
+            throw ("VERSION mismatch. VERSION='{0}', tag='{1}'." -f $version, $tag)
+          }
+          "tag=$tag" >> $env:GITHUB_OUTPUT
+
+      - name: Verify QuickSetup manifest signature
+        shell: pwsh
+        run: |
+          ./Tools/Generate-QuickSetupManifest.ps1 -Check -RequireSignature -ManifestPublicKeyPath "Meta/Keys/quicksetup-manifest-public.xml"
+
+      - name: Install PowerShell modules
+        shell: pwsh
+        run: |
+          Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
+          Install-Module PSScriptAnalyzer -Scope CurrentUser -Force -AllowClobber
+          Install-Module Pester -Scope CurrentUser -Force -SkipPublisherCheck
+
+      - name: Run quality checks
+        shell: pwsh
+        run: |
+          ./Tools/Invoke-QualityChecks.ps1 -Ci -WarningBudgetFile "Tools/PSScriptAnalyzer.warning-budget.json" -CoverageConfigFile "Tools/Pester.coverage.json"
+
+      - name: Materialize update signing key
+        id: keys
+        shell: pwsh
+        env:
+          UPDATE_SIGNING_PRIVATE_KEY_XML: ${{ secrets.UPDATE_SIGNING_PRIVATE_KEY_XML }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:UPDATE_SIGNING_PRIVATE_KEY_XML)) {
+            throw "Missing GitHub secret: UPDATE_SIGNING_PRIVATE_KEY_XML"
+          }
+          $privatePath = Join-Path $env:RUNNER_TEMP "update-private.xml"
+          $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+          [System.IO.File]::WriteAllText($privatePath, $env:UPDATE_SIGNING_PRIVATE_KEY_XML, $utf8NoBom)
+          "update_private_key=$privatePath" >> $env:GITHUB_OUTPUT
+
+      - name: Generate update asset signature
+        id: sign_update
+        shell: pwsh
+        run: |
+          $sigPath = Join-Path $env:RUNNER_TEMP "Teams Always Green.ps1.sig"
+          ./Tools/Generate-UpdateSignature.ps1 `
+            -InputFile "Script/Teams Always Green.ps1" `
+            -PrivateKeyPath "${{ steps.keys.outputs.update_private_key }}" `
+            -SignaturePath $sigPath `
+            -OutputEncoding Hex `
+            -Verify `
+            -PublicKeyPath "Meta/Teams-Always-Green.updatekey.xml"
+          "update_sig=$sigPath" >> $env:GITHUB_OUTPUT
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.meta.outputs.tag }}
+          generate_release_notes: true
+          make_latest: true
+          files: |
+            Script/Teams Always Green.ps1
+            ${{ steps.sign_update.outputs.update_sig }}
+            Script/QuickSetup/QuickSetup.manifest.json
+            Script/QuickSetup/QuickSetup.manifest.sig
