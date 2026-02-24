@@ -7,6 +7,7 @@ BeforeAll {
     $script:historyDialogScript = Join-Path $script:repoRoot "Script/UI/HistoryDialog.ps1"
     $script:trayMenuScript = Join-Path $script:repoRoot "Script/Tray/Menu.ps1"
     $script:updateEngineScript = Join-Path $script:repoRoot "Script/Features/UpdateEngine.ps1"
+    $script:quickSetupScript = Join-Path $script:repoRoot "Script/QuickSetup/QuickSetup.ps1"
     $script:coreRuntimeScript = Join-Path $script:repoRoot "Script/Core/Runtime.ps1"
     $script:uiStringsScript = Join-Path $script:repoRoot "Script/I18n/UiStrings.ps1"
     $script:versionPath = Join-Path $script:repoRoot "VERSION"
@@ -16,6 +17,7 @@ BeforeAll {
     $script:historyDialogText = Get-Content -Raw -Path $script:historyDialogScript
     $script:trayMenuText = Get-Content -Raw -Path $script:trayMenuScript
     $script:updateEngineText = Get-Content -Raw -Path $script:updateEngineScript
+    $script:quickSetupText = Get-Content -Raw -Path $script:quickSetupScript
     $script:coreRuntimeText = Get-Content -Raw -Path $script:coreRuntimeScript
 
     $tokens = $null
@@ -126,6 +128,11 @@ Describe "Quality: Profile and Update Coverage" {
         $script:settingsDialogText | Should -Match 'Invoke-RestMethod\s+-Uri\s+\$uri\s+-Headers\s+\$headers\s+-TimeoutSec'
     }
 
+    It "restarts updated app via explicit system PowerShell path" {
+        $script:updateEngineText | Should -Match 'System32\\WindowsPowerShell\\v1\.0\\powershell\.exe'
+        $script:updateEngineText | Should -Match 'Start-Process\s+-FilePath\s+\$powershellPath'
+    }
+
     It "keeps profile hover handlers theme-safe" {
         $script:settingsDialogText | Should -Match 'SetDeleteProfileButtonHover'
         $script:settingsDialogText | Should -Match 'SetNewProfileButtonHover'
@@ -136,6 +143,37 @@ Describe "Quality: Profile and Update Coverage" {
     It "exposes crash recovery reset action in diagnostics" {
         $script:settingsDialogText | Should -Match 'Reset Crash State'
         $script:mainText | Should -Match 'function\s+Reset-CrashRecoveryState'
+    }
+}
+
+Describe "Quality: QuickSetup Wizard Flow" {
+    It "defers finalize work to Step 2 Next and finalizes once" {
+        $script:quickSetupText | Should -Match 'FinalizeCompleted\s*=\s*\$false'
+
+        $finalizeCallPattern = 'Finalize-Install\s+-installPath'
+        ([regex]::Matches($script:quickSetupText, $finalizeCallPattern)).Count | Should -Be 1
+
+        $nextClickIndex = $script:quickSetupText.IndexOf('$btnNext.Add_Click({')
+        $step2BranchIndex = $script:quickSetupText.IndexOf('if ($stepRef.Value -eq 2) {', $nextClickIndex)
+        $finalizeCallIndex = [regex]::Match($script:quickSetupText, $finalizeCallPattern).Index
+        $nextClickIndex | Should -BeGreaterThan -1
+        $step2BranchIndex | Should -BeGreaterThan $nextClickIndex
+        $finalizeCallIndex | Should -BeGreaterThan $step2BranchIndex
+
+        $downloadCompleteIndex = $script:quickSetupText.IndexOf('$state.DownloadComplete = $true')
+        $downloadCompleteIndex | Should -BeGreaterThan -1
+        $postDownloadText = $script:quickSetupText.Substring($downloadCompleteIndex)
+        $postDownloadText | Should -Not -Match $finalizeCallPattern
+    }
+
+    It "enforces trusted source URLs and strict manifest validation" {
+        $script:quickSetupText | Should -Match 'function\s+Test-QuickSetupTrustedUrl'
+        $script:quickSetupText | Should -Match 'raw\.githubusercontent\.com'
+        $script:quickSetupText | Should -Match 'Blocked untrusted manifest URL'
+        $script:quickSetupText | Should -Match 'Blocked untrusted download URL'
+        $script:quickSetupText | Should -Match 'function\s+Test-QuickSetupManifest'
+        $script:quickSetupText | Should -Match 'Manifest validation failed'
+        $script:quickSetupText | Should -Match 'Manifest expected hash is missing for'
     }
 }
 

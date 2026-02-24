@@ -135,7 +135,10 @@ function Write-IgnoredCatch(
             $detail = if ($ErrorRecord.Exception) { [string]$ErrorRecord.Exception.Message } else { [string]$ErrorRecord }
             Write-BootstrapLog ("Ignored catch: {0}" -f $detail) "DEBUG"
         }
-    } catch {}
+    } catch {
+        # Never throw from ignored-catch logging.
+        $null = $_
+    }
 }
 try {
     $currentIdentity = [System.Security.Principal.WindowsIdentity]::GetCurrent()

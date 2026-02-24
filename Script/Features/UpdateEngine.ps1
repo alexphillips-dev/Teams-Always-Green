@@ -457,7 +457,9 @@ function Invoke-UpdateCheck {
         if (Get-Command -Name Flush-LogBuffer -ErrorAction SilentlyContinue) { Flush-LogBuffer }
         Release-MutexOnce
         $script:CleanupDone = $true
-        Start-Process -FilePath "powershell.exe" -WindowStyle Hidden -WorkingDirectory $script:AppRoot -ArgumentList "-NoProfile -ExecutionPolicy RemoteSigned -File `"$scriptPath`""
+        $powershellPath = Join-Path $env:WINDIR "System32\WindowsPowerShell\v1.0\powershell.exe"
+        if (-not (Test-Path -LiteralPath $powershellPath -PathType Leaf)) { $powershellPath = "powershell.exe" }
+        Start-Process -FilePath $powershellPath -WindowStyle Hidden -WorkingDirectory $script:AppRoot -ArgumentList "-NoProfile -ExecutionPolicy RemoteSigned -File `"$scriptPath`""
         [System.Windows.Forms.Application]::Exit()
     } catch {
         try { if (Test-Path $tempPath) { Remove-Item -Path $tempPath -Force } } catch { $null = $_ }

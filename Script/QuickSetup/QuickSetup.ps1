@@ -11,6 +11,59 @@ trap {
 $script:QuickSetupStateDir = Join-Path $env:LOCALAPPDATA "TeamsAlwaysGreen"
 $script:QuickSetupLastPathFile = Join-Path $script:QuickSetupStateDir "QuickSetup.lastpath.txt"
 $script:QuickSetupManifestRelativePath = "Script\QuickSetup\QuickSetup.manifest.json"
+$script:QuickSetupTrustedOwner = "alexphillips-dev"
+$script:QuickSetupTrustedRepo = "Teams-Always-Green"
+
+function Test-QuickSetupTrustedUrl([string]$url) {
+    if ([string]::IsNullOrWhiteSpace($url)) { return $false }
+    try {
+        $uri = [System.Uri]$url
+        if ($uri.Scheme -ne "https") { return $false }
+        if ([string]::IsNullOrWhiteSpace($uri.Host)) { return $false }
+        $urlHost = $uri.Host.ToLowerInvariant()
+        if ($urlHost -ne "raw.githubusercontent.com") { return $false }
+        $path = [string]$uri.AbsolutePath
+        if ([string]::IsNullOrWhiteSpace($path)) { return $false }
+        $expectedPrefix = ("/{0}/{1}/" -f $script:QuickSetupTrustedOwner, $script:QuickSetupTrustedRepo).ToLowerInvariant()
+        return $path.ToLowerInvariant().StartsWith($expectedPrefix)
+    } catch {
+        return $false
+    }
+}
+
+function Test-QuickSetupManifest([object]$manifest, [object[]]$files) {
+    if (-not $manifest) {
+        return [pscustomobject]@{ IsValid = $false; Reason = "Manifest is missing." }
+    }
+    if (-not $manifest.files) {
+        return [pscustomobject]@{ IsValid = $false; Reason = "Manifest file hash table is missing." }
+    }
+
+    $algorithm = if ($manifest.PSObject.Properties.Name -contains "hashAlgorithm") { [string]$manifest.hashAlgorithm } else { "" }
+    if ($algorithm.ToUpperInvariant() -ne "SHA256") {
+        return [pscustomobject]@{ IsValid = $false; Reason = "Manifest hash algorithm must be SHA256." }
+    }
+
+    $lineEnding = if ($manifest.PSObject.Properties.Name -contains "normalizedLineEndings") { [string]$manifest.normalizedLineEndings } else { "" }
+    if ($lineEnding -notin @("LF", "CRLF")) {
+        return [pscustomobject]@{ IsValid = $false; Reason = "Manifest normalizedLineEndings must be LF or CRLF." }
+    }
+
+    foreach ($file in @($files)) {
+        if (-not $file -or [string]::IsNullOrWhiteSpace([string]$file.Path)) { continue }
+        $key = [string]$file.Path
+        $manifestKey = $key.Replace("\", "/")
+        if (-not ($manifest.files.PSObject.Properties.Name -contains $manifestKey)) {
+            return [pscustomobject]@{ IsValid = $false; Reason = ("Manifest missing hash for {0}." -f $key) }
+        }
+        $expected = [string]$manifest.files.$manifestKey
+        if ([string]::IsNullOrWhiteSpace($expected) -or ($expected -notmatch '^[A-Fa-f0-9]{64}$')) {
+            return [pscustomobject]@{ IsValid = $false; Reason = ("Manifest hash format invalid for {0}." -f $key) }
+        }
+    }
+
+    return [pscustomobject]@{ IsValid = $true; Reason = "" }
+}
 
 function Get-LastInstallBase {
     try {
@@ -936,16 +989,25 @@ if ($useLocal) {
     $manifest = Load-Manifest $localManifestPath
 } else {
     $manifestUrl = "$rawBase/Script/QuickSetup/QuickSetup.manifest.json?v=$cacheBuster"
+    if (-not (Test-QuickSetupTrustedUrl $manifestUrl)) {
+        Show-SetupError ("Blocked untrusted manifest URL: {0}" -f $manifestUrl)
+        exit 1
+    }
     $manifestTarget = Join-Path $installPath "Meta\QuickSetup.manifest.json"
     try {
         Invoke-WebRequest -Uri $manifestUrl -OutFile $manifestTarget -UseBasicParsing
         $manifest = Load-Manifest $manifestTarget
     } catch {
-        Write-SetupLog "Manifest download failed; continuing without integrity validation."
-        $manifest = $null
+        Show-SetupError "Manifest download failed. Setup cannot continue without integrity validation."
+        exit 1
     }
 }
-$integrityStatus = if ($manifest) { "Verified" } else { "Not verified (manifest unavailable)" }
+$manifestCheck = Test-QuickSetupManifest -manifest $manifest -files $filesToDownload
+if (-not $manifestCheck.IsValid) {
+    Show-SetupError ("Manifest validation failed: {0}" -f $manifestCheck.Reason)
+    exit 1
+}
+$integrityStatus = "Verified"
 
 $total = $filesToDownload.Count
 $index = 0
@@ -971,6 +1033,10 @@ foreach ($file in $filesToDownload) {
         Copy-Item -Path $sourcePath -Destination $targetPath -Force
     } else {
         try {
+            if (-not (Test-QuickSetupTrustedUrl $file.Url)) {
+                Show-SetupError ("Blocked untrusted download URL: {0}" -f [string]$file.Url)
+                exit 1
+            }
             $downloadUrl = if ($file.Url -match "\?") { "$($file.Url)&v=$cacheBuster" } else { "$($file.Url)?v=$cacheBuster" }
             Invoke-WebRequest -Uri $downloadUrl -OutFile $targetPath -UseBasicParsing
         } catch {
@@ -990,36 +1056,38 @@ foreach ($file in $filesToDownload) {
 
     if ($manifest -and $manifest.files) {
         $manifestKey = $file.Path.Replace("\", "/")
-        $expected = $manifest.files.$manifestKey
-        if ($expected) {
-            Update-Progress $ui $index $total ("Step 2 of 4: Verifying {0} ({1}/{2})" -f $file.Path, $index, $total)
-            $actual = Get-FileHashHex $targetPath
-            if (-not $actual -or ($actual.ToLowerInvariant() -ne [string]$expected.ToLowerInvariant())) {
-                Write-SetupLog ("Integrity expected: {0}" -f $expected)
-                Write-SetupLog ("Integrity actual:   {0}" -f $actual)
-                $matched = $false
-                if (Is-TextFile $file.Path) {
-                    Write-SetupLog ("Integrity text file: {0}" -f $file.Path)
-                    $altLf = Get-NormalizedBytesHash $targetPath "LF"
-                    if ($altLf -and ($altLf.ToLowerInvariant() -eq [string]$expected.ToLowerInvariant())) {
-                        $matched = $true
-                    } else {
-                        $altCrLf = Get-NormalizedBytesHash $targetPath "CRLF"
-                        if ($altCrLf -and ($altCrLf.ToLowerInvariant() -eq [string]$expected.ToLowerInvariant())) {
-                            $matched = $true
-                        }
-                    }
-                    Write-SetupLog ("Integrity alt LF:   {0}" -f $altLf)
-                    Write-SetupLog ("Integrity alt CRLF: {0}" -f $altCrLf)
+        $expected = [string]$manifest.files.$manifestKey
+        if ([string]::IsNullOrWhiteSpace($expected)) {
+            Show-SetupError ("Manifest expected hash is missing for {0}." -f $file.Path)
+            exit 1
+        }
+        Update-Progress $ui $index $total ("Step 2 of 4: Verifying {0} ({1}/{2})" -f $file.Path, $index, $total)
+        $actual = Get-FileHashHex $targetPath
+        if (-not $actual -or ($actual.ToLowerInvariant() -ne [string]$expected.ToLowerInvariant())) {
+            Write-SetupLog ("Integrity expected: {0}" -f $expected)
+            Write-SetupLog ("Integrity actual:   {0}" -f $actual)
+            $matched = $false
+            if (Is-TextFile $file.Path) {
+                Write-SetupLog ("Integrity text file: {0}" -f $file.Path)
+                $altLf = Get-NormalizedBytesHash $targetPath "LF"
+                if ($altLf -and ($altLf.ToLowerInvariant() -eq [string]$expected.ToLowerInvariant())) {
+                    $matched = $true
                 } else {
-                    Write-SetupLog ("Integrity binary file: {0}" -f $file.Path)
+                    $altCrLf = Get-NormalizedBytesHash $targetPath "CRLF"
+                    if ($altCrLf -and ($altCrLf.ToLowerInvariant() -eq [string]$expected.ToLowerInvariant())) {
+                        $matched = $true
+                    }
                 }
-                if (-not $matched) {
-                    Show-SetupError ("Integrity check failed for {0}. See log for hash details." -f $file.Path)
-                    exit 1
-                }
-                Write-SetupLog ("Integrity check matched after line-ending normalization: {0}" -f $file.Path)
+                Write-SetupLog ("Integrity alt LF:   {0}" -f $altLf)
+                Write-SetupLog ("Integrity alt CRLF: {0}" -f $altCrLf)
+            } else {
+                Write-SetupLog ("Integrity binary file: {0}" -f $file.Path)
             }
+            if (-not $matched) {
+                Show-SetupError ("Integrity check failed for {0}. See log for hash details." -f $file.Path)
+                exit 1
+            }
+            Write-SetupLog ("Integrity check matched after line-ending normalization: {0}" -f $file.Path)
         }
     }
 }
@@ -1807,15 +1875,31 @@ function Show-SetupWizard {
                 $manifest = Load-Manifest (Join-Path $localRoot $script:QuickSetupManifestRelativePath)
             } else {
                 $manifestUrl = "$script:QuickSetupRawBase/Script/QuickSetup/QuickSetup.manifest.json?v=$script:QuickSetupCacheBuster"
+                if (-not (Test-QuickSetupTrustedUrl $manifestUrl)) {
+                    Show-SetupError ("Blocked untrusted manifest URL: {0}" -f $manifestUrl)
+                    $state.Cancelled = $true
+                    $form.Close()
+                    return
+                }
                 $manifestTarget = Join-Path $state.InstallPath "Meta\QuickSetup.manifest.json"
                 try {
                     Invoke-WebRequest -Uri $manifestUrl -OutFile $manifestTarget -UseBasicParsing
                     $manifest = Load-Manifest $manifestTarget
                 } catch {
-                    Write-SetupLog "Manifest download failed; continuing without integrity validation."
+                    Show-SetupError "Manifest download failed. Setup cannot continue without integrity validation."
+                    $state.Cancelled = $true
+                    $form.Close()
+                    return
                 }
             }
-            $state.IntegrityStatus = if ($manifest) { "Verified" } else { "Not verified (manifest unavailable)" }
+            $manifestCheck = Test-QuickSetupManifest -manifest $manifest -files $script:QuickSetupFiles
+            if (-not $manifestCheck.IsValid) {
+                Show-SetupError ("Manifest validation failed: {0}" -f $manifestCheck.Reason)
+                $state.Cancelled = $true
+                $form.Close()
+                return
+            }
+            $state.IntegrityStatus = "Verified"
 
     $downloadUi = @{
         Form = $form
@@ -1865,6 +1949,11 @@ function Show-SetupWizard {
                     Copy-Item -Path $sourcePath -Destination $targetPath -Force
                 } else {
                     try {
+                        if (-not (Test-QuickSetupTrustedUrl $file.Url)) {
+                            Show-SetupError ("Blocked untrusted download URL: {0}" -f [string]$file.Url)
+                            $state.Cancelled = $true
+                            break
+                        }
                         $downloadUrl = if ($file.Url -match "\?") { "$($file.Url)&v=$script:QuickSetupCacheBuster" } else { "$($file.Url)?v=$script:QuickSetupCacheBuster" }
                         Invoke-WebRequest -Uri $downloadUrl -OutFile $targetPath -UseBasicParsing
                     } catch {
@@ -1887,28 +1976,31 @@ function Show-SetupWizard {
 
                 if ($manifest -and $manifest.files) {
                     $manifestKey = $file.Path.Replace("\", "/")
-                    $expected = $manifest.files.$manifestKey
-                    if ($expected) {
-                        Update-Progress $downloadUi $index $total ("Step 2 of 4: Verifying {0} ({1}/{2})" -f $file.Path, $index, $total)
-                        $actual = Get-FileHashHex $targetPath
-                        if (-not $actual -or ($actual.ToLowerInvariant() -ne [string]$expected.ToLowerInvariant())) {
-                            $matched = $false
-                            if (Is-TextFile $file.Path) {
-                                $altLf = Get-NormalizedBytesHash $targetPath "LF"
-                                if ($altLf -and ($altLf.ToLowerInvariant() -eq [string]$expected.ToLowerInvariant())) {
+                    $expected = [string]$manifest.files.$manifestKey
+                    if ([string]::IsNullOrWhiteSpace($expected)) {
+                        Show-SetupError ("Manifest expected hash is missing for {0}." -f $file.Path)
+                        $state.Cancelled = $true
+                        break
+                    }
+                    Update-Progress $downloadUi $index $total ("Step 2 of 4: Verifying {0} ({1}/{2})" -f $file.Path, $index, $total)
+                    $actual = Get-FileHashHex $targetPath
+                    if (-not $actual -or ($actual.ToLowerInvariant() -ne [string]$expected.ToLowerInvariant())) {
+                        $matched = $false
+                        if (Is-TextFile $file.Path) {
+                            $altLf = Get-NormalizedBytesHash $targetPath "LF"
+                            if ($altLf -and ($altLf.ToLowerInvariant() -eq [string]$expected.ToLowerInvariant())) {
+                                $matched = $true
+                            } else {
+                                $altCrLf = Get-NormalizedBytesHash $targetPath "CRLF"
+                                if ($altCrLf -and ($altCrLf.ToLowerInvariant() -eq [string]$expected.ToLowerInvariant())) {
                                     $matched = $true
-                                } else {
-                                    $altCrLf = Get-NormalizedBytesHash $targetPath "CRLF"
-                                    if ($altCrLf -and ($altCrLf.ToLowerInvariant() -eq [string]$expected.ToLowerInvariant())) {
-                                        $matched = $true
-                                    }
                                 }
                             }
-                            if (-not $matched) {
-                                Show-SetupError ("Integrity check failed for {0}. See log for hash details." -f $file.Path)
-                                $state.Cancelled = $true
-                                break
-                            }
+                        }
+                        if (-not $matched) {
+                            Show-SetupError ("Integrity check failed for {0}. See log for hash details." -f $file.Path)
+                            $state.Cancelled = $true
+                            break
                         }
                     }
                 }
