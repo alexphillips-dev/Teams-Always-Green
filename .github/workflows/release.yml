@@ -53,6 +53,8 @@ jobs:
             throw ("VERSION mismatch. VERSION='{0}', tag='{1}'." -f $version, $tag)
           }
           "tag=$tag" >> $env:GITHUB_OUTPUT
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "release_name=Teams Always Green $tag" >> $env:GITHUB_OUTPUT
 
       - name: Verify QuickSetup manifest signature
         shell: pwsh
@@ -99,11 +101,74 @@ jobs:
             -PublicKeyPath "Meta/Teams-Always-Green.updatekey.xml"
           "update_sig=$sigPath" >> $env:GITHUB_OUTPUT
 
+      - name: Build release notes
+        id: notes
+        shell: pwsh
+        run: |
+          $version = [string]"${{ steps.meta.outputs.version }}"
+          $tag = [string]"${{ steps.meta.outputs.tag }}"
+          $changelogPath = "CHANGELOG.md"
+          if (-not (Test-Path -LiteralPath $changelogPath -PathType Leaf)) {
+            throw "Missing CHANGELOG.md."
+          }
+          $lines = Get-Content -Path $changelogPath
+          $startPattern = "^## \[$([Regex]::Escape($version))\](?:\s*-\s*.+)?$"
+          $start = -1
+          for ($i = 0; $i -lt $lines.Count; $i++) {
+            if ($lines[$i] -match $startPattern) {
+              $start = $i
+              break
+            }
+          }
+          if ($start -lt 0) {
+            throw ("Could not find changelog entry for version '{0}'." -f $version)
+          }
+          $end = $lines.Count
+          for ($i = $start + 1; $i -lt $lines.Count; $i++) {
+            if ($lines[$i] -match '^## \[') {
+              $end = $i
+              break
+            }
+          }
+          $section = @()
+          if ($end -gt ($start + 1)) {
+            $section = $lines[($start + 1)..($end - 1)]
+          }
+          while ($section.Count -gt 0 -and [string]::IsNullOrWhiteSpace($section[0])) {
+            if ($section.Count -eq 1) {
+              $section = @()
+              break
+            }
+            $section = @($section | Select-Object -Skip 1)
+          }
+          while ($section.Count -gt 0 -and [string]::IsNullOrWhiteSpace($section[$section.Count - 1])) {
+            if ($section.Count -eq 1) {
+              $section = @()
+              break
+            }
+            $section = @($section | Select-Object -First ($section.Count - 1))
+          }
+          if ($section.Count -eq 0) {
+            $section = @("### Changed", "- See CHANGELOG.md for release details.")
+          }
+          $notes = @(
+            "### Teams Always Green $tag",
+            "",
+            "Release summary from \`CHANGELOG.md\`:",
+            ""
+          ) + $section
+          $notesPath = Join-Path $env:RUNNER_TEMP "release-notes.md"
+          $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+          [System.IO.File]::WriteAllLines($notesPath, $notes, $utf8NoBom)
+          "notes_path=$notesPath" >> $env:GITHUB_OUTPUT
+
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.meta.outputs.tag }}
-          generate_release_notes: true
+          name: ${{ steps.meta.outputs.release_name }}
+          body_path: ${{ steps.notes.outputs.notes_path }}
+          generate_release_notes: false
           make_latest: true
           files: |
             Script/Teams Always Green.ps1
