@@ -314,6 +314,10 @@ Describe "Quality: QuickSetup Wizard Flow" {
         $script:quickSetupText | Should -Match 'Retry = try this file again'
         $script:quickSetupText | Should -Match 'Download \+ integrity verification complete\. Click Next to finalize install\.'
     }
+
+    It "unlocks summary step before advancing from step 2" {
+        $script:quickSetupText | Should -Match '\$allowSummary\s*=\s*\$true\s*[\r\n]+\s*&\s*\$showStep\s+3'
+    }
 }
 
 Describe "Quality: UI Integration Contracts" {

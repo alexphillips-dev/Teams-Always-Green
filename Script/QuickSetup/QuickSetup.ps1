@@ -1788,6 +1788,7 @@ function Show-SetupWizard {
             $sumShortcuts.Text = if ($state.ShortcutsCreated.Count -gt 0) { $state.ShortcutsCreated -join "; " } else { "None" }
             $sumLog.Text = $logPath
             $pinTip.Visible = (-not $state.PortableMode)
+            $allowSummary = $true
             & $showStep 3
             return
         }
