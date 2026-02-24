@@ -18,6 +18,12 @@ Keep your Microsoft Teams status active without babysitting your keyboard. Teams
 - **Helpful logging:** Debug detail when you need it.
 - **Language support:** English, Spanish, French, German (auto-detect + manual).
 
+## Why This Project Exists
+
+I built this project after seeing how easily Teams presence can switch to **Away** during normal work, which can sometimes be interpreted as not being active. I wanted a simple, reliable tray app that runs quietly in the background and removes that noise while I focus on my job.
+
+This was not created to avoid work or to encourage misuse. It was created to reduce false signals and make day-to-day work more predictable. It is also useful in legitimate scenarios like keeping a PC awake during long meetings, presentations, or other hands-off workflows where lock/sleep interruptions are disruptive.
+
 ---
 
 ## Quick Setup (Recommended)
