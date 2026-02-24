@@ -28,3 +28,4 @@ Thumbs.db
 
 Meta/*.settings.lastgood.json
 coverage.xml
+secrets/
