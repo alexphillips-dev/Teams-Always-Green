@@ -127,6 +127,7 @@ Teams Always Green\
     Icons\
     Readme\
       Banner.png
+      AI_Assisted_Banner.png
 ```
 
 Runtime data (standard install):
@@ -167,6 +168,18 @@ Portable mode stores runtime data in the install folder (`Logs\`, `Settings\`, `
 - **Path protections:** External path usage can be disabled; unsafe link-style reparse paths are blocked for sensitive loads.
 - **Rate limiting:** Update checks and import actions are throttled to reduce abuse loops.
 - **Audit chain:** Security/audit log entries include a hash chain to help detect tampering.
+
+---
+
+<p align="center">
+  <img src="Meta/Readme/AI_Assisted_Banner.png" alt="AI-Assisted Development Banner" width="100%" />
+</p>
+
+## Development Transparency
+
+This project is AI-assisted.
+
+AI tooling is used to speed up development and iteration, while final decisions and project direction remain human-led. Changes are reviewed and validated with repository quality checks before release.
 
 ---
 
