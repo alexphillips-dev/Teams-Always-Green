@@ -32,8 +32,9 @@ irm "https://raw.githubusercontent.com/alexphillips-dev/Teams-Always-Green/main/
 2) Double-click it.  
 3) Choose your install folder (default: `Documents\Teams Always Green`).
 
-The installer downloads the app scripts/modules, validates integrity with `QuickSetup.manifest.json`,
-creates required folders, and can set up shortcuts. A setup summary appears at the end.
+The installer downloads the app scripts/modules, requires and validates `QuickSetup.manifest.json`,
+verifies every downloaded file hash, and blocks untrusted source URLs.
+It creates required folders and can set up shortcuts. A setup summary appears at the end.
 Optional: choose **portable mode** to skip shortcuts. Setup logs are saved to `%TEMP%\TeamsAlwaysGreen-QuickSetup.log`.
 
 ---
@@ -82,14 +83,27 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File "Script\Teams Always Gre
 
 ---
 
+## Architecture
+
+- See `docs/architecture.md` for startup flow, module boundaries, and data-path model.
+
+---
+
 ## Folder Layout
 
 ```
 Teams Always Green\
+  .editorconfig
+  docs\
+    architecture.md
   Script\
     Teams Always Green.ps1
     Core\
     Features\
+      Hotkeys.ps1
+      Profiles.ps1
+      Scheduling.ps1
+      UpdateEngine.ps1
     I18n\
     Tray\
     UI\
@@ -124,6 +138,7 @@ Portable mode stores runtime data in the install folder (`Logs\`, `Settings\`, `
 - **App won't appear:** Check `Debug\*.vbs.log` and `%LOCALAPPDATA%\TeamsAlwaysGreen\Logs\*.log`.  
 - **Settings not saving:** Ensure `%LOCALAPPDATA%\TeamsAlwaysGreen\Settings` is writable.  
 - **Weird behavior after updates:** Use **Restart** from the tray.
+- **Quick Setup stops at Step 2:** Check `%TEMP%\TeamsAlwaysGreen-QuickSetup.log` for trusted URL or integrity validation failures.
 
 ---
 
@@ -138,8 +153,10 @@ Portable mode stores runtime data in the install folder (`Logs\`, `Settings\`, `
 
 - **Security Mode bundle:** A single toggle in **Settings -> Advanced** to enforce strict import/update policy, update hash/signature requirements, permission hardening, and safer path behavior.
 - **Strict imports:** `StrictSettingsImport` and `StrictProfileImport` can block unknown or malformed keys during imports.
+- **QuickSetup supply-chain checks:** QuickSetup only accepts trusted raw GitHub URLs for this repo and requires a valid manifest + per-file hash verification.
 - **Trusted update source:** Updates are validated against configured `UpdateOwner`/`UpdateRepo` and trusted GitHub URLs.
 - **Update integrity gates:** `UpdateRequireHash` and `UpdateRequireSignature` can require SHA-256 and detached signature validation before applying updates.
+- **Safer update relaunch:** After update apply, restart uses an explicit system PowerShell path (`%WINDIR%\System32\WindowsPowerShell\v1.0\powershell.exe`).
 - **Script signature policy:** `RequireScriptSignature` with optional `TrustedSignerThumbprints` enforces Authenticode trust at startup.
 - **Path protections:** External path usage can be disabled; unsafe link-style reparse paths are blocked for sensitive loads.
 - **Rate limiting:** Update checks and import actions are throttled to reduce abuse loops.

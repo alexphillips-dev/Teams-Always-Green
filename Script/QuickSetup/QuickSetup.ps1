@@ -1265,6 +1265,7 @@ function Show-SetupWizard {
         CreateShortcuts = $true
         EnableStartup = $false
         IntegrityStatus = "Not verified"
+        InstallSource = "Remote (GitHub)"
         ShortcutsCreated = @()
         PortableMode = $false
         FinalizeCompleted = $false
@@ -1582,11 +1583,12 @@ function Show-SetupWizard {
 
     $sumInstall = New-Object System.Windows.Forms.Label
     $sumMode = New-Object System.Windows.Forms.Label
+    $sumSource = New-Object System.Windows.Forms.Label
     $sumIntegrity = New-Object System.Windows.Forms.Label
     $sumShortcuts = New-Object System.Windows.Forms.Label
     $sumLog = New-Object System.Windows.Forms.LinkLabel
 
-    foreach ($lbl in @($sumInstall,$sumMode,$sumIntegrity,$sumShortcuts,$sumLog)) {
+    foreach ($lbl in @($sumInstall,$sumMode,$sumSource,$sumIntegrity,$sumShortcuts,$sumLog)) {
         $lbl.AutoSize = $true
         $lbl.MaximumSize = New-Object System.Drawing.Size(420, 0)
     }
@@ -1610,6 +1612,7 @@ function Show-SetupWizard {
 
     & $addRow "Install Path:" $sumInstall
     & $addRow "Mode:" $sumMode
+    & $addRow "Source:" $sumSource
     & $addRow "Integrity:" $sumIntegrity
     & $addRow "Shortcuts:" $sumShortcuts
     & $addRow "Setup Log:" $sumLog
@@ -1764,6 +1767,11 @@ function Show-SetupWizard {
                 return
             }
             if (-not $state.FinalizeCompleted) {
+                $btnNext.Enabled = $false
+                $btnBack.Enabled = $false
+                $btnCancel.Enabled = $false
+                if ($dlLabel) { $dlLabel.Text = "Finalizing install..." }
+                [System.Windows.Forms.Application]::DoEvents()
                 try {
                     $state.ShortcutsCreated = Finalize-Install -installPath $state.InstallPath -targetScript $targetScript -portableMode $state.PortableMode -enableStartup $state.EnableStartup
                     $state.FinalizeCompleted = $true
@@ -1775,6 +1783,7 @@ function Show-SetupWizard {
             }
             $sumInstall.Text = $state.InstallPath
             $sumMode.Text = if ($state.PortableMode) { "Portable (no shortcuts)" } else { "Standard" }
+            $sumSource.Text = $state.InstallSource
             $sumIntegrity.Text = $state.IntegrityStatus
             $sumShortcuts.Text = if ($state.ShortcutsCreated.Count -gt 0) { $state.ShortcutsCreated -join "; " } else { "None" }
             $sumLog.Text = $logPath
@@ -1826,7 +1835,7 @@ function Show-SetupWizard {
             $startupSummary = if ($state.EnableStartup) { "Startup: Yes" } else { "Startup: No" }
             $modeSummary = if ($state.PortableMode) { "Mode: Portable" } else { "Mode: Standard" }
             if ($dlSummary) {
-                $dlSummary.Text = "Install to: $($state.InstallPath) | $modeSummary | $shortcutsSummary | $startupSummary"
+                $dlSummary.Text = ("Install to: {0} | {1} | {2} | {3}" -f $state.InstallPath, $modeSummary, $shortcutsSummary, $startupSummary)
             }
             & $showStep 2
             $targetScript = Join-Path $state.InstallPath "Script\Teams Always Green.ps1"
@@ -1868,6 +1877,10 @@ function Show-SetupWizard {
             if ($localRoot -and (Test-Path (Join-Path $localRoot "Script\Teams Always Green.ps1"))) {
                 $useLocal = $true
                 Write-SetupLog "Using local app files for install."
+            }
+            $state.InstallSource = if ($useLocal) { "Local repository" } else { "Remote (GitHub)" }
+            if ($dlSummary) {
+                $dlSummary.Text = ("{0} | Source: {1}" -f $dlSummary.Text, $state.InstallSource)
             }
 
             $manifest = $null
@@ -1957,7 +1970,7 @@ function Show-SetupWizard {
                         $downloadUrl = if ($file.Url -match "\?") { "$($file.Url)&v=$script:QuickSetupCacheBuster" } else { "$($file.Url)?v=$script:QuickSetupCacheBuster" }
                         Invoke-WebRequest -Uri $downloadUrl -OutFile $targetPath -UseBasicParsing
                     } catch {
-                        $choice = Show-SetupPrompt -message ("Download failed for:`n{0}`n`nRetry, change folder, or cancel?" -f $file.Url) -title "Download Failed" -buttons ([System.Windows.Forms.MessageBoxButtons]::AbortRetryIgnore) -icon ([System.Windows.Forms.MessageBoxIcon]::Warning) -owner $form
+                        $choice = Show-SetupPrompt -message ("Download failed for:`n{0}`n`nRetry = try this file again`nIgnore = go back to location step`nAbort = cancel setup" -f $file.Url) -title "Download Failed" -buttons ([System.Windows.Forms.MessageBoxButtons]::AbortRetryIgnore) -icon ([System.Windows.Forms.MessageBoxIcon]::Warning) -owner $form
                         if ($choice -eq [System.Windows.Forms.DialogResult]::Retry) {
                             $index--
                             continue
@@ -2016,6 +2029,9 @@ function Show-SetupWizard {
             }
 
             Update-Progress $downloadUi $total $total "Step 2 of 4: Download complete. Click Next to continue."
+            if ($dlSummary) {
+                $dlSummary.Text = "Download + integrity verification complete. Click Next to finalize install."
+            }
             $state.DownloadComplete = $true
             $btnNext.Enabled = $true
             [System.Windows.Forms.Application]::DoEvents()

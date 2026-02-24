@@ -7,6 +7,9 @@ BeforeAll {
     $script:historyDialogScript = Join-Path $script:repoRoot "Script/UI/HistoryDialog.ps1"
     $script:trayMenuScript = Join-Path $script:repoRoot "Script/Tray/Menu.ps1"
     $script:updateEngineScript = Join-Path $script:repoRoot "Script/Features/UpdateEngine.ps1"
+    $script:hotkeysFeatureScript = Join-Path $script:repoRoot "Script/Features/Hotkeys.ps1"
+    $script:schedulingFeatureScript = Join-Path $script:repoRoot "Script/Features/Scheduling.ps1"
+    $script:profilesFeatureScript = Join-Path $script:repoRoot "Script/Features/Profiles.ps1"
     $script:quickSetupScript = Join-Path $script:repoRoot "Script/QuickSetup/QuickSetup.ps1"
     $script:coreRuntimeScript = Join-Path $script:repoRoot "Script/Core/Runtime.ps1"
     $script:uiStringsScript = Join-Path $script:repoRoot "Script/I18n/UiStrings.ps1"
@@ -17,6 +20,9 @@ BeforeAll {
     $script:historyDialogText = Get-Content -Raw -Path $script:historyDialogScript
     $script:trayMenuText = Get-Content -Raw -Path $script:trayMenuScript
     $script:updateEngineText = Get-Content -Raw -Path $script:updateEngineScript
+    $script:hotkeysFeatureText = Get-Content -Raw -Path $script:hotkeysFeatureScript
+    $script:schedulingFeatureText = Get-Content -Raw -Path $script:schedulingFeatureScript
+    $script:profilesFeatureText = Get-Content -Raw -Path $script:profilesFeatureScript
     $script:quickSetupText = Get-Content -Raw -Path $script:quickSetupScript
     $script:coreRuntimeText = Get-Content -Raw -Path $script:coreRuntimeScript
 
@@ -51,6 +57,21 @@ Describe "Quality: Script Parse" {
         $tokens = $null
         $errors = $null
         [System.Management.Automation.Language.Parser]::ParseFile($script:updateEngineScript, [ref]$tokens, [ref]$errors) | Out-Null
+        $errors | Should -BeNullOrEmpty
+
+        $tokens = $null
+        $errors = $null
+        [System.Management.Automation.Language.Parser]::ParseFile($script:hotkeysFeatureScript, [ref]$tokens, [ref]$errors) | Out-Null
+        $errors | Should -BeNullOrEmpty
+
+        $tokens = $null
+        $errors = $null
+        [System.Management.Automation.Language.Parser]::ParseFile($script:schedulingFeatureScript, [ref]$tokens, [ref]$errors) | Out-Null
+        $errors | Should -BeNullOrEmpty
+
+        $tokens = $null
+        $errors = $null
+        [System.Management.Automation.Language.Parser]::ParseFile($script:profilesFeatureScript, [ref]$tokens, [ref]$errors) | Out-Null
         $errors | Should -BeNullOrEmpty
     }
 }
@@ -146,6 +167,116 @@ Describe "Quality: Profile and Update Coverage" {
     }
 }
 
+Describe "Quality: Feature Module Coverage" {
+    It "loads feature modules from main startup path" {
+        $script:mainText | Should -Match 'Import-RequiredFeatureModule "Features\\Hotkeys\.ps1" "Hotkeys-Module"'
+        $script:mainText | Should -Match 'Import-RequiredFeatureModule "Features\\Scheduling\.ps1" "Scheduling-Module"'
+        $script:mainText | Should -Match 'Import-RequiredFeatureModule "Features\\Profiles\.ps1" "Profiles-Module"'
+    }
+
+    It "keeps feature module contracts for hotkeys, scheduling, and profiles" {
+        $script:hotkeysFeatureText | Should -Match 'function\s+Get-HotkeysModuleVersion'
+        $script:hotkeysFeatureText | Should -Match 'function\s+Parse-Hotkey'
+        $script:hotkeysFeatureText | Should -Match 'function\s+Validate-HotkeyString'
+        $script:hotkeysFeatureText | Should -Match 'function\s+Register-Hotkeys'
+        $script:hotkeysFeatureText | Should -Match 'function\s+Unregister-Hotkeys'
+
+        $script:schedulingFeatureText | Should -Match 'function\s+Get-SchedulingModuleVersion'
+        $script:schedulingFeatureText | Should -Match 'function\s+Get-ScheduleWeekdaySet'
+        $script:schedulingFeatureText | Should -Match 'function\s+Get-ScheduleSuspendUntil'
+        $script:schedulingFeatureText | Should -Match 'function\s+Is-WithinSchedule'
+        $script:schedulingFeatureText | Should -Match 'function\s+Update-ScheduleBlock'
+        $script:schedulingFeatureText | Should -Match 'function\s+Format-ScheduleStatus'
+
+        $script:profilesFeatureText | Should -Match 'function\s+Get-ProfilesModuleVersion'
+        $script:profilesFeatureText | Should -Match 'function\s+Get-ProfileUsageSplitLabel'
+    }
+
+    It "parses and validates hotkeys with feature module helpers" {
+        Add-Type -AssemblyName System.Windows.Forms
+        if (-not ("HotKeyNative" -as [type])) {
+            Add-Type -TypeDefinition @"
+public static class HotKeyNative {
+    public const int MOD_ALT = 1;
+    public const int MOD_CONTROL = 2;
+    public const int MOD_SHIFT = 4;
+    public const int MOD_WIN = 8;
+    public static bool RegisterHotKey(System.IntPtr hWnd, int id, uint fsModifiers, uint vk) { return true; }
+    public static bool UnregisterHotKey(System.IntPtr hWnd, int id) { return true; }
+}
+"@
+        }
+        . $script:hotkeysFeatureScript
+        $parsed = Parse-Hotkey "Ctrl+Shift+F12"
+        $parsed | Should -Not -BeNullOrEmpty
+        [int]$parsed.Vk | Should -BeGreaterThan 0
+        Validate-HotkeyString "Ctrl+Shift+Nope" | Should -BeFalse
+    }
+
+    It "evaluates schedule suspension and formats status from scheduling module" {
+        function Write-Log { param([string]$Message, [string]$Level, [object]$Exception, [string]$Context) }
+        function Log-StateSummary { param([string]$Reason) }
+        function Format-DateTime { param($Value) return [string]$Value }
+        function Format-TimeOrNever { param($time, [bool]$showSeconds) if ($null -eq $time) { return "Never" } return [string]$time }
+        function Try-ParseTime([string]$text, [ref]$result) {
+            $result.Value = [TimeSpan]::Zero
+            if ([string]::IsNullOrWhiteSpace($text)) { return $false }
+            $parsed = [TimeSpan]::Zero
+            $ok = [TimeSpan]::TryParse($text, [ref]$parsed)
+            if ($ok) { $result.Value = $parsed }
+            return $ok
+        }
+        . $script:schedulingFeatureScript
+        $script:settings = [pscustomobject]@{
+            ScheduleEnabled = $true
+            ScheduleStart = "00:00:00"
+            ScheduleEnd = "23:59:59"
+            ScheduleWeekdays = "Mon,Tue,Wed,Thu,Fri,Sat,Sun"
+            ScheduleSuspendUntil = (Get-Date).AddMinutes(10).ToString("o")
+        }
+        $script:ScheduleWeekdayCacheText = $null
+        $script:ScheduleWeekdayCacheSet = @()
+        $script:ScheduleTimeCacheKey = $null
+        $script:ScheduleStartCache = [TimeSpan]::Zero
+        $script:ScheduleEndCache = [TimeSpan]::Zero
+        $script:ScheduleStatusCacheKey = $null
+        $script:ScheduleStatusCacheValue = $null
+        $script:isScheduleBlocked = $false
+        $script:isScheduleSuspended = $false
+        $script:LastScheduleBlocked = $false
+        $script:LastScheduleSuspended = $false
+
+        (Update-ScheduleBlock) | Should -BeTrue
+        $script:isScheduleSuspended | Should -BeTrue
+        (Format-ScheduleStatus) | Should -Match '^Suspended until'
+    }
+
+    It "summarizes profile usage split from profiles module" {
+        function Convert-ToHashtable {
+            param($Value)
+            if ($Value -is [hashtable]) { return $Value }
+            $result = @{}
+            if ($Value -and $Value.PSObject) {
+                foreach ($p in $Value.PSObject.Properties) {
+                    $result[[string]$p.Name] = $p.Value
+                }
+            }
+            return $result
+        }
+        . $script:profilesFeatureScript
+        $stats = [pscustomobject]@{
+            ProfileUsageMinutes = [pscustomobject]@{
+                Work = 120
+                Home = 60
+                Lab = 20
+            }
+        }
+        $label = Get-ProfileUsageSplitLabel $stats "Work"
+        $label | Should -Match 'Work'
+        $label | Should -Match '%'
+    }
+}
+
 Describe "Quality: QuickSetup Wizard Flow" {
     It "defers finalize work to Step 2 Next and finalizes once" {
         $script:quickSetupText | Should -Match 'FinalizeCompleted\s*=\s*\$false'
@@ -174,6 +305,14 @@ Describe "Quality: QuickSetup Wizard Flow" {
         $script:quickSetupText | Should -Match 'function\s+Test-QuickSetupManifest'
         $script:quickSetupText | Should -Match 'Manifest validation failed'
         $script:quickSetupText | Should -Match 'Manifest expected hash is missing for'
+    }
+
+    It "shows clearer step 2 guidance and summary source details" {
+        $script:quickSetupText | Should -Match 'InstallSource\s*=\s*"Remote \(GitHub\)"'
+        $script:quickSetupText | Should -Match 'Source:'
+        $script:quickSetupText | Should -Match 'Finalizing install'
+        $script:quickSetupText | Should -Match 'Retry = try this file again'
+        $script:quickSetupText | Should -Match 'Download \+ integrity verification complete\. Click Next to finalize install\.'
     }
 }
 

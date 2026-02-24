@@ -304,6 +304,9 @@ $script:RuntimeModuleAllowList = @(
     "Core\Runtime.ps1",
     "Core\DateTime.ps1",
     "Core\Settings.ps1",
+    "Features\Hotkeys.ps1",
+    "Features\Profiles.ps1",
+    "Features\Scheduling.ps1",
     "Features\UpdateEngine.ps1",
     "I18n\UiStrings.ps1",
     "Tray\Menu.ps1",
@@ -311,6 +314,9 @@ $script:RuntimeModuleAllowList = @(
     "UI\SettingsDialog.ps1"
 )
 $script:RuntimeModuleContractVersions = @{
+    "Hotkeys-Module" = "1.0.0"
+    "Profiles-Module" = "1.0.0"
+    "Scheduling-Module" = "1.0.0"
     "Update-Module" = "1.0.0"
     "Tray-Module" = "1.0.0"
     "Settings-UI" = "1.0.0"
@@ -2613,6 +2619,37 @@ if (-not (Import-RuntimeModule $updateModulePath "Update-Module")) {
         }
     }
 }
+
+function Import-RequiredFeatureModule([string]$relativePath, [string]$tag, [string]$versionCommand, [string[]]$requiredFunctions) {
+    $modulePath = Join-Path $PSScriptRoot $relativePath
+    if (-not (Import-RuntimeModule $modulePath $tag)) {
+        $reason = if ([string]::IsNullOrWhiteSpace($script:RuntimeModuleLastError)) { "Unknown reason." } else { $script:RuntimeModuleLastError }
+        throw ("{0} unavailable. Path={1} Reason={2}" -f $tag, $modulePath, $reason)
+    }
+    if (-not [string]::IsNullOrWhiteSpace($versionCommand)) {
+        if (-not (Test-ModuleVersionContract $tag $versionCommand)) {
+            throw ("{0} version contract failed." -f $tag)
+        }
+    }
+    if ($requiredFunctions -and $requiredFunctions.Count -gt 0 -and (Get-Command Test-ModuleFunctionContract -ErrorAction SilentlyContinue)) {
+        $functionMap = @{}
+        foreach ($name in @($requiredFunctions)) {
+            $cmd = Get-Command -Name $name -CommandType Function -ErrorAction SilentlyContinue
+            if ($cmd -and $cmd.ScriptBlock) {
+                $functionMap[$name] = $cmd.ScriptBlock
+            }
+        }
+        $contract = Test-ModuleFunctionContract -ModuleTag $tag -FunctionMap $functionMap -RequiredFunctions $requiredFunctions
+        if (-not $contract.IsValid) {
+            $missing = if ($contract.MissingFunctions) { ($contract.MissingFunctions -join ", ") } else { "unknown" }
+            throw ("{0} function contract failed. Missing: {1}" -f $tag, $missing)
+        }
+    }
+}
+
+Import-RequiredFeatureModule "Features\Hotkeys.ps1" "Hotkeys-Module" "Get-HotkeysModuleVersion" @("Parse-Hotkey", "Validate-HotkeyString", "Register-Hotkeys", "Unregister-Hotkeys")
+Import-RequiredFeatureModule "Features\Scheduling.ps1" "Scheduling-Module" "Get-SchedulingModuleVersion" @("Get-ScheduleWeekdaySet", "Get-ScheduleSuspendUntil", "Is-WithinSchedule", "Update-ScheduleBlock", "Format-ScheduleStatus")
+Import-RequiredFeatureModule "Features\Profiles.ps1" "Profiles-Module" "Get-ProfilesModuleVersion" @("Get-ProfileUsageSplitLabel")
 
 # --- Single-instance mutex acquisition (acquire/retry) ---
 $createdNew = $false
@@ -8987,37 +9024,6 @@ function Get-CrashFreeDays($stats, [DateTime]$now = (Get-Date)) {
     }
 }
 
-function Get-ProfileUsageSplitLabel($stats, [string]$activeProfile = "Default") {
-    if (-not $stats) { return "N/A" }
-    $profileUsage = @{}
-    if ($stats -is [System.Collections.IDictionary] -and $stats.ContainsKey("ProfileUsageMinutes")) {
-        $profileUsage = Convert-ToHashtable $stats["ProfileUsageMinutes"]
-    } elseif ($stats -and $stats.PSObject.Properties.Match("ProfileUsageMinutes").Count -gt 0) {
-        $profileUsage = Convert-ToHashtable $stats.ProfileUsageMinutes
-    }
-    if (-not $profileUsage -or @($profileUsage.Keys).Count -eq 0) {
-        if ([string]::IsNullOrWhiteSpace($activeProfile)) { $activeProfile = "Default" }
-        return ("{0} 100%" -f $activeProfile)
-    }
-    $totals = New-Object System.Collections.Generic.List[object]
-    $totalMinutes = 0.0
-    foreach ($key in @($profileUsage.Keys)) {
-        $minutes = 0.0
-        try { $minutes = [double]$profileUsage[$key] } catch { $minutes = 0.0 }
-        if ($minutes -lt 0) { $minutes = 0.0 }
-        $totalMinutes += $minutes
-        [void]$totals.Add([pscustomobject]@{ Name = [string]$key; Minutes = $minutes })
-    }
-    if ($totalMinutes -le 0) { return "N/A" }
-    $top = @($totals | Sort-Object Minutes -Descending | Select-Object -First 3)
-    $parts = @()
-    foreach ($entry in $top) {
-        $pct = [int][Math]::Round(($entry.Minutes / $totalMinutes) * 100.0)
-        $parts += ("{0} {1}%" -f $entry.Name, $pct)
-    }
-    return ($parts -join " | ")
-}
-
 function Get-UptimeReliabilityPercent($stats) {
     if (-not $stats) { return 100.0 }
     $reliable = 0.0
@@ -9491,31 +9497,6 @@ function Get-PauseDurations {
     return $values | Sort-Object -Unique
 }
 
-function Get-ScheduleWeekdaySet([string]$text) {
-    if ($script:ScheduleWeekdayCacheText -eq $text -and $script:ScheduleWeekdayCacheSet) {
-        return $script:ScheduleWeekdayCacheSet
-    }
-    if ([string]::IsNullOrWhiteSpace($text)) { return @() }
-    $map = @{
-        "MON" = [DayOfWeek]::Monday
-        "TUE" = [DayOfWeek]::Tuesday
-        "WED" = [DayOfWeek]::Wednesday
-        "THU" = [DayOfWeek]::Thursday
-        "FRI" = [DayOfWeek]::Friday
-        "SAT" = [DayOfWeek]::Saturday
-        "SUN" = [DayOfWeek]::Sunday
-    }
-    $set = @()
-    foreach ($part in ($text -split "[,; ]+" | Where-Object { $_ -ne "" })) {
-        $key = $part.ToUpperInvariant().Substring(0, [Math]::Min(3, $part.Length))
-        if ($map.ContainsKey($key)) { $set += $map[$key] }
-    }
-    $set = $set | Sort-Object -Unique
-    $script:ScheduleWeekdayCacheText = $text
-    $script:ScheduleWeekdayCacheSet = $set
-    return $set
-}
-
 function Try-ParseTime([string]$text, [ref]$result) {
     $result.Value = [TimeSpan]::Zero
     if ([string]::IsNullOrWhiteSpace($text)) { return $false }
@@ -9525,92 +9506,8 @@ function Try-ParseTime([string]$text, [ref]$result) {
     return $ok
 }
 
-function Get-ScheduleSuspendUntil {
-    $raw = [string]$settings.ScheduleSuspendUntil
-    if ([string]::IsNullOrWhiteSpace($raw)) { return $null }
-    try {
-        return [DateTime]::Parse($raw)
-    } catch {
-        return $null
-    }
-}
-
-function Is-WithinSchedule {
-    if (-not [bool]$settings.ScheduleEnabled) { return $true }
-    $days = Get-ScheduleWeekdaySet $settings.ScheduleWeekdays
-    if ($days.Count -gt 0 -and -not ($days -contains (Get-Date).DayOfWeek)) { return $false }
-    $cacheKey = "{0}|{1}" -f $settings.ScheduleStart, $settings.ScheduleEnd
-    if ($script:ScheduleTimeCacheKey -ne $cacheKey) {
-        $start = [TimeSpan]::Zero
-        $end = [TimeSpan]::Zero
-        if (-not (Try-ParseTime $settings.ScheduleStart ([ref]$start))) { return $true }
-        if (-not (Try-ParseTime $settings.ScheduleEnd ([ref]$end))) { return $true }
-        $script:ScheduleStartCache = $start
-        $script:ScheduleEndCache = $end
-        $script:ScheduleTimeCacheKey = $cacheKey
-    }
-    $start = $script:ScheduleStartCache
-    $end = $script:ScheduleEndCache
-    $now = (Get-Date).TimeOfDay
-    if ($start -le $end) {
-        return ($now -ge $start -and $now -le $end)
-    }
-    return ($now -ge $start -or $now -le $end)
-}
-
-function Update-ScheduleBlock {
-    $script:isScheduleSuspended = $false
-    if ([bool]$settings.ScheduleEnabled) {
-        $suspendUntil = Get-ScheduleSuspendUntil
-        if ($suspendUntil -and $suspendUntil -gt (Get-Date)) {
-            $script:isScheduleBlocked = $true
-            $script:isScheduleSuspended = $true
-            if (-not $script:LastScheduleSuspended) {
-                Write-Log "SCHED: Schedule suspended until $(Format-DateTime $suspendUntil)." "INFO" $null "Schedule"
-                Log-StateSummary "Schedule"
-            }
-            $script:LastScheduleSuspended = $true
-            $script:LastScheduleBlocked = $true
-            return $true
-        }
-    }
-    if ($script:LastScheduleSuspended) {
-        Write-Log "SCHED: Schedule suspension ended." "INFO" $null "Schedule"
-        $script:LastScheduleSuspended = $false
-        Log-StateSummary "Schedule"
-    }
-    $script:isScheduleBlocked = [bool]$settings.ScheduleEnabled -and -not (Is-WithinSchedule)
-    if ($script:LastScheduleBlocked -ne $script:isScheduleBlocked) {
-        $blockedText = if ($script:isScheduleBlocked) { "blocked (outside schedule)." } else { "unblocked (inside schedule)." }
-        Write-Log "SCHED: Schedule $blockedText" "INFO" $null "Schedule"
-        Log-StateSummary "Schedule"
-    }
-    $script:LastScheduleBlocked = $script:isScheduleBlocked
-    return $script:isScheduleBlocked
-}
-
 $null = Update-ScheduleBlock
 Log-StartupSummary
-
-function Format-ScheduleStatus {
-    $key = "{0}|{1}|{2}|{3}|{4}|{5}" -f $settings.ScheduleEnabled, $settings.ScheduleStart, $settings.ScheduleEnd, $settings.ScheduleWeekdays, $settings.ScheduleSuspendUntil, $script:isScheduleSuspended
-    if ($script:ScheduleStatusCacheKey -eq $key -and $script:ScheduleStatusCacheValue) {
-        return $script:ScheduleStatusCacheValue
-    }
-    $value = "Off"
-    if ([bool]$settings.ScheduleEnabled) {
-        if ($script:isScheduleSuspended) {
-            $suspendUntil = Get-ScheduleSuspendUntil
-            $suspendText = Format-TimeOrNever $suspendUntil $false
-            $value = "Suspended until $suspendText"
-        } else {
-            $value = "On ($($settings.ScheduleStart)-$($settings.ScheduleEnd) $($settings.ScheduleWeekdays))"
-        }
-    }
-    $script:ScheduleStatusCacheKey = $key
-    $script:ScheduleStatusCacheValue = $value
-    return $value
-}
 
 function Update-NotifyIconText([string]$state) {
     if ($script:isShuttingDown -or -not $notifyIcon) { return }
@@ -9667,34 +9564,6 @@ function Update-NotifyIconText([string]$state) {
     $notifyIcon.Text = $short
 }
 
-function Parse-Hotkey([string]$text) {
-    if ([string]::IsNullOrWhiteSpace($text)) { return $null }
-    $mods = 0
-    $keyName = $null
-    foreach ($part in ($text -split "\+" | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne "" })) {
-        switch ($part.ToUpperInvariant()) {
-            "CTRL" { $mods = $mods -bor [HotKeyNative]::MOD_CONTROL }
-            "CONTROL" { $mods = $mods -bor [HotKeyNative]::MOD_CONTROL }
-            "ALT" { $mods = $mods -bor [HotKeyNative]::MOD_ALT }
-            "SHIFT" { $mods = $mods -bor [HotKeyNative]::MOD_SHIFT }
-            "WIN" { $mods = $mods -bor [HotKeyNative]::MOD_WIN }
-            default { $keyName = $part }
-        }
-    }
-    if ([string]::IsNullOrWhiteSpace($keyName)) { return $null }
-    try {
-        $key = [System.Windows.Forms.Keys]::$keyName
-    } catch {
-        return $null
-    }
-    return @{ Modifiers = $mods; Vk = [int]$key }
-}
-
-function Validate-HotkeyString([string]$text) {
-    if ([string]::IsNullOrWhiteSpace($text)) { return $true }
-    return ($null -ne (Parse-Hotkey $text))
-}
-
 function Run-SelfTest {
     $issues = @()
     if (-not (Validate-HotkeyString $settings.HotkeyToggle)) { $issues += "HotkeyToggle invalid" }
@@ -9723,70 +9592,6 @@ Write-Log ("Health Summary: Hotkeys={0} Schedule={1} Profiles={2} EventLog={3} S
 
 $script:HotkeyStatusText = "Unknown"
 $script:HotkeyWarned = $false
-
-function Register-Hotkeys {
-    if ($script:isShuttingDown) { return }
-    Unregister-Hotkeys
-    if (-not $script:HotKeyFilterAdded) {
-        [System.Windows.Forms.Application]::AddMessageFilter((New-Object HotKeyMessageFilter))
-        $script:HotKeyFilterAdded = $true
-    }
-    [HotKeyMessageFilter]::HotKeyPressed = [System.Action[int]]{
-        param($id)
-        switch ($id) {
-            1001 { Do-Toggle "hotkey" }
-            1002 { if ($script:isRunning) { Stop-Toggling } else { Start-Toggling } }
-            1003 {
-                if ($script:isPaused) {
-                    Start-Toggling
-                } else {
-                    $durations = Get-PauseDurations
-                    if ($durations.Count -gt 0) { Pause-Toggling ([int]$durations[0]) }
-                }
-            }
-        }
-    }
-    $map = @{
-        1001 = $settings.HotkeyToggle
-        1002 = $settings.HotkeyStartStop
-        1003 = $settings.HotkeyPauseResume
-    }
-    $registered = 0
-    $failed = 0
-    foreach ($id in $map.Keys) {
-        $parsed = Parse-Hotkey $map[$id]
-        if ($parsed) {
-            $ok = [HotKeyNative]::RegisterHotKey([IntPtr]::Zero, $id, [uint32]$parsed.Modifiers, [uint32]$parsed.Vk)
-            if (-not $ok) {
-                Write-Log "HOTKEY: Failed to register id=$id value=$($map[$id])." "WARN" $null "Hotkey"
-                $failed++
-            } else {
-                $registered++
-            }
-        }
-    }
-    Write-Log "HOTKEY: Registration complete. Registered=$registered Failed=$failed." "INFO" $null "Hotkey"
-    if ($failed -gt 0) {
-        $script:HotkeyStatusText = "Failed ($failed)"
-        if (-not $script:HotkeyWarned -and $notifyIcon) {
-            Show-Balloon "Teams-Always-Green" "Some hotkeys failed to register. Open Settings > Hotkeys to adjust." ([System.Windows.Forms.ToolTipIcon]::Warning)
-            $script:HotkeyWarned = $true
-        }
-    } elseif ($registered -gt 0) {
-        $script:HotkeyStatusText = "Registered ($registered)"
-    } else {
-        $script:HotkeyStatusText = "Disabled"
-    }
-    Write-Log ("Metadata: Hotkeys={0}" -f $script:HotkeyStatusText) "DEBUG" $null "Hotkey"
-}
-
-function Unregister-Hotkeys {
-    foreach ($id in 1001, 1002, 1003) {
-        [HotKeyNative]::UnregisterHotKey([IntPtr]::Zero, $id) | Out-Null
-    }
-    Write-Log "HOTKEY: Unregistered." "INFO" $null "Hotkey"
-    $script:HotkeyStatusText = "Unregistered"
-}
 
 function Get-SystemThemeIsDark {
     $path = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize"
