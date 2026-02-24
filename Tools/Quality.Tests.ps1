@@ -305,6 +305,8 @@ Describe "Quality: QuickSetup Wizard Flow" {
         $script:quickSetupText | Should -Match 'Blocked untrusted download URL'
         $script:quickSetupText | Should -Match 'function\s+Test-QuickSetupManifest'
         $script:quickSetupText | Should -Match 'function\s+Test-QuickSetupManifestSignature'
+        $script:quickSetupText | Should -Match '\$script:QuickSetupRequireManifestSignature\s*=\s*\$true'
+        $script:quickSetupText | Should -Match '\$script:QuickSetupManifestSignaturePublicKeyXml\s*=\s*@'''
         $script:quickSetupText | Should -Match 'Manifest validation failed'
         $script:quickSetupText | Should -Match 'Manifest expected hash is missing for'
     }

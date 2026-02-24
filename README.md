@@ -73,7 +73,7 @@ Optional: choose **portable mode** to skip shortcuts. Setup logs are saved to `%
 
 1) Create a folder (example: `Documents\Teams Always Green`).  
 2) Copy the entire `Script\` folder from the repo into it.  
-3) Copy `Meta\Icons\` and `VERSION` from the repo into the install folder.  
+3) Copy `Meta\` and `VERSION` from the repo into the install folder.  
 4) Run:
 
 ```powershell
@@ -121,12 +121,15 @@ Teams Always Green\
     QuickSetup.ps1
     QuickSetup.cmd
     QuickSetup.manifest.json
-    QuickSetup.manifest.sig   (optional, detached signature)
+    QuickSetup.manifest.sig
   Teams Always Green.VBS
   CHANGELOG.md
   Debug\
   Meta\
     Icons\
+    Keys\
+      quicksetup-manifest-public.xml
+    Teams-Always-Green.updatekey.xml
     Readme\
       Banner.png
       AI_Assisted_Banner.png
@@ -163,7 +166,7 @@ Portable mode stores runtime data in the install folder (`Logs\`, `Settings\`, `
 - **Security Mode bundle:** A single toggle in **Settings -> Advanced** to enforce strict import/update policy, update hash/signature requirements, permission hardening, and safer path behavior.
 - **Strict imports:** `StrictSettingsImport` and `StrictProfileImport` can block unknown or malformed keys during imports.
 - **QuickSetup supply-chain checks:** QuickSetup only accepts trusted raw GitHub URLs for this repo and requires a valid manifest + per-file hash verification.
-- **Optional detached manifest signature:** QuickSetup supports `QuickSetup.manifest.sig` verification (RSA/SHA-256) when a trusted public key is configured.
+- **Detached manifest signature required:** QuickSetup requires `QuickSetup.manifest.sig` (RSA/SHA-256) and verifies it against a pinned trusted public key.
 - **Trusted update source:** Updates are validated against configured `UpdateOwner`/`UpdateRepo` and trusted GitHub URLs.
 - **Update integrity gates:** `UpdateRequireHash` and `UpdateRequireSignature` can require SHA-256 and detached signature validation before applying updates.
 - **Safer update relaunch:** After update apply, restart uses an explicit system PowerShell path (`%WINDIR%\System32\WindowsPowerShell\v1.0\powershell.exe`).
@@ -206,7 +209,7 @@ Versioning discipline:
 4. Optional: create detached manifest signature (private key XML required): `powershell -NoProfile -ExecutionPolicy RemoteSigned -File .\Tools\Generate-QuickSetupManifest.ps1 -Sign -ManifestPrivateKeyPath <PRIVATE_KEY_XML_PATH>`
 5. Sign release scripts (certificate in cert store required): `powershell -NoProfile -ExecutionPolicy RemoteSigned -File .\Tools\Sign-Release.ps1 -CertificateThumbprint <THUMBPRINT>`
 6. `.github/workflows/quality.yml` runs privacy/security scanning + analyzer warning budget + Pester coverage gate + manifest freshness checks.
-7. `.github/workflows/release-prep.yml` verifies `QuickSetup.manifest.json` freshness before release (no direct auto-commit to `main`).
+7. `.github/workflows/release-prep.yml` verifies `QuickSetup.manifest.json` freshness and signature validity before release (no direct auto-commit to `main`).
 
 ---
 
