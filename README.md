@@ -179,7 +179,15 @@ Portable mode stores runtime data in the install folder (`Logs\`, `Settings\`, `
 
 This project is AI-assisted.
 
-AI tooling is used to speed up development and iteration, while final decisions and project direction remain human-led. Changes are reviewed and validated with repository quality checks before release.
+AI tooling is used to accelerate drafting, refactoring, testing, and documentation. Final decisions, acceptance criteria, and release direction remain human-led.
+
+To keep quality and trust high:
+- Every meaningful change is reviewed before merge.
+- Automated quality gates run before release (`parse` checks, analyzer, privacy scan, Pester tests, and QuickSetup manifest freshness).
+- Security-sensitive paths (installer/update integrity and trust checks) are validated in code and covered by tests.
+- If a change does not pass checks, it does not ship.
+
+The goal is simple: use AI for speed, without lowering the bar on reliability, safety, or maintainability.
 
 ---
 
