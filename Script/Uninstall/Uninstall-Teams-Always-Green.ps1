@@ -625,12 +625,14 @@ function New-UninstallProgressUi {
     })
 
     $form.Add_FormClosing({
-        param($sender, $args)
+        param($sender, $eventArgs)
         $uiState = $sender.Tag
         if ($null -eq $uiState) { return }
         if (-not [bool]$uiState.AllowClose) {
             $uiState.Cancelled = $true
-            $args.Cancel = $true
+            if ($eventArgs -is [System.Windows.Forms.FormClosingEventArgs]) {
+                $eventArgs.Cancel = $true
+            }
         }
     })
 
@@ -1172,7 +1174,7 @@ try {
         }
 
         if ($ui -and $ui.Form -and -not $ui.Form.IsDisposed) {
-            Prepare-UninstallWizardStep1 -ui $ui -resolvedInstallRoot $resolvedInstallRoot -effectivePolicy $effectivePolicy -dryRunChecked:[bool]$script:IsDryRun
+            Prepare-UninstallWizardStep1 -ui $ui -resolvedInstallRoot $resolvedInstallRoot -effectivePolicy $effectivePolicy -dryRunChecked ([bool]$script:IsDryRun)
             Add-UninstallDetail $ui ("Ready to remove app files from: {0}" -f $resolvedInstallRoot)
             Add-UninstallDetail $ui "Next step will stop running app processes and begin file cleanup."
 
