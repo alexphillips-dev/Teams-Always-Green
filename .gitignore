@@ -13,6 +13,7 @@ Meta/PortableMode.txt
 Meta/QuickSetup.manifest.json
 .vscode/
 Settings/
+Testing/
 
 # Deprecated settings host (no longer used)
 Meta/SettingsApp/

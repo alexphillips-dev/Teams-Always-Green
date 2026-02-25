@@ -343,23 +343,26 @@ Describe "Quality: Uninstall Flow" {
         $errors | Should -BeNullOrEmpty
     }
 
-    It "hardens uninstall with safety checks, process stop, and cleanup worker" {
-        $rootPattern = '\$installRoot\s*=\s*Get-InstallRootFromScriptPath'
-        $script:uninstallText | Should -Match $rootPattern
+    It "hardens uninstall with safety checks, foreground progress UI, and full removal retries" {
+        $script:uninstallText | Should -Match 'Get-InstallRootFromScriptPath \$scriptPath'
         $script:uninstallText | Should -Match '\[CmdletBinding\(SupportsShouldProcess\s*=\s*\$true'
         $script:uninstallText | Should -Match '\[switch\]\$RemoveAppData'
         $script:uninstallText | Should -Match '\[ValidateSet\(\"Keep\", \"Remove\", \"Prompt\"\)\]'
+        $script:uninstallText | Should -Match '\[switch\]\$Relaunched'
+        $script:uninstallText | Should -Match 'function\s+Ensure-TempExecution'
+        $script:uninstallText | Should -Match 'function\s+New-UninstallProgressUi'
+        $script:uninstallText | Should -Match 'function\s+Set-UninstallProgress'
+        $script:uninstallText | Should -Match 'function\s+Add-UninstallDetail'
         $script:uninstallText | Should -Match 'function\s+Get-EffectiveAppDataPolicy'
         $script:uninstallText | Should -Match 'function\s+Test-UninstallTargetPath'
         $script:uninstallText | Should -Match 'function\s+Get-TrackedProcessCandidates'
         $script:uninstallText | Should -Match 'function\s+Stop-AppProcesses'
         $script:uninstallText | Should -Match 'function\s+Get-PathLockDiagnostics'
-        $script:uninstallText | Should -Match 'function\s+Start-RemovalWorker'
+        $script:uninstallText | Should -Match 'function\s+Remove-PathWithRetry'
         $script:uninstallText | Should -Match 'function\s+Remove-AppShortcuts'
-        $script:uninstallText | Should -Match 'function\s+Ensure-UninstallShortcut'
         $script:uninstallText | Should -Match '\$script:ExitCodes\s*=\s*@\{'
         $script:uninstallText | Should -Match 'Install signature files were not found'
-        $script:uninstallText | Should -Match 'Cleanup worker started\.'
+        $script:uninstallText | Should -Match 'Uninstall completed successfully\.'
         $script:uninstallText | Should -Match '\[System\.Windows\.Forms\.MessageBox\]::Show\('
     }
 

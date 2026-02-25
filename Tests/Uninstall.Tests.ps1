@@ -28,15 +28,17 @@ Describe "Uninstall integration" {
         function Invoke-UninstallChild {
             param(
                 [string]$ScriptPath,
+                [string]$InstallRoot,
                 [string]$Arguments,
                 [string]$LocalAppDataPath,
                 [string]$RuntimeTempRoot
             )
 
             $escapedScript = $ScriptPath.Replace("'", "''")
+            $escapedRoot = $InstallRoot.Replace("'", "''")
             $escapedLocal = $LocalAppDataPath.Replace("'", "''")
             $escapedTemp = $RuntimeTempRoot.Replace("'", "''")
-            $command = "`$env:LOCALAPPDATA='{0}'; `$env:TEMP='{1}'; `$env:TMP='{1}'; & '{2}' -Confirm:`$false {3}; exit `$LASTEXITCODE" -f $escapedLocal, $escapedTemp, $escapedScript, $Arguments
+            $command = "`$env:LOCALAPPDATA='{0}'; `$env:TEMP='{1}'; `$env:TMP='{1}'; & '{2}' -Relaunched -InstallRoot '{3}' -Confirm:`$false {4}; exit `$LASTEXITCODE" -f $escapedLocal, $escapedTemp, $escapedScript, $escapedRoot, $Arguments
             $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($command))
             $proc = Start-Process -FilePath $script:pwshPath -ArgumentList "-NoProfile -ExecutionPolicy RemoteSigned -EncodedCommand $encoded" -PassThru -Wait -WindowStyle Hidden
             return [int]$proc.ExitCode
@@ -86,7 +88,7 @@ Describe "Uninstall integration" {
         New-Item -ItemType Directory -Path $localAppData -Force | Out-Null
         New-Item -ItemType Directory -Path $runTemp -Force | Out-Null
 
-        $exitCode = Invoke-UninstallChild -ScriptPath $scriptPath -Arguments "-Silent -WhatIf -AppDataPolicy Remove" -LocalAppDataPath $localAppData -RuntimeTempRoot $runTemp
+        $exitCode = Invoke-UninstallChild -ScriptPath $scriptPath -InstallRoot $root -Arguments "-Silent -WhatIf -AppDataPolicy Remove" -LocalAppDataPath $localAppData -RuntimeTempRoot $runTemp
         $artifacts = Get-UninstallArtifacts -RuntimeTempRoot $runTemp
 
         $exitCode | Should -Be 0
@@ -111,12 +113,12 @@ Describe "Uninstall integration" {
         New-Item -ItemType Directory -Path $runTemp -Force | Out-Null
         Set-Content -Path (Join-Path $appDataRoot "settings.json") -Value "{}" -Encoding UTF8
 
-        $exitCode = Invoke-UninstallChild -ScriptPath $scriptPath -Arguments "-Silent -AppDataPolicy Remove" -LocalAppDataPath $localBase -RuntimeTempRoot $runTemp
+        $exitCode = Invoke-UninstallChild -ScriptPath $scriptPath -InstallRoot $root -Arguments "-Silent -AppDataPolicy Remove" -LocalAppDataPath $localBase -RuntimeTempRoot $runTemp
         $artifacts = Get-UninstallArtifacts -RuntimeTempRoot $runTemp
 
         $exitCode | Should -Be 0
         $artifacts.Report | Should -Not -BeNullOrEmpty
-        [string]$artifacts.Report.Result | Should -Be "CleanupStarted"
+        [string]$artifacts.Report.Result | Should -Be "Completed"
         (Wait-UntilRemoved -Path $root -TimeoutSeconds 15) | Should -BeTrue
         (Wait-UntilRemoved -Path $appDataRoot -TimeoutSeconds 15) | Should -BeTrue
 
@@ -132,7 +134,7 @@ Describe "Uninstall integration" {
         New-Item -ItemType Directory -Path $localAppData -Force | Out-Null
         New-Item -ItemType Directory -Path $runTemp -Force | Out-Null
 
-        $exitCode = Invoke-UninstallChild -ScriptPath $scriptPath -Arguments "-Silent" -LocalAppDataPath $localAppData -RuntimeTempRoot $runTemp
+        $exitCode = Invoke-UninstallChild -ScriptPath $scriptPath -InstallRoot $root -Arguments "-Silent" -LocalAppDataPath $localAppData -RuntimeTempRoot $runTemp
         $artifacts = Get-UninstallArtifacts -RuntimeTempRoot $runTemp
 
         $exitCode | Should -Be 10

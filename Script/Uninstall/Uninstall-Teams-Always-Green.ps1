@@ -1,31 +1,32 @@
-[Diagnostics.CodeAnalysis.SuppressMessageAttribute("PSUseApprovedVerbs", "", Scope = "Function", Target = "Ensure-UninstallShortcut")]
+[Diagnostics.CodeAnalysis.SuppressMessageAttribute("PSUseApprovedVerbs", "", Scope = "Function", Target = "Ensure-TempExecution")]
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute("PSUseSingularNouns", "", Scope = "Function", Target = "Remove-AppShortcuts")]
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute("PSUseSingularNouns", "", Scope = "Function", Target = "Get-TrackedProcessCandidates")]
-[Diagnostics.CodeAnalysis.SuppressMessageAttribute("PSUseSingularNouns", "", Scope = "Function", Target = "Get-PathLockDiagnostics")]
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute("PSUseSingularNouns", "", Scope = "Function", Target = "Stop-AppProcesses")]
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute("PSUseShouldProcessForStateChangingFunctions", "", Scope = "Function", Target = "Remove-AppShortcuts")]
-[Diagnostics.CodeAnalysis.SuppressMessageAttribute("PSUseShouldProcessForStateChangingFunctions", "", Scope = "Function", Target = "Stop-TrackedProcess")]
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute("PSUseShouldProcessForStateChangingFunctions", "", Scope = "Function", Target = "Stop-AppProcesses")]
-[Diagnostics.CodeAnalysis.SuppressMessageAttribute("PSUseShouldProcessForStateChangingFunctions", "", Scope = "Function", Target = "Start-RemovalWorker")]
+[Diagnostics.CodeAnalysis.SuppressMessageAttribute("PSUseShouldProcessForStateChangingFunctions", "", Scope = "Function", Target = "Remove-PathWithRetry")]
 [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = "Medium")]
 param(
     [switch]$Silent,
     [switch]$RemoveAppData,
     [ValidateSet("Keep", "Remove", "Prompt")]
-    [string]$AppDataPolicy = "Prompt"
+    [string]$AppDataPolicy = "Prompt",
+    [string]$InstallRoot = "",
+    [switch]$Relaunched
 )
 
 Add-Type -AssemblyName System.Windows.Forms
+Add-Type -AssemblyName System.Drawing
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 $script:ExitCodes = @{
-    Success           = 0
-    UserCancelled     = 2
-    SafetyBlocked     = 10
-    WorkerStartFailed = 20
-    PartialCleanup    = 30
-    UnhandledError    = 99
+    Success        = 0
+    UserCancelled  = 2
+    SafetyBlocked  = 10
+    PartialCleanup = 30
+    RelaunchFailed = 40
+    UnhandledError = 99
 }
 
 $script:AppName = "Teams Always Green"
@@ -47,23 +48,22 @@ $script:UninstallReportPath = Join-Path $tempRoot ("TeamsAlwaysGreen-Uninstall-{
 $script:UninstallReport = [ordered]@{
     StartedAtUtc             = [DateTime]::UtcNow.ToString("o")
     ScriptPath               = [string]$MyInvocation.MyCommand.Path
-    InstallRoot              = ""
+    InstallRoot              = [string]$InstallRoot
+    Relaunched               = [bool]$Relaunched
     Silent                   = [bool]$Silent
     DryRun                   = [bool]$script:IsDryRun
     AppDataPolicyRequested   = [string]$AppDataPolicy
     AppDataPolicyEffective   = ""
     RemoveAppDataSwitch      = [bool]$RemoveAppData
     RemoveAppDataResolved    = $false
-    ShortcutsRemoved         = @()
-    ShortcutRemoveFailures   = @()
+    ProcessCandidates        = @()
     ProcessesStopped         = @()
     ProcessStopFailures      = @()
-    ProcessCandidates        = @()
-    CleanupWorkerStarted     = $false
-    CleanupWorkerPath        = ""
+    ShortcutsRemoved         = @()
+    ShortcutRemoveFailures   = @()
+    RemovedInstallRoot       = $false
+    RemovedAppDataRoot       = $false
     LockDiagnostics          = ""
-    RollbackPerformed        = $false
-    RollbackResult           = ""
     Result                   = "Pending"
     ExitCode                 = -1
     Summary                  = ""
@@ -120,10 +120,16 @@ function Complete-Uninstall {
 
     if ($NotifyUser) {
         $message = "{0}`n`nLog: {1}`nReport: {2}" -f $Summary, $script:UninstallLogPath, $script:UninstallReportPath
-        Show-UninstallMessage $message $Title $Icon
+        Show-UninstallMessage -message $message -title $Title -icon $Icon
     }
 
     exit $ExitCode
+}
+
+function Get-PowerShellPath {
+    $candidate = Join-Path $env:WINDIR "System32\WindowsPowerShell\v1.0\powershell.exe"
+    if (Test-Path -LiteralPath $candidate -PathType Leaf) { return $candidate }
+    return "powershell.exe"
 }
 
 function Get-InstallRootFromScriptPath([string]$scriptPath) {
@@ -208,23 +214,185 @@ function Get-EffectiveAppDataPolicy {
     }
 }
 
+function New-UninstallProgressUi {
+    if ($Silent -or $script:IsDryRun) { return $null }
+
+    $form = New-Object System.Windows.Forms.Form
+    $form.Text = "Teams Always Green - Uninstall"
+    $form.Width = 640
+    $form.Height = 240
+    $form.StartPosition = "CenterScreen"
+    $form.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::FixedDialog
+    $form.MaximizeBox = $false
+    $form.MinimizeBox = $false
+    $form.TopMost = $true
+
+    $title = New-Object System.Windows.Forms.Label
+    $title.AutoSize = $true
+    $title.Font = New-Object System.Drawing.Font("Segoe UI", 11, [System.Drawing.FontStyle]::Bold)
+    $title.Location = New-Object System.Drawing.Point(16, 12)
+    $title.Text = "Uninstall"
+
+    $stepper = New-Object System.Windows.Forms.Label
+    $stepper.AutoSize = $true
+    $stepper.Font = New-Object System.Drawing.Font("Segoe UI", 8.5, [System.Drawing.FontStyle]::Regular)
+    $stepper.ForeColor = [System.Drawing.Color]::FromArgb(90, 90, 90)
+    $stepper.Location = New-Object System.Drawing.Point(120, 15)
+    $stepper.Text = "Step 1 of 4 - Preparing"
+
+    $label = New-Object System.Windows.Forms.Label
+    $label.AutoSize = $true
+    $label.Location = New-Object System.Drawing.Point(16, 52)
+    $label.Text = "Preparing uninstall..."
+
+    $progress = New-Object System.Windows.Forms.ProgressBar
+    $progress.Width = 590
+    $progress.Height = 20
+    $progress.Location = New-Object System.Drawing.Point(16, 76)
+    $progress.Minimum = 0
+    $progress.Maximum = 100
+    $progress.Style = [System.Windows.Forms.ProgressBarStyle]::Continuous
+
+    $meta = New-Object System.Windows.Forms.Label
+    $meta.AutoSize = $true
+    $meta.Font = New-Object System.Drawing.Font("Segoe UI", 8.5, [System.Drawing.FontStyle]::Regular)
+    $meta.Location = New-Object System.Drawing.Point(16, 104)
+    $meta.Text = ""
+
+    $detailsLink = New-Object System.Windows.Forms.LinkLabel
+    $detailsLink.Text = "Show details"
+    $detailsLink.AutoSize = $true
+    $detailsLink.Location = New-Object System.Drawing.Point(525, 104)
+
+    $detailsList = New-Object System.Windows.Forms.ListBox
+    $detailsList.Width = 590
+    $detailsList.Height = 70
+    $detailsList.Location = New-Object System.Drawing.Point(16, 126)
+    $detailsList.Visible = $false
+
+    $baseHeight = 240
+    $expandedHeight = 320
+    $detailsLink.Add_LinkClicked({
+        $detailsList.Visible = -not $detailsList.Visible
+        if ($detailsList.Visible) {
+            $detailsLink.Text = "Hide details"
+            $form.Height = $expandedHeight
+        } else {
+            $detailsLink.Text = "Show details"
+            $form.Height = $baseHeight
+        }
+    })
+
+    $form.Controls.Add($title)
+    $form.Controls.Add($stepper)
+    $form.Controls.Add($label)
+    $form.Controls.Add($progress)
+    $form.Controls.Add($meta)
+    $form.Controls.Add($detailsLink)
+    $form.Controls.Add($detailsList)
+    $form.Show()
+    [System.Windows.Forms.Application]::DoEvents()
+
+    return @{
+        Form = $form
+        Stepper = $stepper
+        Label = $label
+        Progress = $progress
+        Meta = $meta
+        DetailsList = $detailsList
+    }
+}
+
+function Set-UninstallProgress($ui, [int]$percent, [string]$stepText, [string]$message, [string]$metaText) {
+    if (-not $ui) { return }
+    if ($ui.Form.IsDisposed) { return }
+    $pct = [Math]::Max(0, [Math]::Min(100, $percent))
+    $ui.Progress.Value = $pct
+    $ui.Stepper.Text = $stepText
+    $ui.Label.Text = $message
+    $ui.Meta.Text = $metaText
+    [System.Windows.Forms.Application]::DoEvents()
+}
+
+function Add-UninstallDetail($ui, [string]$message) {
+    if ([string]::IsNullOrWhiteSpace($message)) { return }
+    Write-UninstallLog $message
+    if (-not $ui -or $ui.Form.IsDisposed) { return }
+    [void]$ui.DetailsList.Items.Insert(0, $message)
+    while ($ui.DetailsList.Items.Count -gt 40) {
+        $ui.DetailsList.Items.RemoveAt($ui.DetailsList.Items.Count - 1)
+    }
+    [System.Windows.Forms.Application]::DoEvents()
+}
+
+function Close-UninstallProgress($ui) {
+    if (-not $ui) { return }
+    try {
+        if ($ui.Form -and -not $ui.Form.IsDisposed) {
+            $ui.Form.Close()
+            $ui.Form.Dispose()
+        }
+    } catch {
+        $null = $_
+    }
+}
+
+function Ensure-TempExecution([string]$resolvedInstallRoot) {
+    if ($Relaunched) { return }
+
+    $scriptPath = [string]$MyInvocation.MyCommand.Path
+    if ([string]::IsNullOrWhiteSpace($scriptPath) -or -not (Test-Path -LiteralPath $scriptPath -PathType Leaf)) {
+        Complete-Uninstall -ExitCode $script:ExitCodes.RelaunchFailed -Result "RelaunchFailed" -Summary "Unable to resolve uninstall script path for temp execution." -NotifyUser -Icon ([System.Windows.Forms.MessageBoxIcon]::Error) -Title "Uninstall failed"
+    }
+
+    $runnerPath = Join-Path $tempRoot ("TAG-UninstallRunner-{0}.ps1" -f [Guid]::NewGuid().ToString("N"))
+    try {
+        Copy-Item -Path $scriptPath -Destination $runnerPath -Force
+    } catch {
+        Complete-Uninstall -ExitCode $script:ExitCodes.RelaunchFailed -Result "RelaunchFailed" -Summary ("Unable to stage uninstall runner: {0}" -f $_.Exception.Message) -NotifyUser -Icon ([System.Windows.Forms.MessageBoxIcon]::Error) -Title "Uninstall failed"
+    }
+
+    $args = New-Object System.Collections.Generic.List[string]
+    $args.Add("-NoProfile")
+    $args.Add("-ExecutionPolicy")
+    $args.Add("RemoteSigned")
+    $args.Add("-File")
+    $args.Add($runnerPath)
+    $args.Add("-Relaunched")
+    $args.Add("-InstallRoot")
+    $args.Add($resolvedInstallRoot)
+    $args.Add("-AppDataPolicy")
+    $args.Add($AppDataPolicy)
+    $args.Add("-Confirm:`$false")
+    if ($Silent) { $args.Add("-Silent") }
+    if ($RemoveAppData) { $args.Add("-RemoveAppData") }
+    if ($script:IsDryRun) { $args.Add("-WhatIf") }
+
+    $windowStyle = if ($Silent) { "Hidden" } else { "Normal" }
+    try {
+        Start-Process -FilePath (Get-PowerShellPath) -ArgumentList @($args.ToArray()) -WindowStyle $windowStyle -ErrorAction Stop | Out-Null
+        exit 0
+    } catch {
+        Complete-Uninstall -ExitCode $script:ExitCodes.RelaunchFailed -Result "RelaunchFailed" -Summary ("Unable to launch temp uninstall runner: {0}" -f $_.Exception.Message) -NotifyUser -Icon ([System.Windows.Forms.MessageBoxIcon]::Error) -Title "Uninstall failed"
+    }
+}
+
 function Get-ShortcutMap {
     $programsDir = [Environment]::GetFolderPath("Programs")
     $menuFolder = Join-Path $programsDir $script:AppName
     return @{
-        MenuFolder         = $menuFolder
-        MainShortcut       = (Join-Path $menuFolder "Teams Always Green.lnk")
-        UninstallShortcut  = (Join-Path $menuFolder "Uninstall Teams Always Green.lnk")
-        DesktopShortcut    = (Join-Path ([Environment]::GetFolderPath("Desktop")) "Teams Always Green.lnk")
-        StartupShortcut    = (Join-Path ([Environment]::GetFolderPath("Startup")) "Teams Always Green.lnk")
+        MenuFolder        = $menuFolder
+        MainShortcut      = (Join-Path $menuFolder "Teams Always Green.lnk")
+        UninstallShortcut = (Join-Path $menuFolder "Uninstall Teams Always Green.lnk")
+        DesktopShortcut   = (Join-Path ([Environment]::GetFolderPath("Desktop")) "Teams Always Green.lnk")
+        StartupShortcut   = (Join-Path ([Environment]::GetFolderPath("Startup")) "Teams Always Green.lnk")
     }
 }
 
-function Remove-AppShortcuts([hashtable]$shortcutMap) {
+function Remove-AppShortcuts([hashtable]$shortcutMap, $ui) {
     $result = [ordered]@{
-        Removed                  = @()
-        Failed                   = @()
-        RemovedUninstallShortcut = $false
+        Removed = @()
+        Failed  = @()
     }
 
     foreach ($shortcut in @(
@@ -237,19 +405,16 @@ function Remove-AppShortcuts([hashtable]$shortcutMap) {
         try {
             if (-not (Test-Path -LiteralPath $shortcut)) { continue }
             if ($script:IsDryRun) {
-                Write-UninstallLog ("WhatIf: would remove shortcut: {0}" -f $shortcut)
+                Add-UninstallDetail $ui ("WhatIf: would remove shortcut: {0}" -f $shortcut)
                 continue
             }
             Remove-Item -LiteralPath $shortcut -Force -ErrorAction Stop
             $result.Removed += $shortcut
-            if ($shortcut.Equals([string]$shortcutMap.UninstallShortcut, [System.StringComparison]::OrdinalIgnoreCase)) {
-                $result.RemovedUninstallShortcut = $true
-            }
-            Write-UninstallLog ("Removed shortcut: {0}" -f $shortcut)
+            Add-UninstallDetail $ui ("Removed shortcut: {0}" -f $shortcut)
         } catch {
             $failure = ("{0} | {1}" -f $shortcut, $_.Exception.Message)
             $result.Failed += $failure
-            Write-UninstallLog ("Failed to remove shortcut: {0}" -f $failure)
+            Add-UninstallDetail $ui ("Failed to remove shortcut: {0}" -f $failure)
         }
     }
 
@@ -259,57 +424,18 @@ function Remove-AppShortcuts([hashtable]$shortcutMap) {
             $childCount = (Get-ChildItem -Path $menuFolder -Force | Measure-Object).Count
             if ($childCount -eq 0) {
                 if ($script:IsDryRun) {
-                    Write-UninstallLog ("WhatIf: would remove empty Start Menu folder: {0}" -f $menuFolder)
+                    Add-UninstallDetail $ui ("WhatIf: would remove empty Start Menu folder: {0}" -f $menuFolder)
                 } else {
                     Remove-Item -LiteralPath $menuFolder -Force -ErrorAction Stop
-                    Write-UninstallLog ("Removed empty Start Menu folder: {0}" -f $menuFolder)
+                    Add-UninstallDetail $ui ("Removed empty Start Menu folder: {0}" -f $menuFolder)
                 }
             }
         }
     } catch {
-        Write-UninstallLog ("Failed to remove Start Menu folder: {0}" -f $_.Exception.Message)
+        Add-UninstallDetail $ui ("Failed to remove Start Menu folder: {0}" -f $_.Exception.Message)
     }
 
     return [pscustomobject]$result
-}
-
-function Ensure-UninstallShortcut([string]$installRoot, [hashtable]$shortcutMap) {
-    if ($script:IsDryRun) {
-        Write-UninstallLog ("WhatIf: would recreate uninstall shortcut at {0}" -f [string]$shortcutMap.UninstallShortcut)
-        return $true
-    }
-
-    try {
-        $menuFolder = [string]$shortcutMap.MenuFolder
-        if (-not (Test-Path -LiteralPath $menuFolder -PathType Container)) {
-            New-Item -ItemType Directory -Path $menuFolder -Force | Out-Null
-        }
-
-        $uninstallVbs = Join-Path $installRoot "Script\Uninstall\Uninstall-Teams-Always-Green.vbs"
-        if (-not (Test-Path -LiteralPath $uninstallVbs -PathType Leaf)) {
-            Write-UninstallLog ("Rollback failed: uninstall VBS is missing: {0}" -f $uninstallVbs)
-            return $false
-        }
-
-        $shortcutPath = [string]$shortcutMap.UninstallShortcut
-        $shell = New-Object -ComObject WScript.Shell
-        $shortcut = $shell.CreateShortcut($shortcutPath)
-        $shortcut.TargetPath = "$env:WINDIR\System32\wscript.exe"
-        $shortcut.Arguments = "`"$uninstallVbs`""
-        $shortcut.WorkingDirectory = $installRoot
-        $iconPath = Join-Path $installRoot "Meta\Icons\Tray_Icon.ico"
-        if (Test-Path -LiteralPath $iconPath -PathType Leaf) {
-            $shortcut.IconLocation = "$iconPath,0"
-        } else {
-            $shortcut.IconLocation = "$env:WINDIR\System32\shell32.dll,1"
-        }
-        $shortcut.Save()
-        Write-UninstallLog ("Rollback complete: recreated uninstall shortcut: {0}" -f $shortcutPath)
-        return $true
-    } catch {
-        Write-UninstallLog ("Rollback failed: unable to recreate uninstall shortcut: {0}" -f $_.Exception.Message)
-        return $false
-    }
 }
 
 function Get-TrackedProcessCandidates([string]$installRoot) {
@@ -325,15 +451,10 @@ function Get-TrackedProcessCandidates([string]$installRoot) {
         $installRoot,
         (Join-Path $installRoot "Script\Teams Always Green.ps1"),
         (Join-Path $installRoot "Teams Always Green.VBS"),
-        (Join-Path $installRoot "Script\Uninstall\Uninstall-Teams-Always-Green.ps1")
+        (Join-Path $installRoot "Script\Uninstall")
     ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | ForEach-Object { $_.ToLowerInvariant() }
 
-    $byId = @{}
-    foreach ($proc in $all) {
-        $byId[[int]$proc.ProcessId] = $proc
-    }
-
-    $direct = @{}
+    $selected = New-Object System.Collections.Generic.List[object]
     foreach ($proc in $all) {
         $procId = [int]$proc.ProcessId
         if ($procId -eq $PID) { continue }
@@ -342,45 +463,54 @@ function Get-TrackedProcessCandidates([string]$installRoot) {
         $cmdLower = $cmd.ToLowerInvariant()
         foreach ($token in $tokens) {
             if ($cmdLower.Contains($token)) {
-                $direct[$procId] = $true
+                $selected.Add([pscustomobject]@{
+                    ProcessId = $procId
+                    Name = [string]$proc.Name
+                    CommandLine = [string]$proc.CommandLine
+                })
                 break
             }
         }
     }
+    return @($selected | Sort-Object ProcessId -Unique)
+}
 
-    $selected = New-Object System.Collections.Generic.List[object]
-    foreach ($proc in $all) {
-        $procId = [int]$proc.ProcessId
-        if ($procId -eq $PID) { continue }
-        $reason = $null
+function Stop-AppProcesses([string]$installRoot, $ui) {
+    $result = [ordered]@{
+        Candidates = @()
+        Stopped    = @()
+        Failed     = @()
+    }
 
-        if ($direct.ContainsKey($procId)) {
-            $reason = "direct-commandline-match"
-        } else {
-            $cursor = [int]$proc.ParentProcessId
-            for ($depth = 0; $depth -lt 12; $depth++) {
-                if ($cursor -le 0) { break }
-                if ($direct.ContainsKey($cursor)) {
-                    $reason = ("descendant-of-{0}" -f $cursor)
-                    break
-                }
-                if (-not $byId.ContainsKey($cursor)) { break }
-                $cursor = [int]$byId[$cursor].ParentProcessId
+    $candidates = @(Get-TrackedProcessCandidates -installRoot $installRoot)
+    foreach ($candidate in $candidates) {
+        $result.Candidates += ("PID={0}|Name={1}" -f $candidate.ProcessId, $candidate.Name)
+        if ($script:IsDryRun) {
+            Add-UninstallDetail $ui ("WhatIf: would stop PID={0} Name={1}" -f $candidate.ProcessId, $candidate.Name)
+            continue
+        }
+
+        $stopped = $false
+        foreach ($delay in @(200, 500, 900)) {
+            try {
+                Stop-Process -Id ([int]$candidate.ProcessId) -Force -ErrorAction Stop
+                $stopped = $true
+                break
+            } catch {
+                Start-Sleep -Milliseconds $delay
             }
         }
 
-        if (-not [string]::IsNullOrWhiteSpace($reason)) {
-            $selected.Add([pscustomobject]@{
-                ProcessId     = $procId
-                ParentProcess = [int]$proc.ParentProcessId
-                Name          = [string]$proc.Name
-                MatchReason   = $reason
-                CommandLine   = [string]$proc.CommandLine
-            })
+        if ($stopped) {
+            $result.Stopped += [int]$candidate.ProcessId
+            Add-UninstallDetail $ui ("Stopped process PID={0} Name={1}" -f $candidate.ProcessId, $candidate.Name)
+        } else {
+            $result.Failed += [int]$candidate.ProcessId
+            Add-UninstallDetail $ui ("Failed to stop PID={0}" -f $candidate.ProcessId)
         }
     }
 
-    return @($selected | Sort-Object ProcessId -Unique)
+    return [pscustomobject]$result
 }
 
 function Get-PathLockDiagnostics([string]$installRoot) {
@@ -390,186 +520,83 @@ function Get-PathLockDiagnostics([string]$installRoot) {
     $items = New-Object System.Collections.Generic.List[string]
     foreach ($candidate in $candidates) {
         $cmd = [string]$candidate.CommandLine
-        if ($cmd.Length -gt 180) { $cmd = $cmd.Substring(0, 180) + "..." }
-        $items.Add(("PID={0};Name={1};Reason={2};Cmd={3}" -f $candidate.ProcessId, $candidate.Name, $candidate.MatchReason, $cmd))
+        if ($cmd.Length -gt 160) { $cmd = $cmd.Substring(0, 160) + "..." }
+        $items.Add(("PID={0};Name={1};Cmd={2}" -f $candidate.ProcessId, $candidate.Name, $cmd))
     }
     return ($items -join " || ")
 }
 
-function Stop-TrackedProcess([pscustomobject]$candidate) {
+function Remove-PathWithRetry([string]$path, [string]$label, [int]$maxAttempts, $ui, [int]$basePercent) {
+    if ([string]::IsNullOrWhiteSpace($path)) { return $false }
     if ($script:IsDryRun) {
-        Write-UninstallLog ("WhatIf: would stop PID={0} Name={1} Reason={2}" -f $candidate.ProcessId, $candidate.Name, $candidate.MatchReason)
+        Add-UninstallDetail $ui ("WhatIf: would remove {0}: {1}" -f $label, $path)
         return $true
     }
 
-    $delays = @(200, 500, 1000)
-    foreach ($delay in $delays) {
-        try {
-            Stop-Process -Id ([int]$candidate.ProcessId) -Force -ErrorAction Stop
-            Write-UninstallLog ("Stopped process PID={0} Name={1} Reason={2}" -f $candidate.ProcessId, $candidate.Name, $candidate.MatchReason)
+    for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
+        if (-not (Test-Path -LiteralPath $path)) {
+            Add-UninstallDetail $ui ("Removed {0}: {1}" -f $label, $path)
             return $true
+        }
+
+        try {
+            Remove-Item -LiteralPath $path -Recurse -Force -ErrorAction Stop
         } catch {
-            Write-UninstallLog ("Stop attempt failed for PID={0}: {1}" -f $candidate.ProcessId, $_.Exception.Message)
-            Start-Sleep -Milliseconds $delay
+            $null = $_
         }
-    }
 
-    try {
-        $stillRunning = Get-Process -Id ([int]$candidate.ProcessId) -ErrorAction Stop
-        if ($stillRunning) {
-            Write-UninstallLog ("PID={0} is still running after retries." -f $candidate.ProcessId)
-            return $false
+        if (-not (Test-Path -LiteralPath $path)) {
+            Add-UninstallDetail $ui ("Removed {0}: {1}" -f $label, $path)
+            return $true
         }
-    } catch {
-        return $true
-    }
-    return $false
-}
 
-function Stop-AppProcesses([string]$installRoot) {
-    $result = [ordered]@{
-        Candidates = @()
-        Stopped    = @()
-        Failed     = @()
+        $progressSpan = 12
+        $pct = $basePercent + [int][Math]::Min($progressSpan, [Math]::Floor(($attempt / [double]$maxAttempts) * $progressSpan))
+        Set-UninstallProgress $ui $pct "Step 3 of 4 - Removing files" ("Retrying {0} remove..." -f $label) ("Attempt {0}/{1}" -f $attempt, $maxAttempts)
+        Add-UninstallDetail $ui ("Attempt {0}/{1} failed for {2}" -f $attempt, $maxAttempts, $label)
+        $delay = [Math]::Min(2000, [int](150 * [Math]::Pow(2, [Math]::Min(4, $attempt))))
+        Start-Sleep -Milliseconds $delay
     }
 
-    $candidates = @(Get-TrackedProcessCandidates -installRoot $installRoot)
-    foreach ($candidate in $candidates) {
-        $result.Candidates += ("PID={0}|Name={1}|Reason={2}" -f $candidate.ProcessId, $candidate.Name, $candidate.MatchReason)
-        if (Stop-TrackedProcess -candidate $candidate) {
-            $result.Stopped += [int]$candidate.ProcessId
-        } else {
-            $result.Failed += [int]$candidate.ProcessId
-        }
+    if (Test-Path -LiteralPath $path) {
+        Add-UninstallDetail $ui ("Failed to remove {0}: {1}" -f $label, $path)
+        return $false
     }
 
-    if ($candidates.Count -eq 0) {
-        Write-UninstallLog "No candidate app processes found."
-    } else {
-        Write-UninstallLog ("Process stop summary: candidates={0} stopped={1} failed={2}" -f $candidates.Count, $result.Stopped.Count, $result.Failed.Count)
-    }
-
-    if (-not $script:IsDryRun) {
-        Start-Sleep -Milliseconds 700
-    }
-
-    return [pscustomobject]$result
-}
-
-function Start-RemovalWorker([string]$installRoot, [bool]$removeAppData, [string]$appDataRoot, [string]$logPath) {
-    if ($script:IsDryRun) {
-        Write-UninstallLog ("WhatIf: would start cleanup worker for install path '{0}' (RemoveAppData={1})" -f $installRoot, $removeAppData)
-        return [pscustomobject]@{ Started = $true; CleanupPath = ""; Error = "" }
-    }
-
-    $cleanupPath = Join-Path $tempRoot ("TAG-UninstallCleanup-{0}.ps1" -f [Guid]::NewGuid().ToString("N"))
-    $escapedInstallRoot = $installRoot.Replace("'", "''")
-    $escapedAppDataRoot = $appDataRoot.Replace("'", "''")
-    $escapedLogPath = $logPath.Replace("'", "''")
-    $escapedCleanupPath = $cleanupPath.Replace("'", "''")
-    $removeAppDataLiteral = if ($removeAppData) { '$true' } else { '$false' }
-
-    $cleanupScript = @"
-`$ErrorActionPreference = 'SilentlyContinue'
-function Write-CleanupLog([string]`$message) {
-    if ([string]::IsNullOrWhiteSpace(`$message)) { return }
-    try {
-        Add-Content -Path '$escapedLogPath' -Value ('[{0}] [cleanup] {1}' -f (Get-Date).ToString('yyyy-MM-dd HH:mm:ss'), `$message) -Encoding UTF8
-    } catch {
-        `$null = `$_
-    }
-}
-function Get-LockDiagnostics([string]`$rootPath) {
-    try {
-        `$filter = "Name='wscript.exe' OR Name='cscript.exe' OR Name='powershell.exe' OR Name='pwsh.exe'"
-        `$list = @(Get-CimInstance Win32_Process -Filter `$filter -ErrorAction Stop)
-        `$items = New-Object System.Collections.Generic.List[string]
-        foreach (`$proc in `$list) {
-            `$cmd = [string]`$proc.CommandLine
-            if ([string]::IsNullOrWhiteSpace(`$cmd)) { continue }
-            if (`$cmd.IndexOf(`$rootPath, [System.StringComparison]::OrdinalIgnoreCase) -lt 0) { continue }
-            if (`$cmd.Length -gt 160) { `$cmd = `$cmd.Substring(0, 160) + '...' }
-            `$items.Add(('PID={0};Name={1};Cmd={2}' -f `$proc.ProcessId, `$proc.Name, `$cmd))
-        }
-        if (`$items.Count -eq 0) { return 'none' }
-        return (`$items -join ' || ')
-    } catch {
-        return ('diag-error: ' + `$_.Exception.Message)
-    }
-}
-function Remove-WithRetry([string]`$targetPath, [string]`$label) {
-    if ([string]::IsNullOrWhiteSpace(`$targetPath)) { return `$false }
-    for (`$attempt = 1; `$attempt -le 12; `$attempt++) {
-        if (-not (Test-Path -LiteralPath `$targetPath)) { return `$true }
-        Remove-Item -LiteralPath `$targetPath -Recurse -Force -ErrorAction SilentlyContinue
-        if (-not (Test-Path -LiteralPath `$targetPath)) { return `$true }
-        `$delay = [Math]::Min(3000, [int](200 * [Math]::Pow(2, [Math]::Min(4, `$attempt))))
-        Write-CleanupLog ('Attempt {0} failed for {1}; backoff={2}ms' -f `$attempt, `$label, `$delay)
-        Start-Sleep -Milliseconds `$delay
-    }
-    if (Test-Path -LiteralPath `$targetPath) {
-        `$diag = Get-LockDiagnostics '$escapedInstallRoot'
-        Write-CleanupLog ('Lock diagnostics for {0}: {1}' -f `$label, `$diag)
-        return `$false
-    }
-    return `$true
-}
-Write-CleanupLog 'Cleanup worker started.'
-`$removedInstall = Remove-WithRetry '$escapedInstallRoot' 'install-root'
-if (`$removedInstall) {
-    Write-CleanupLog ('Removed install path: {0}' -f '$escapedInstallRoot')
-} else {
-    Write-CleanupLog ('Failed to remove install path: {0}' -f '$escapedInstallRoot')
-}
-`$removeAppData = $removeAppDataLiteral
-if (`$removeAppData) {
-    `$removedData = Remove-WithRetry '$escapedAppDataRoot' 'app-data'
-    if (`$removedData) {
-        Write-CleanupLog ('Removed app data path: {0}' -f '$escapedAppDataRoot')
-    } else {
-        Write-CleanupLog ('Failed to remove app data path: {0}' -f '$escapedAppDataRoot')
-    }
-}
-Remove-Item -LiteralPath '$escapedCleanupPath' -Force -ErrorAction SilentlyContinue
-"@
-
-    try {
-        Set-Content -Path $cleanupPath -Value $cleanupScript -Encoding UTF8
-        Start-Process "$env:WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe" -ArgumentList "-NoProfile -ExecutionPolicy RemoteSigned -WindowStyle Hidden -File `"$cleanupPath`"" -WindowStyle Hidden -ErrorAction Stop | Out-Null
-        Write-UninstallLog ("Started cleanup worker: {0}" -f $cleanupPath)
-        return [pscustomobject]@{ Started = $true; CleanupPath = $cleanupPath; Error = "" }
-    } catch {
-        Write-UninstallLog ("Failed to start cleanup worker: {0}" -f $_.Exception.Message)
-        return [pscustomobject]@{ Started = $false; CleanupPath = $cleanupPath; Error = [string]$_.Exception.Message }
-    }
+    return $true
 }
 
 try {
-    $scriptPath = $MyInvocation.MyCommand.Path
-    $installRoot = Get-InstallRootFromScriptPath $scriptPath
-    $script:UninstallReport.InstallRoot = [string]$installRoot
+    $scriptPath = [string]$MyInvocation.MyCommand.Path
+    $resolvedInstallRoot = if ([string]::IsNullOrWhiteSpace($InstallRoot)) {
+        Get-InstallRootFromScriptPath $scriptPath
+    } else {
+        [string]$InstallRoot
+    }
 
     Write-UninstallLog ("Uninstall started. Script={0}" -f $scriptPath)
-    Write-UninstallLog ("Resolved install root={0}" -f $installRoot)
-    Write-UninstallLog ("AppData root={0}" -f $script:AppDataRoot)
-    Write-UninstallLog ("DryRun={0}" -f $script:IsDryRun)
+    Write-UninstallLog ("InstallRoot parameter={0}" -f $resolvedInstallRoot)
+    Write-UninstallLog ("Relaunched={0} Silent={1} DryRun={2}" -f $Relaunched, $Silent, $script:IsDryRun)
 
-    $validation = Test-UninstallTargetPath $installRoot
+    $validation = Test-UninstallTargetPath $resolvedInstallRoot
     if (-not $validation.IsSafe) {
         Complete-Uninstall -ExitCode $script:ExitCodes.SafetyBlocked -Result "SafetyBlocked" -Summary ("Uninstall blocked for safety: {0}" -f $validation.Reason) -NotifyUser -Icon ([System.Windows.Forms.MessageBoxIcon]::Error) -Title "Uninstall blocked"
     }
-    $installRoot = [string]$validation.Path
-    $script:UninstallReport.InstallRoot = $installRoot
+    $resolvedInstallRoot = [string]$validation.Path
+    $script:UninstallReport.InstallRoot = $resolvedInstallRoot
+
+    Ensure-TempExecution -resolvedInstallRoot $resolvedInstallRoot
+
+    $ui = New-UninstallProgressUi
+    Set-UninstallProgress $ui 5 "Step 1 of 4 - Verify" "Verifying install path and options..." ("Install path: {0}" -f $resolvedInstallRoot)
 
     $operation = "Remove app files, shortcuts, and selected local data"
-    if (-not $PSCmdlet.ShouldProcess($installRoot, $operation)) {
+    if (-not $PSCmdlet.ShouldProcess($resolvedInstallRoot, $operation)) {
         if ($script:IsDryRun) {
             $previewPolicy = Get-EffectiveAppDataPolicy -SilentMode:$Silent -RemoveAppDataSwitch:$RemoveAppData -RequestedPolicy $AppDataPolicy
-            $summary = "Dry run complete. Planned uninstall root: {0}. AppData policy: {1}." -f $installRoot, $previewPolicy
-            Complete-Uninstall -ExitCode $script:ExitCodes.Success -Result "DryRun" -Summary $summary
-        } else {
-            Complete-Uninstall -ExitCode $script:ExitCodes.UserCancelled -Result "Cancelled" -Summary "Uninstall cancelled by confirmation prompt."
+            Complete-Uninstall -ExitCode $script:ExitCodes.Success -Result "DryRun" -Summary ("Dry run complete. Planned uninstall root: {0}. AppData policy: {1}." -f $resolvedInstallRoot, $previewPolicy)
         }
+        Complete-Uninstall -ExitCode $script:ExitCodes.UserCancelled -Result "Cancelled" -Summary "Uninstall cancelled by confirmation prompt."
     }
 
     $effectivePolicy = Get-EffectiveAppDataPolicy -SilentMode:$Silent -RemoveAppDataSwitch:$RemoveAppData -RequestedPolicy $AppDataPolicy
@@ -588,14 +615,15 @@ try {
     } elseif ($effectivePolicy -eq "Prompt") {
         $effectivePolicy = "Keep"
     }
+
     $removeAppDataRequested = ($effectivePolicy -eq "Remove")
     $script:UninstallReport.AppDataPolicyEffective = $effectivePolicy
     $script:UninstallReport.RemoveAppDataResolved = [bool]$removeAppDataRequested
-    Write-UninstallLog ("AppDataPolicy requested={0} effective={1} remove={2}" -f $AppDataPolicy, $effectivePolicy, $removeAppDataRequested)
+    Add-UninstallDetail $ui ("AppData policy: {0}" -f $effectivePolicy)
 
     if (-not $Silent -and -not $script:IsDryRun) {
         $resp = [System.Windows.Forms.MessageBox]::Show(
-            "Remove app files from:`n$installRoot`n`nRunning app processes will be stopped.",
+            "Remove app files from:`n$resolvedInstallRoot`n`nRunning app processes will be stopped.",
             "Uninstall Teams Always Green",
             [System.Windows.Forms.MessageBoxButtons]::YesNo,
             [System.Windows.Forms.MessageBoxIcon]::Warning
@@ -605,45 +633,46 @@ try {
         }
     }
 
+    Set-UninstallProgress $ui 18 "Step 2 of 4 - Cleanup" "Removing shortcuts..." ""
     $shortcutMap = Get-ShortcutMap
-    $shortcutResult = Remove-AppShortcuts -shortcutMap $shortcutMap
+    $shortcutResult = Remove-AppShortcuts -shortcutMap $shortcutMap -ui $ui
     $script:UninstallReport.ShortcutsRemoved = @($shortcutResult.Removed)
     $script:UninstallReport.ShortcutRemoveFailures = @($shortcutResult.Failed)
 
-    $processResult = Stop-AppProcesses -installRoot $installRoot
+    Set-UninstallProgress $ui 32 "Step 2 of 4 - Cleanup" "Stopping running processes..." ""
+    $processResult = Stop-AppProcesses -installRoot $resolvedInstallRoot -ui $ui
     $script:UninstallReport.ProcessCandidates = @($processResult.Candidates)
     $script:UninstallReport.ProcessesStopped = @($processResult.Stopped)
     $script:UninstallReport.ProcessStopFailures = @($processResult.Failed)
 
-    $workerResult = Start-RemovalWorker -installRoot $installRoot -removeAppData:$removeAppDataRequested -appDataRoot $script:AppDataRoot -logPath $script:UninstallLogPath
-    $script:UninstallReport.CleanupWorkerStarted = [bool]$workerResult.Started
-    $script:UninstallReport.CleanupWorkerPath = [string]$workerResult.CleanupPath
+    Set-UninstallProgress $ui 48 "Step 3 of 4 - Removing files" "Removing app files..." ""
+    $removedInstallRoot = Remove-PathWithRetry -path $resolvedInstallRoot -label "install root" -maxAttempts 18 -ui $ui -basePercent 48
+    $script:UninstallReport.RemovedInstallRoot = [bool]$removedInstallRoot
 
-    if (-not $workerResult.Started) {
-        $script:UninstallReport.LockDiagnostics = Get-PathLockDiagnostics -installRoot $installRoot
-        Write-UninstallLog ("Lock diagnostics: {0}" -f $script:UninstallReport.LockDiagnostics)
-
-        $rollbackPerformed = $false
-        if ([bool]$shortcutResult.RemovedUninstallShortcut) {
-            $rollbackPerformed = Ensure-UninstallShortcut -installRoot $installRoot -shortcutMap $shortcutMap
-        }
-        $script:UninstallReport.RollbackPerformed = [bool]$rollbackPerformed
-        $script:UninstallReport.RollbackResult = if ($rollbackPerformed) { "Uninstall shortcut restored." } else { "Uninstall shortcut restore not required or failed." }
-
-        $failureSummary = "Cleanup worker failed to start. No files were removed yet. {0}" -f $script:UninstallReport.RollbackResult
-        if ($rollbackPerformed) {
-            Complete-Uninstall -ExitCode $script:ExitCodes.WorkerStartFailed -Result "WorkerStartFailed" -Summary $failureSummary -NotifyUser -Icon ([System.Windows.Forms.MessageBoxIcon]::Error) -Title "Uninstall failed"
-        } else {
-            Complete-Uninstall -ExitCode $script:ExitCodes.PartialCleanup -Result "PartialCleanup" -Summary $failureSummary -NotifyUser -Icon ([System.Windows.Forms.MessageBoxIcon]::Error) -Title "Uninstall failed"
-        }
-    }
-
-    $summary = if ($script:IsDryRun) {
-        "Dry run complete. No files were removed."
+    if ($removeAppDataRequested) {
+        Set-UninstallProgress $ui 78 "Step 3 of 4 - Removing files" "Removing local settings and logs..." ""
+        $removedAppDataRoot = Remove-PathWithRetry -path $script:AppDataRoot -label "app data" -maxAttempts 12 -ui $ui -basePercent 78
+        $script:UninstallReport.RemovedAppDataRoot = [bool]$removedAppDataRoot
     } else {
-        "Uninstall started in the background."
+        $script:UninstallReport.RemovedAppDataRoot = $false
+        Add-UninstallDetail $ui "Local settings/logs retained."
     }
-    Complete-Uninstall -ExitCode $script:ExitCodes.Success -Result "CleanupStarted" -Summary $summary -NotifyUser:(-not $Silent) -Icon ([System.Windows.Forms.MessageBoxIcon]::Information) -Title "Uninstall started"
+
+    $allGood = $removedInstallRoot -and (-not $removeAppDataRequested -or $script:UninstallReport.RemovedAppDataRoot)
+    if (-not $allGood) {
+        $script:UninstallReport.LockDiagnostics = Get-PathLockDiagnostics -installRoot $resolvedInstallRoot
+        Add-UninstallDetail $ui ("Lock diagnostics: {0}" -f $script:UninstallReport.LockDiagnostics)
+    }
+
+    Set-UninstallProgress $ui 100 "Step 4 of 4 - Complete" "Finalizing uninstall..." ""
+    Start-Sleep -Milliseconds 300
+    Close-UninstallProgress $ui
+
+    if ($allGood) {
+        Complete-Uninstall -ExitCode $script:ExitCodes.Success -Result "Completed" -Summary "Uninstall completed successfully." -NotifyUser:(-not $Silent) -Icon ([System.Windows.Forms.MessageBoxIcon]::Information) -Title "Uninstall complete"
+    }
+
+    Complete-Uninstall -ExitCode $script:ExitCodes.PartialCleanup -Result "PartialCleanup" -Summary "Uninstall completed with warnings. Some files could not be removed." -NotifyUser -Icon ([System.Windows.Forms.MessageBoxIcon]::Warning) -Title "Uninstall completed with warnings"
 } catch {
     $message = "Unhandled uninstall error: {0}" -f $_.Exception.Message
     Write-UninstallLog $message
@@ -651,6 +680,6 @@ try {
     $script:UninstallReport.ExitCode = $script:ExitCodes.UnhandledError
     $script:UninstallReport.Summary = $message
     Save-UninstallReport
-    Show-UninstallMessage ("{0}`n`nLog: {1}`nReport: {2}" -f $message, $script:UninstallLogPath, $script:UninstallReportPath) "Uninstall failed" ([System.Windows.Forms.MessageBoxIcon]::Error)
+    Show-UninstallMessage -message ("{0}`n`nLog: {1}`nReport: {2}" -f $message, $script:UninstallLogPath, $script:UninstallReportPath) -title "Uninstall failed" -icon ([System.Windows.Forms.MessageBoxIcon]::Error)
     exit $script:ExitCodes.UnhandledError
 }
