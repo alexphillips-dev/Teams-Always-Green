@@ -343,15 +343,26 @@ Describe "Quality: Uninstall Flow" {
         $errors | Should -BeNullOrEmpty
     }
 
-    It "targets install root and supports interactive prompt without helper dependencies" {
-        $rootPattern = '\$installRoot\s*=\s*Split-Path -Parent \(Split-Path -Parent \(Split-Path -Parent \$scriptPath\)\)'
+    It "hardens uninstall with safety checks, process stop, and cleanup worker" {
+        $rootPattern = '\$installRoot\s*=\s*Get-InstallRootFromScriptPath'
         $script:uninstallText | Should -Match $rootPattern
+        $script:uninstallText | Should -Match '\[switch\]\$RemoveAppData'
+        $script:uninstallText | Should -Match 'function\s+Test-UninstallTargetPath'
+        $script:uninstallText | Should -Match 'function\s+Stop-AppProcesses'
+        $script:uninstallText | Should -Match 'function\s+Start-RemovalWorker'
+        $script:uninstallText | Should -Match 'function\s+Remove-AppShortcuts'
+        $script:uninstallText | Should -Match 'Install signature files were not found'
+        $script:uninstallText | Should -Match 'Cleanup worker started\.'
         $script:uninstallText | Should -Match '\[System\.Windows\.Forms\.MessageBox\]::Show\('
-        $script:uninstallText | Should -Not -Match 'Show-SetupPrompt'
+    }
 
-        # QuickSetup's generated uninstall template should stay aligned with the standalone script.
-        $script:quickSetupText | Should -Match $rootPattern
-        $script:quickSetupText | Should -Match '\[System\.Windows\.Forms\.MessageBox\]::Show\('
+    It "stages canonical uninstall assets from local or trusted remote source" {
+        $script:quickSetupText | Should -Match 'function\s+Install-UninstallAssets'
+        $script:quickSetupText | Should -Match 'Uninstall assets copied from local repository\.'
+        $script:quickSetupText | Should -Match '\$script:QuickSetupRawBase/Script/Uninstall/Uninstall-Teams-Always-Green\.ps1'
+        $script:quickSetupText | Should -Match 'Blocked untrusted uninstall asset URL'
+        $script:quickSetupText | Should -Match 'Install-UninstallAssets -installPath \$installPath'
+        $script:quickSetupText | Should -Not -Match '\$uninstallScript = @'''
     }
 }
 

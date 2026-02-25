@@ -1274,6 +1274,53 @@ function New-VbsShortcut([string]$shortcutPath, [string]$vbsPath, [string]$worki
     $shortcut.Save()
 }
 
+function Install-UninstallAssets {
+    param([string]$installPath)
+
+    $uninstallDir = Join-Path $installPath "Script\Uninstall"
+    $uninstallScriptPath = Join-Path $uninstallDir "Uninstall-Teams-Always-Green.ps1"
+    $uninstallVbsPath = Join-Path $uninstallDir "Uninstall-Teams-Always-Green.vbs"
+    if (-not (Test-Path -LiteralPath $uninstallDir -PathType Container)) {
+        New-Item -ItemType Directory -Path $uninstallDir -Force | Out-Null
+    }
+
+    $sourceRoot = Get-QuickSetupSourceRoot
+    if ($sourceRoot) {
+        $localScriptPath = Join-Path $sourceRoot "Script\Uninstall\Uninstall-Teams-Always-Green.ps1"
+        $localVbsPath = Join-Path $sourceRoot "Script\Uninstall\Uninstall-Teams-Always-Green.vbs"
+        if ((Test-Path -LiteralPath $localScriptPath -PathType Leaf) -and (Test-Path -LiteralPath $localVbsPath -PathType Leaf)) {
+            Copy-Item -Path $localScriptPath -Destination $uninstallScriptPath -Force
+            Copy-Item -Path $localVbsPath -Destination $uninstallVbsPath -Force
+            Write-SetupLog "Uninstall assets copied from local repository."
+            return @{
+                ScriptPath = $uninstallScriptPath
+                VbsPath = $uninstallVbsPath
+            }
+        }
+    }
+
+    $assets = @(
+        @{ Url = "$script:QuickSetupRawBase/Script/Uninstall/Uninstall-Teams-Always-Green.ps1"; Path = $uninstallScriptPath },
+        @{ Url = "$script:QuickSetupRawBase/Script/Uninstall/Uninstall-Teams-Always-Green.vbs"; Path = $uninstallVbsPath }
+    )
+    foreach ($asset in $assets) {
+        if (-not (Test-QuickSetupTrustedUrl $asset.Url)) {
+            throw ("Blocked untrusted uninstall asset URL: {0}" -f [string]$asset.Url)
+        }
+        $downloadUrl = if ([string]$asset.Url -match "\?") { "$($asset.Url)&v=$script:QuickSetupCacheBuster" } else { "$($asset.Url)?v=$script:QuickSetupCacheBuster" }
+        Invoke-WebRequest -Uri $downloadUrl -OutFile $asset.Path -UseBasicParsing
+        if (-not (Test-Path -LiteralPath $asset.Path -PathType Leaf)) {
+            throw ("Failed to stage uninstall asset: {0}" -f [string]$asset.Path)
+        }
+    }
+    Write-SetupLog "Uninstall assets downloaded from trusted source."
+
+    return @{
+        ScriptPath = $uninstallScriptPath
+        VbsPath = $uninstallVbsPath
+    }
+}
+
 function Finalize-Install {
     param(
         [string]$installPath,
@@ -1297,67 +1344,12 @@ function Finalize-Install {
         $startupShortcut = Join-Path $startupDir "Teams Always Green.lnk"
     }
 
-    $uninstallDir = Join-Path $installPath "Script\Uninstall"
-    $uninstallScriptPath = Join-Path $uninstallDir "Uninstall-Teams-Always-Green.ps1"
-    $uninstallVbsPath = Join-Path $uninstallDir "Uninstall-Teams-Always-Green.vbs"
-    $uninstallScript = @'
-param([switch]$Silent)
-Add-Type -AssemblyName System.Windows.Forms
-
-$scriptPath = $MyInvocation.MyCommand.Path
-$installRoot = Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $scriptPath))
-$programsDir = [Environment]::GetFolderPath("Programs")
-$menuFolder = Join-Path $programsDir "Teams Always Green"
-$shortcuts = @(
-    (Join-Path $menuFolder "Teams Always Green.lnk")
-    (Join-Path $menuFolder "Uninstall Teams Always Green.lnk")
-    (Join-Path ([Environment]::GetFolderPath("Desktop")) "Teams Always Green.lnk")
-    Join-Path ([Environment]::GetFolderPath("Startup")) "Teams Always Green.lnk"
-)
-
-foreach ($shortcut in $shortcuts) {
-    try { if (Test-Path $shortcut) { Remove-Item -Path $shortcut -Force -ErrorAction SilentlyContinue } } catch { }
-}
-try {
-    if (Test-Path $menuFolder -and -not (Get-ChildItem -Path $menuFolder -Force | Measure-Object).Count) {
-        Remove-Item -Path $menuFolder -Force -ErrorAction SilentlyContinue
-    }
-} catch { }
-
-$deleteFiles = $true
-if (-not $Silent) {
-    $resp = [System.Windows.Forms.MessageBox]::Show(
-        "Remove the app files from:`n$installRoot`n`nThis will close the app if it is running.",
-        "Uninstall Teams Always Green",
-        [System.Windows.Forms.MessageBoxButtons]::YesNo,
-        [System.Windows.Forms.MessageBoxIcon]::Warning
-    )
-    if ($resp -ne [System.Windows.Forms.DialogResult]::Yes) { $deleteFiles = $false }
-}
-
-if (-not $deleteFiles) { return }
-$cmdPath = Join-Path $env:TEMP ("TAG-Uninstall-" + [Guid]::NewGuid().ToString("N") + ".cmd")
-$cmd = "@echo off`r`n" + "timeout /t 2 >nul`r`n" + "rmdir /s /q `"$installRoot`"`r`n" + "del /f /q `"$cmdPath`"`r`n"
-Set-Content -Path $cmdPath -Value $cmd -Encoding ASCII
-Start-Process -FilePath "cmd.exe" -ArgumentList "/c `"$cmdPath`"" -WindowStyle Hidden
-'@
-    $uninstallVbs = @'
-Dim shell, fso, vbsPath, uninstallPs1, cmd
-Set shell = CreateObject("WScript.Shell")
-Set fso = CreateObject("Scripting.FileSystemObject")
-vbsPath = WScript.ScriptFullName
-uninstallPs1 = fso.BuildPath(fso.GetParentFolderName(vbsPath), "Uninstall-Teams-Always-Green.ps1")
-cmd = "powershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File """ & uninstallPs1 & """"
-shell.Run cmd, 1, False
-'@
+    $uninstallVbsPath = $null
     try {
-        if (-not (Test-Path $uninstallDir)) {
-            New-Item -ItemType Directory -Path $uninstallDir -Force | Out-Null
-        }
-        Set-Content -Path $uninstallScriptPath -Value $uninstallScript -Encoding UTF8
-        Set-Content -Path $uninstallVbsPath -Value $uninstallVbs -Encoding ASCII
+        $uninstallAssets = Install-UninstallAssets -installPath $installPath
+        $uninstallVbsPath = [string]$uninstallAssets.VbsPath
     } catch {
-        Write-SetupLog "Failed to write uninstall script."
+        Write-SetupLog ("Failed to stage uninstall assets: {0}" -f $_.Exception.Message)
     }
 
     $shortcutsCreated = @()
@@ -2304,169 +2296,3 @@ if ($wizard.OpenAfterFinish -and $wizard.Action -ne "Folder") {
 
 Cleanup-SetupTempFiles -success $true
 exit 0
-
-$programsDir = [Environment]::GetFolderPath("Programs")
-$menuFolder = Join-Path $programsDir "Teams Always Green"
-if (-not (Test-Path $menuFolder)) {
-    New-Item -ItemType Directory -Path $menuFolder -Force | Out-Null
-}
-$menuShortcut = Join-Path $menuFolder "Teams Always Green.lnk"
-$uninstallShortcut = Join-Path $menuFolder "Uninstall Teams Always Green.lnk"
-$desktopDir = [Environment]::GetFolderPath("Desktop")
-$desktopShortcut = Join-Path $desktopDir "Teams Always Green.lnk"
-
-$enableStartup = $false
-if (-not $portableMode) {
-    $enableStartup = (Show-SetupPrompt -message (
-        "Step 3 of 4: Start Teams Always Green when Windows starts?",
-        "Startup Shortcut"
-    ) -title "Startup Shortcut" -buttons ([System.Windows.Forms.MessageBoxButtons]::YesNo) -icon ([System.Windows.Forms.MessageBoxIcon]::Question) -owner $setupOwner) -eq [System.Windows.Forms.DialogResult]::Yes
-
-    if ($enableStartup) {
-        $startupDir = [Environment]::GetFolderPath("Startup")
-        $startupShortcut = Join-Path $startupDir "Teams Always Green.lnk"
-    }
-}
-
-$uninstallDir = Join-Path $installPath "Script\Uninstall"
-$uninstallScriptPath = Join-Path $uninstallDir "Uninstall-Teams-Always-Green.ps1"
-$uninstallVbsPath = Join-Path $uninstallDir "Uninstall-Teams-Always-Green.vbs"
-$uninstallScript = @'
-param([switch]$Silent)
-Add-Type -AssemblyName System.Windows.Forms
-
-$scriptPath = $MyInvocation.MyCommand.Path
-$installRoot = Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $scriptPath))
-$programsDir = [Environment]::GetFolderPath("Programs")
-$menuFolder = Join-Path $programsDir "Teams Always Green"
-$shortcuts = @(
-    (Join-Path $menuFolder "Teams Always Green.lnk")
-    (Join-Path $menuFolder "Uninstall Teams Always Green.lnk")
-    (Join-Path ([Environment]::GetFolderPath("Desktop")) "Teams Always Green.lnk")
-    Join-Path ([Environment]::GetFolderPath("Startup")) "Teams Always Green.lnk"
-)
-
-foreach ($shortcut in $shortcuts) {
-    try { if (Test-Path $shortcut) { Remove-Item -Path $shortcut -Force -ErrorAction SilentlyContinue } } catch { }
-}
-try {
-    if (Test-Path $menuFolder -and -not (Get-ChildItem -Path $menuFolder -Force | Measure-Object).Count) {
-        Remove-Item -Path $menuFolder -Force -ErrorAction SilentlyContinue
-    }
-} catch { }
-
-$deleteFiles = $true
-if (-not $Silent) {
-    $resp = [System.Windows.Forms.MessageBox]::Show(
-        "Remove the app files from:`n$installRoot`n`nThis will close the app if it is running.",
-        "Uninstall Teams Always Green",
-        [System.Windows.Forms.MessageBoxButtons]::YesNo,
-        [System.Windows.Forms.MessageBoxIcon]::Warning
-    )
-    if ($resp -ne [System.Windows.Forms.DialogResult]::Yes) { $deleteFiles = $false }
-}
-
-if (-not $deleteFiles) { return }
-$cmdPath = Join-Path $env:TEMP ("TAG-Uninstall-" + [Guid]::NewGuid().ToString("N") + ".cmd")
-$cmd = "@echo off`r`n" + "timeout /t 2 >nul`r`n" + "rmdir /s /q `"$installRoot`"`r`n" + "del /f /q `"$cmdPath`"`r`n"
-Set-Content -Path $cmdPath -Value $cmd -Encoding ASCII
-Start-Process -FilePath "cmd.exe" -ArgumentList "/c `"$cmdPath`"" -WindowStyle Hidden
-'@
-$uninstallVbs = @'
-Dim shell, fso, vbsPath, uninstallPs1, cmd
-Set shell = CreateObject("WScript.Shell")
-Set fso = CreateObject("Scripting.FileSystemObject")
-vbsPath = WScript.ScriptFullName
-uninstallPs1 = fso.BuildPath(fso.GetParentFolderName(vbsPath), "Uninstall-Teams-Always-Green.ps1")
-cmd = "powershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File """ & uninstallPs1 & """"
-shell.Run cmd, 1, False
-'@
-try {
-    if (-not (Test-Path $uninstallDir)) {
-        New-Item -ItemType Directory -Path $uninstallDir -Force | Out-Null
-    }
-    Set-Content -Path $uninstallScriptPath -Value $uninstallScript -Encoding UTF8
-    Set-Content -Path $uninstallVbsPath -Value $uninstallVbs -Encoding ASCII
-} catch {
-    Write-SetupLog "Failed to write uninstall script."
-}
-
-$shortcutsCreated = @()
-if (-not $portableMode) {
-    try {
-        New-Shortcut -shortcutPath $menuShortcut -targetScriptPath $targetScript -workingDir $installPath
-        $shortcutsCreated += "Start Menu"
-        if ($enableStartup) {
-            New-Shortcut -shortcutPath $startupShortcut -targetScriptPath $targetScript -workingDir $installPath
-            $shortcutsCreated += "Startup"
-        }
-        New-Shortcut -shortcutPath $desktopShortcut -targetScriptPath $targetScript -workingDir $installPath
-        $shortcutsCreated += "Desktop"
-        if (Test-Path $uninstallVbsPath) {
-            New-VbsShortcut -shortcutPath $uninstallShortcut -vbsPath $uninstallVbsPath -workingDir $installPath
-            $shortcutsCreated += "Uninstall"
-        }
-    } catch {
-        Write-Warning ("Failed to create shortcuts: {0}" -f $_.Exception.Message)
-    }
-} else {
-    Write-SetupLog "Portable mode: shortcuts not created."
-}
-
-Write-Output "Installed Teams Always Green to: $installPath"
-Write-Output "Setup log: $logPath"
-if (-not $portableMode) {
-    $pinMessage = @"
-Teams Always Green runs in the system tray.
-
-To keep it visible:
-1) Click the ^ arrow in the taskbar.
-2) Drag the Teams Always Green icon onto the taskbar tray.
-   - Or open Settings > Personalization > Taskbar > Other system tray icons.
-"@
-    [void](Show-SetupPrompt -message $pinMessage -title "Pin to Tray" -buttons ([System.Windows.Forms.MessageBoxButtons]::OK) -icon ([System.Windows.Forms.MessageBoxIcon]::Information) -owner $setupOwner)
-    Write-SetupLog "Pin-to-tray tip shown."
-}
-Write-SetupLog "Install completed. Showing summary."
-
-$action = Show-SetupSummary -installPath $installPath -integrityStatus $integrityStatus -portableMode $portableMode -shortcutsCreated $shortcutsCreated -logPath $logPath
-Write-SetupLog ("Summary action selected: {0}" -f $action)
-if ($action -eq "Launch") {
-    Write-SetupLog "Launch requested."
-    $launchVbs = Join-Path $installPath "Teams Always Green.VBS"
-    if (Test-Path $launchVbs) {
-        try {
-            $proc = Start-Process "$env:WINDIR\System32\wscript.exe" -ArgumentList "`"$launchVbs`"" -WorkingDirectory $installPath -PassThru -ErrorAction Stop
-            Write-SetupLog ("Launch started (wscript). PID={0}" -f $proc.Id)
-        } catch {
-            Write-SetupLog ("Launch failed (wscript): {0}" -f $_.Exception.Message)
-        }
-    }
-    if (-not (Test-Path $targetScript)) {
-        Show-SetupError "Launch failed: app script not found at $targetScript"
-    } elseif (-not (Test-Path $launchVbs)) {
-        $launchArgs = "-NoProfile -ExecutionPolicy RemoteSigned -WindowStyle Hidden -File `"$targetScript`""
-        try {
-            $proc = Start-Process "$env:WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe" -ArgumentList $launchArgs -WorkingDirectory $installPath -PassThru -ErrorAction Stop
-            Write-SetupLog ("Launch started (hidden). PID={0}" -f $proc.Id)
-        } catch {
-            Write-SetupLog ("Launch failed (hidden): {0}" -f $_.Exception.Message)
-            try {
-                $proc = Start-Process "$env:WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe" -ArgumentList ("-NoProfile -ExecutionPolicy RemoteSigned -File `"$targetScript`"") -WorkingDirectory $installPath -PassThru -ErrorAction Stop
-                Write-SetupLog ("Launch started (visible). PID={0}" -f $proc.Id)
-            } catch {
-                Show-SetupError ("Launch failed: {0}" -f $_.Exception.Message)
-            }
-        }
-    }
-} elseif ($action -eq "Settings") {
-        Start-Process "$env:WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe" -ArgumentList "-NoProfile -ExecutionPolicy RemoteSigned -WindowStyle Hidden -File `"$targetScript`" -SettingsOnly" -WorkingDirectory $installPath
-    } elseif ($action -eq "Folder") {
-        Start-Process "explorer.exe" $installPath
-    }
-    if ($setupOwner -and -not $setupOwner.IsDisposed) { $setupOwner.Close() }
-
-
-
-
-
