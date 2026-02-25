@@ -160,7 +160,7 @@ function Get-CurrentProcessCommandLine {
 function Resolve-QuickSetupChannelFromHistory {
     $owner = [regex]::Escape($script:QuickSetupTrustedOwner)
     $repo = [regex]::Escape($script:QuickSetupTrustedRepo)
-    $pattern = ("raw\.githubusercontent\.com/{0}/{1}/(?<channel>main|dev)/Script/QuickSetup/QuickSetup\.ps1" -f $owner, $repo)
+    $pattern = ("raw\.githubusercontent\.com/{0}/{1}/(?:refs/heads/)?(?<channel>main|dev)/Script/QuickSetup/QuickSetup\.ps1" -f $owner, $repo)
     try {
         $entries = @(Get-History -Count 25 -ErrorAction Stop | Sort-Object Id -Descending)
         foreach ($entry in $entries) {
