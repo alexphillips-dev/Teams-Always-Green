@@ -417,13 +417,39 @@ function Ensure-TempExecution([string]$resolvedInstallRoot) {
     if ($RemoveAppData) { $argLine += " -RemoveAppData" }
     if ($script:IsDryRun) { $argLine += " -WhatIf" }
 
-    $windowStyle = "Hidden"
+    $windowStyle = if ($Silent) { "Hidden" } else { "Normal" }
     try {
         Write-UninstallLog ("Relaunching uninstall from temp runner: {0}" -f $runnerPath)
-        Start-Process -FilePath (Get-PowerShellPath) -ArgumentList $argLine -WindowStyle $windowStyle -ErrorAction Stop | Out-Null
+        Start-Process -FilePath (Get-PowerShellPath) -ArgumentList $argLine -WindowStyle $windowStyle -WorkingDirectory $tempRoot -ErrorAction Stop | Out-Null
         exit 0
     } catch {
         Complete-Uninstall -ExitCode $script:ExitCodes.RelaunchFailed -Result "RelaunchFailed" -Summary ("Unable to launch temp uninstall runner: {0}" -f $_.Exception.Message) -NotifyUser -Icon ([System.Windows.Forms.MessageBoxIcon]::Error) -Title "Uninstall failed"
+    }
+}
+
+function Ensure-SafeWorkingDirectory([string]$installRoot) {
+    try {
+        $currentPath = [string](Get-Location).Path
+    } catch {
+        $currentPath = ""
+    }
+    if ([string]::IsNullOrWhiteSpace($currentPath) -or [string]::IsNullOrWhiteSpace($installRoot)) { return }
+
+    $installFull = ""
+    $currentFull = ""
+    try { $installFull = [System.IO.Path]::GetFullPath($installRoot).TrimEnd("\") } catch { $installFull = [string]$installRoot.TrimEnd("\") }
+    try { $currentFull = [System.IO.Path]::GetFullPath($currentPath).TrimEnd("\") } catch { $currentFull = [string]$currentPath.TrimEnd("\") }
+    if ([string]::IsNullOrWhiteSpace($installFull) -or [string]::IsNullOrWhiteSpace($currentFull)) { return }
+
+    $insideInstallRoot = $currentFull.Equals($installFull, [System.StringComparison]::OrdinalIgnoreCase) -or
+        $currentFull.StartsWith(($installFull + "\"), [System.StringComparison]::OrdinalIgnoreCase)
+    if (-not $insideInstallRoot) { return }
+
+    try {
+        Set-Location -LiteralPath $tempRoot -ErrorAction Stop
+        Write-UninstallLog ("Working directory moved from install root to temp: {0}" -f $tempRoot)
+    } catch {
+        Write-UninstallLog ("Failed to move working directory off install root: {0}" -f $_.Exception.Message)
     }
 }
 
@@ -654,6 +680,8 @@ try {
     $oneDrivePathInfo = Get-OneDrivePathDiagnostics -path $resolvedInstallRoot
     $script:UninstallReport.OneDrivePathLike = [bool]$oneDrivePathInfo.IsOneDriveLike
     $script:UninstallReport.OneDriveSignals = @($oneDrivePathInfo.Signals)
+    Write-UninstallLog ("Current working directory: {0}" -f [string](Get-Location).Path)
+    Ensure-SafeWorkingDirectory -installRoot $resolvedInstallRoot
 
     Ensure-TempExecution -resolvedInstallRoot $resolvedInstallRoot
 

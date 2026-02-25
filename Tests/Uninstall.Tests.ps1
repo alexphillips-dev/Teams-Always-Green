@@ -39,7 +39,9 @@ Describe "Uninstall integration" {
                 [string]$Arguments,
                 [string]$LocalAppDataPath,
                 [string]$RuntimeTempRoot,
-                [string]$OneDrivePath = ""
+                [string]$OneDrivePath = "",
+                [string]$WorkingDirectory = "",
+                [bool]$Relaunched = $true
             )
 
             $escapedScript = $ScriptPath.Replace("'", "''")
@@ -47,9 +49,20 @@ Describe "Uninstall integration" {
             $escapedLocal = $LocalAppDataPath.Replace("'", "''")
             $escapedTemp = $RuntimeTempRoot.Replace("'", "''")
             $escapedOneDrive = $OneDrivePath.Replace("'", "''")
-            $command = "`$env:LOCALAPPDATA='{0}'; `$env:TEMP='{1}'; `$env:TMP='{1}'; `$env:OneDrive='{4}'; & '{2}' -Relaunched -InstallRoot '{3}' -Confirm:`$false {5}; exit `$LASTEXITCODE" -f $escapedLocal, $escapedTemp, $escapedScript, $escapedRoot, $escapedOneDrive, $Arguments
+            $relaunchArg = if ($Relaunched) { "-Relaunched " } else { "" }
+            $command = "`$env:LOCALAPPDATA='{0}'; `$env:TEMP='{1}'; `$env:TMP='{1}'; `$env:OneDrive='{4}'; & '{2}' {6}-InstallRoot '{3}' -Confirm:`$false {5}; exit `$LASTEXITCODE" -f $escapedLocal, $escapedTemp, $escapedScript, $escapedRoot, $escapedOneDrive, $Arguments, $relaunchArg
             $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($command))
-            $proc = Start-Process -FilePath $script:pwshPath -ArgumentList "-NoProfile -ExecutionPolicy RemoteSigned -EncodedCommand $encoded" -PassThru -Wait -WindowStyle Hidden
+            $startParams = @{
+                FilePath = $script:pwshPath
+                ArgumentList = "-NoProfile -ExecutionPolicy RemoteSigned -EncodedCommand $encoded"
+                PassThru = $true
+                Wait = $true
+                WindowStyle = "Hidden"
+            }
+            if (-not [string]::IsNullOrWhiteSpace($WorkingDirectory)) {
+                $startParams["WorkingDirectory"] = $WorkingDirectory
+            }
+            $proc = Start-Process @startParams
             return [int]$proc.ExitCode
         }
 
@@ -179,6 +192,28 @@ Describe "Uninstall integration" {
 
         Remove-Item -Path $root -Recurse -Force -ErrorAction SilentlyContinue
         Remove-Item -Path $oneDriveBase -Recurse -Force -ErrorAction SilentlyContinue
+        Remove-Item -Path $localAppData -Recurse -Force -ErrorAction SilentlyContinue
+        Remove-Item -Path $runTemp -Recurse -Force -ErrorAction SilentlyContinue
+    }
+
+    It "removes install root even when launched with install-root working directory" {
+        $root = New-UninstallSandbox -WithMarkers $true
+        $scriptPath = Join-Path $root "Script/Uninstall/Uninstall-Teams-Always-Green.ps1"
+        $localAppData = Join-Path $env:TEMP ("TAG-Uninstall-IT-Local-" + [Guid]::NewGuid().ToString("N"))
+        $runTemp = Join-Path $env:TEMP ("TAG-Uninstall-IT-Run-" + [Guid]::NewGuid().ToString("N"))
+        New-Item -ItemType Directory -Path $localAppData -Force | Out-Null
+        New-Item -ItemType Directory -Path $runTemp -Force | Out-Null
+
+        $exitCode = Invoke-UninstallChild -ScriptPath $scriptPath -InstallRoot $root -Arguments "-Silent -AppDataPolicy Keep" -LocalAppDataPath $localAppData -RuntimeTempRoot $runTemp -WorkingDirectory $root -Relaunched $false
+        $artifacts = Get-UninstallArtifacts -RuntimeTempRoot $runTemp
+
+        $exitCode | Should -Be 0
+        $artifacts.Report | Should -Not -BeNullOrEmpty
+        [string]$artifacts.Report.Result | Should -Be "Completed"
+        $artifacts.LogText | Should -Match "Current working directory:"
+        $artifacts.LogText | Should -Not -Match ([Regex]::Escape("Current working directory: " + $root))
+        (Wait-UntilRemoved -Path $root -TimeoutSeconds 15) | Should -BeTrue
+
         Remove-Item -Path $localAppData -Recurse -Force -ErrorAction SilentlyContinue
         Remove-Item -Path $runTemp -Recurse -Force -ErrorAction SilentlyContinue
     }

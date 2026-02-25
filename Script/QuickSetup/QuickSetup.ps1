@@ -264,6 +264,132 @@ function Show-SetupInfo {
     Show-SetupPrompt -message $message -title "Quick Setup" -buttons ([System.Windows.Forms.MessageBoxButtons]::OK) -icon ([System.Windows.Forms.MessageBoxIcon]::Information) -owner $owner | Out-Null
 }
 
+function Show-OneDrivePathWarning {
+    param(
+        [string]$selectedPath,
+        [string]$recommendedPath,
+        [System.Windows.Forms.Form]$owner
+    )
+
+    $form = New-Object System.Windows.Forms.Form
+    $form.Text = "OneDrive path warning"
+    $form.Width = 760
+    $form.Height = 440
+    $form.StartPosition = "CenterParent"
+    $form.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::FixedDialog
+    $form.MaximizeBox = $false
+    $form.MinimizeBox = $false
+    $form.BackColor = [System.Drawing.Color]::White
+    $form.ShowInTaskbar = $false
+    $form.TopMost = $true
+
+    $header = New-Object System.Windows.Forms.Panel
+    $header.Width = 720
+    $header.Height = 72
+    $header.Location = New-Object System.Drawing.Point(16, 12)
+    $header.BackColor = [System.Drawing.Color]::FromArgb(255, 244, 214)
+
+    $headerIcon = New-Object System.Windows.Forms.PictureBox
+    $headerIcon.Size = New-Object System.Drawing.Size(28, 28)
+    $headerIcon.Location = New-Object System.Drawing.Point(14, 22)
+    $headerIcon.SizeMode = [System.Windows.Forms.PictureBoxSizeMode]::StretchImage
+    $headerIcon.Image = [System.Drawing.SystemIcons]::Warning.ToBitmap()
+
+    $headerTitle = New-Object System.Windows.Forms.Label
+    $headerTitle.AutoSize = $true
+    $headerTitle.Font = New-Object System.Drawing.Font("Segoe UI", 12, [System.Drawing.FontStyle]::Bold)
+    $headerTitle.Location = New-Object System.Drawing.Point(52, 12)
+    $headerTitle.Text = "OneDrive-managed install path detected"
+
+    $headerBody = New-Object System.Windows.Forms.Label
+    $headerBody.AutoSize = $false
+    $headerBody.Width = 650
+    $headerBody.Height = 34
+    $headerBody.Font = New-Object System.Drawing.Font("Segoe UI", 9.5, [System.Drawing.FontStyle]::Regular)
+    $headerBody.Location = New-Object System.Drawing.Point(52, 36)
+    $headerBody.Text = "Sync/file-provider locking can interrupt install, update, or uninstall. A local app path is recommended."
+
+    $header.Controls.Add($headerIcon)
+    $header.Controls.Add($headerTitle)
+    $header.Controls.Add($headerBody)
+
+    $selectedLabel = New-Object System.Windows.Forms.Label
+    $selectedLabel.AutoSize = $true
+    $selectedLabel.Font = New-Object System.Drawing.Font("Segoe UI", 9.5, [System.Drawing.FontStyle]::Bold)
+    $selectedLabel.Location = New-Object System.Drawing.Point(18, 100)
+    $selectedLabel.Text = "Selected location"
+
+    $selectedBox = New-Object System.Windows.Forms.TextBox
+    $selectedBox.Location = New-Object System.Drawing.Point(20, 122)
+    $selectedBox.Width = 716
+    $selectedBox.Height = 58
+    $selectedBox.Multiline = $true
+    $selectedBox.ReadOnly = $true
+    $selectedBox.BackColor = [System.Drawing.Color]::FromArgb(250, 250, 250)
+    $selectedBox.Text = $selectedPath
+
+    $recommendedLabel = New-Object System.Windows.Forms.Label
+    $recommendedLabel.AutoSize = $true
+    $recommendedLabel.Font = New-Object System.Drawing.Font("Segoe UI", 9.5, [System.Drawing.FontStyle]::Bold)
+    $recommendedLabel.Location = New-Object System.Drawing.Point(18, 194)
+    $recommendedLabel.Text = "Recommended location"
+
+    $recommendedBox = New-Object System.Windows.Forms.TextBox
+    $recommendedBox.Location = New-Object System.Drawing.Point(20, 216)
+    $recommendedBox.Width = 716
+    $recommendedBox.Height = 58
+    $recommendedBox.Multiline = $true
+    $recommendedBox.ReadOnly = $true
+    $recommendedBox.BackColor = [System.Drawing.Color]::FromArgb(242, 249, 242)
+    $recommendedBox.Text = $recommendedPath
+
+    $note = New-Object System.Windows.Forms.Label
+    $note.AutoSize = $false
+    $note.Width = 716
+    $note.Height = 44
+    $note.Font = New-Object System.Drawing.Font("Segoe UI", 9, [System.Drawing.FontStyle]::Regular)
+    $note.Location = New-Object System.Drawing.Point(20, 286)
+    $note.Text = "Use Recommended keeps files outside synced folders and reduces lock-contention issues for business endpoints."
+
+    $btnRecommended = New-Object System.Windows.Forms.Button
+    $btnRecommended.Text = "Use Recommended"
+    $btnRecommended.Width = 150
+    $btnRecommended.Height = 30
+    $btnRecommended.Location = New-Object System.Drawing.Point(268, 346)
+    $btnRecommended.DialogResult = [System.Windows.Forms.DialogResult]::Retry
+
+    $btnContinue = New-Object System.Windows.Forms.Button
+    $btnContinue.Text = "Install Here Anyway"
+    $btnContinue.Width = 150
+    $btnContinue.Height = 30
+    $btnContinue.Location = New-Object System.Drawing.Point(428, 346)
+    $btnContinue.DialogResult = [System.Windows.Forms.DialogResult]::Yes
+
+    $btnBack = New-Object System.Windows.Forms.Button
+    $btnBack.Text = "Back"
+    $btnBack.Width = 90
+    $btnBack.Height = 30
+    $btnBack.Location = New-Object System.Drawing.Point(588, 346)
+    $btnBack.DialogResult = [System.Windows.Forms.DialogResult]::No
+
+    $form.AcceptButton = $btnRecommended
+    $form.CancelButton = $btnBack
+    $form.Controls.Add($header)
+    $form.Controls.Add($selectedLabel)
+    $form.Controls.Add($selectedBox)
+    $form.Controls.Add($recommendedLabel)
+    $form.Controls.Add($recommendedBox)
+    $form.Controls.Add($note)
+    $form.Controls.Add($btnRecommended)
+    $form.Controls.Add($btnContinue)
+    $form.Controls.Add($btnBack)
+
+    if ($owner) {
+        return $form.ShowDialog($owner)
+    }
+    return $form.ShowDialog()
+}
+
 function Show-SetupPrompt {
     param(
         [string]$message,
@@ -2148,19 +2274,17 @@ function Show-SetupWizard {
             $state.OneDriveRecommendedPath = [string]$oneDriveRisk.RecommendedInstallPath
             if ($state.OneDriveRiskDetected) {
                 Write-SetupLog ("OneDrive install-path advisory: Path={0}; Signals={1}; Recommended={2}" -f $state.InstallPath, $state.OneDriveRiskSummary, $state.OneDriveRecommendedPath)
-                $warningMessage = @(
-                    "The selected install location appears to be OneDrive-managed."
-                    ""
-                    "Selected: $($state.InstallPath)"
-                    "Recommended: $($state.OneDriveRecommendedPath)"
-                    ""
-                    "Sync/file-provider locking can interrupt install, update, or uninstall for business users."
-                    "Continue anyway?"
-                ) -join [Environment]::NewLine
-                $warningResult = Show-SetupPrompt -message $warningMessage -title "OneDrive path warning" -buttons ([System.Windows.Forms.MessageBoxButtons]::YesNo) -icon ([System.Windows.Forms.MessageBoxIcon]::Warning) -owner $form
-                if ($warningResult -ne [System.Windows.Forms.DialogResult]::Yes) {
-                    Show-SetupInfo -message ("Choose a local non-synced folder. Recommended:`n{0}" -f $state.OneDriveRecommendedPath) -owner $form
+                $warningResult = Show-OneDrivePathWarning -selectedPath $state.InstallPath -recommendedPath $state.OneDriveRecommendedPath -owner $form
+                if ($warningResult -eq [System.Windows.Forms.DialogResult]::Retry) {
+                    $state.InstallPath = $state.OneDriveRecommendedPath
+                    Write-SetupLog ("OneDrive advisory action: switched to recommended path: {0}" -f $state.InstallPath)
+                    $state.OneDriveRiskDetected = $false
+                    $state.OneDriveRiskSummary = "none"
+                } elseif ($warningResult -ne [System.Windows.Forms.DialogResult]::Yes) {
+                    Write-SetupLog "OneDrive advisory action: user returned to location step."
                     return
+                } else {
+                    Write-SetupLog "OneDrive advisory action: user continued with selected OneDrive path."
                 }
             }
 
