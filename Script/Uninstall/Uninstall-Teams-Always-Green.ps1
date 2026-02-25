@@ -664,32 +664,36 @@ function Wait-UninstallWizardAction($ui) {
 
 function Set-UninstallUiLayout($ui, [bool]$showProgress) {
     if (-not $ui -or -not $ui.Form -or $ui.Form.IsDisposed) { return }
+    $metaTop = if ($showProgress) { 104 } else { 78 }
+    $ui.Meta.Location = New-Object System.Drawing.Point(16, $metaTop)
+    $metaHeight = [Math]::Max(20, [int]$ui.Meta.PreferredHeight)
+    $optionsTop = $metaTop + $metaHeight + 8
+    $detailsTop = $optionsTop + $ui.OptionsPanel.Height + 8
+
     if ($showProgress) {
         $ui.Progress.Visible = $true
-        $ui.Meta.Location = New-Object System.Drawing.Point(16, 104)
-        $ui.OptionsPanel.Location = New-Object System.Drawing.Point(16, 126)
-        $ui.DetailsLink.Location = New-Object System.Drawing.Point(525, 202)
-        $ui.DetailsList.Location = New-Object System.Drawing.Point(16, 224)
+        $ui.OptionsPanel.Location = New-Object System.Drawing.Point(16, $optionsTop)
+        $ui.DetailsLink.Location = New-Object System.Drawing.Point(525, $detailsTop)
+        $ui.DetailsList.Location = New-Object System.Drawing.Point(16, ($detailsTop + 22))
         return
     }
 
     $ui.Progress.Visible = $false
-    $ui.Meta.Location = New-Object System.Drawing.Point(16, 78)
-    $ui.OptionsPanel.Location = New-Object System.Drawing.Point(16, 104)
-    $ui.DetailsLink.Location = New-Object System.Drawing.Point(525, 180)
-    $ui.DetailsList.Location = New-Object System.Drawing.Point(16, 202)
+    $ui.OptionsPanel.Location = New-Object System.Drawing.Point(16, $optionsTop)
+    $ui.DetailsLink.Location = New-Object System.Drawing.Point(525, $detailsTop)
+    $ui.DetailsList.Location = New-Object System.Drawing.Point(16, ($detailsTop + 22))
 }
 
 function Set-UninstallProgress($ui, [int]$percent, [string]$stepText, [string]$message, [string]$metaText) {
     if (-not $ui) { return }
     if ($ui.Form.IsDisposed) { return }
     $showProgress = -not ([string]$stepText -like "Step 1*")
-    Set-UninstallUiLayout -ui $ui -showProgress:$showProgress
     $pct = [Math]::Max(0, [Math]::Min(100, $percent))
     $ui.Progress.Value = $pct
     $ui.Stepper.Text = $stepText
     $ui.Label.Text = $message
     $ui.Meta.Text = $metaText
+    Set-UninstallUiLayout -ui $ui -showProgress:$showProgress
     [System.Windows.Forms.Application]::DoEvents()
 }
 
@@ -737,7 +741,7 @@ function Ensure-TempExecution([string]$resolvedInstallRoot) {
     if ($RemoveAppData) { $argLine += " -RemoveAppData" }
     if ($script:IsDryRun) { $argLine += " -WhatIf" }
 
-    $windowStyle = if ($Silent) { "Hidden" } else { "Normal" }
+    $windowStyle = "Hidden"
     try {
         Write-UninstallLog ("Relaunching uninstall from temp runner: {0}" -f $runnerPath)
         Start-Process -FilePath (Get-PowerShellPath) -ArgumentList $argLine -WindowStyle $windowStyle -WorkingDirectory $tempRoot -ErrorAction Stop | Out-Null
