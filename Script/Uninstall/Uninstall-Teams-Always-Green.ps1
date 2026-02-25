@@ -488,11 +488,13 @@ function New-UninstallProgressUi {
     $progress.Minimum = 0
     $progress.Maximum = 100
     $progress.Style = [System.Windows.Forms.ProgressBarStyle]::Continuous
+    $progress.Visible = $false
 
     $meta = New-Object System.Windows.Forms.Label
     $meta.AutoSize = $true
+    $meta.MaximumSize = New-Object System.Drawing.Size(590, 0)
     $meta.Font = New-Object System.Drawing.Font("Segoe UI", 8.5, [System.Drawing.FontStyle]::Regular)
-    $meta.Location = New-Object System.Drawing.Point(16, 104)
+    $meta.Location = New-Object System.Drawing.Point(16, 78)
     $meta.Text = ""
 
     $optionsPanel = New-Object System.Windows.Forms.Panel
@@ -563,14 +565,29 @@ function New-UninstallProgressUi {
         AllowClose = $false
     }
 
-    $nextButton.Add_Click({ $state.NextClicked = $true })
-    $backButton.Add_Click({ $state.BackClicked = $true })
-    $cancelButton.Add_Click({ $state.Cancelled = $true })
+    $form.Tag = $state
+    $nextButton.Add_Click({
+        param($sender, $args)
+        $uiState = $sender.FindForm().Tag
+        if ($uiState) { $uiState.NextClicked = $true }
+    })
+    $backButton.Add_Click({
+        param($sender, $args)
+        $uiState = $sender.FindForm().Tag
+        if ($uiState) { $uiState.BackClicked = $true }
+    })
+    $cancelButton.Add_Click({
+        param($sender, $args)
+        $uiState = $sender.FindForm().Tag
+        if ($uiState) { $uiState.Cancelled = $true }
+    })
 
     $form.Add_FormClosing({
         param($sender, $args)
-        if (-not [bool]$state.AllowClose) {
-            $state.Cancelled = $true
+        $uiState = $sender.Tag
+        if ($null -eq $uiState) { return }
+        if (-not [bool]$uiState.AllowClose) {
+            $uiState.Cancelled = $true
             $args.Cancel = $true
         }
     })
@@ -592,7 +609,7 @@ function New-UninstallProgressUi {
             $nextButton.Location = New-Object System.Drawing.Point(420, 280)
             $cancelButton.Location = New-Object System.Drawing.Point(518, 280)
         }
-    })
+    }.GetNewClosure())
 
     $form.AcceptButton = $nextButton
     $form.CancelButton = $cancelButton
@@ -645,9 +662,29 @@ function Wait-UninstallWizardAction($ui) {
     return "Cancel"
 }
 
+function Set-UninstallUiLayout($ui, [bool]$showProgress) {
+    if (-not $ui -or -not $ui.Form -or $ui.Form.IsDisposed) { return }
+    if ($showProgress) {
+        $ui.Progress.Visible = $true
+        $ui.Meta.Location = New-Object System.Drawing.Point(16, 104)
+        $ui.OptionsPanel.Location = New-Object System.Drawing.Point(16, 126)
+        $ui.DetailsLink.Location = New-Object System.Drawing.Point(525, 202)
+        $ui.DetailsList.Location = New-Object System.Drawing.Point(16, 224)
+        return
+    }
+
+    $ui.Progress.Visible = $false
+    $ui.Meta.Location = New-Object System.Drawing.Point(16, 78)
+    $ui.OptionsPanel.Location = New-Object System.Drawing.Point(16, 104)
+    $ui.DetailsLink.Location = New-Object System.Drawing.Point(525, 180)
+    $ui.DetailsList.Location = New-Object System.Drawing.Point(16, 202)
+}
+
 function Set-UninstallProgress($ui, [int]$percent, [string]$stepText, [string]$message, [string]$metaText) {
     if (-not $ui) { return }
     if ($ui.Form.IsDisposed) { return }
+    $showProgress = -not ([string]$stepText -like "Step 1*")
+    Set-UninstallUiLayout -ui $ui -showProgress:$showProgress
     $pct = [Math]::Max(0, [Math]::Min(100, $percent))
     $ui.Progress.Value = $pct
     $ui.Stepper.Text = $stepText
