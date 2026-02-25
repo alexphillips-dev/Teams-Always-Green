@@ -23,6 +23,14 @@ $script:QuickSetupChannel = "main"
 $script:QuickSetupChannelSource = "default"
 $script:QuickSetupRawBase = ""
 $script:QuickSetupSelfText = ""
+$script:QuickSetupEntryScriptText = ""
+try {
+    if ($MyInvocation -and $MyInvocation.MyCommand -and $MyInvocation.MyCommand.ScriptBlock) {
+        $script:QuickSetupEntryScriptText = [string]$MyInvocation.MyCommand.ScriptBlock.ToString()
+    }
+} catch {
+    $null = $_
+}
 
 function Test-QuickSetupTrustedUrl([string]$url) {
     if ([string]::IsNullOrWhiteSpace($url)) { return $false }
@@ -198,8 +206,12 @@ function Get-QuickSetupSelfText {
     }
 
     $text = ""
+    if (-not [string]::IsNullOrWhiteSpace($script:QuickSetupEntryScriptText)) {
+        $text = [string]$script:QuickSetupEntryScriptText
+    }
+
     try {
-        if (-not [string]::IsNullOrWhiteSpace($PSCommandPath) -and (Test-Path -LiteralPath $PSCommandPath -PathType Leaf)) {
+        if ([string]::IsNullOrWhiteSpace($text) -and -not [string]::IsNullOrWhiteSpace($PSCommandPath) -and (Test-Path -LiteralPath $PSCommandPath -PathType Leaf)) {
             $text = Get-Content -Path $PSCommandPath -Raw -ErrorAction Stop
         }
     } catch {

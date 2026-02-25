@@ -320,6 +320,7 @@ Describe "Quality: QuickSetup Wizard Flow" {
         $script:quickSetupText | Should -Match 'function\s+Resolve-QuickSetupChannelFromSelfHash'
         $script:quickSetupText | Should -Match 'function\s+Get-QuickSetupSelfText'
         $script:quickSetupText | Should -Match 'function\s+Get-QuickSetupTextHash'
+        $script:quickSetupText | Should -Match 'QuickSetupEntryScriptText'
         $script:quickSetupText | Should -Match 'TAG_QUICKSETUP_CHANNEL'
         $script:quickSetupText | Should -Match 'session-history'
         $script:quickSetupText | Should -Match 'self-hash-match'
