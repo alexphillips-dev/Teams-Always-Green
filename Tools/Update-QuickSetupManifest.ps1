@@ -5,7 +5,7 @@ function Is-TextFile([string]$relativePath) {
     $ext = [System.IO.Path]::GetExtension($relativePath)
     if ([string]::IsNullOrWhiteSpace($ext)) { return $true }
     $ext = $ext.ToLowerInvariant()
-    return @(".ps1", ".cmd", ".vbs", ".json", ".xml", ".md", ".txt", ".log", ".csv", ".ini") -contains $ext
+    return @(".ps1", ".cmd", ".vbs", ".json", ".md", ".txt", ".log", ".csv", ".ini") -contains $ext
 }
 
 function Get-NormalizedBytesHash([string]$path, [string]$lineEnding) {
@@ -89,3 +89,4 @@ $manifest.generatedAt = (Get-Date).ToString("o")
 $json = $manifest | ConvertTo-Json -Depth 6
 Set-Content -Path $manifestPath -Value $json -Encoding UTF8
 Write-Host ("Updated QuickSetup manifest. Files changed={0}" -f $updates)
+
