@@ -760,7 +760,7 @@ function Prepare-UninstallWizardStep1 {
         $ui,
         [string]$resolvedInstallRoot,
         [string]$effectivePolicy,
-        [bool]$dryRunChecked
+        $dryRunChecked
     )
 
     if (-not $ui -or -not $ui.Form -or $ui.Form.IsDisposed) { return }
@@ -784,7 +784,22 @@ function Prepare-UninstallWizardStep1 {
     $ui.AppDataPathLabel.Text = ("Local data path: {0}" -f $script:AppDataRoot)
     $ui.RemoveDataCheck.Checked = ($effectivePolicy -eq "Remove")
     $ui.RemoveDataCheck.Enabled = ($effectivePolicy -eq "Prompt")
-    $ui.DryRunCheck.Checked = [bool]$dryRunChecked
+    $dryRunEnabled = $false
+    try {
+        if ($dryRunChecked -is [bool]) {
+            $dryRunEnabled = [bool]$dryRunChecked
+        } elseif ($null -ne $dryRunChecked) {
+            $raw = [string]$dryRunChecked
+            switch -Regex ($raw.Trim()) {
+                '^(?i:true|1|yes|y)$' { $dryRunEnabled = $true; break }
+                '^(?i:false|0|no|n|)$' { $dryRunEnabled = $false; break }
+                default { $dryRunEnabled = [bool]$dryRunChecked }
+            }
+        }
+    } catch {
+        $dryRunEnabled = $false
+    }
+    $ui.DryRunCheck.Checked = $dryRunEnabled
     $ui.DryRunCheck.Enabled = $true
     if ($effectivePolicy -eq "Keep") {
         $ui.OptionsPrompt.Text = "Local settings and logs will be kept by policy."

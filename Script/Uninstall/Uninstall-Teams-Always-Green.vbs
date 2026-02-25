@@ -65,7 +65,7 @@ On Error GoTo 0
 
 cmd = """" & psPath & """ -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File """ & runnerPs1 & """ -Relaunched -InstallRoot """ & installRoot & """ -HideConsole"
 
-WriteLog "Launcher started. Version=3"
+WriteLog "Launcher started. Version=4"
 WriteLog "PowerShell path: " & psPath
 WriteLog "Install root: " & installRoot
 WriteLog "Runner path: " & runnerPs1
