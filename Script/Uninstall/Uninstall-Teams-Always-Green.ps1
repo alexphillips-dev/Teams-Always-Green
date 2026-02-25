@@ -997,7 +997,20 @@ function Remove-PathWithRetry([string]$path, [string]$label, [int]$maxAttempts, 
         return $true
     }
 
-    for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
+    $isInstallRoot = ($label -eq "install root")
+    $pathIsOneDriveLike = $false
+    if ($isInstallRoot) {
+        try {
+            $pathIsOneDriveLike = [bool](Get-OneDrivePathDiagnostics -path $path).IsOneDriveLike
+        } catch {
+            $pathIsOneDriveLike = $false
+        }
+    }
+    $attemptLimit = if ($pathIsOneDriveLike) { [Math]::Min($maxAttempts, 6) } else { $maxAttempts }
+    $lastErrorMessage = ""
+    $earlyExitReason = ""
+
+    for ($attempt = 1; $attempt -le $attemptLimit; $attempt++) {
         if (-not (Test-Path -LiteralPath $path)) {
             Add-UninstallDetail $ui ("Removed {0}: {1}" -f $label, $path)
             return $true
@@ -1006,7 +1019,12 @@ function Remove-PathWithRetry([string]$path, [string]$label, [int]$maxAttempts, 
         try {
             Remove-Item -LiteralPath $path -Recurse -Force -ErrorAction Stop
         } catch {
-            $null = $_
+            $lastErrorMessage = [string]$_.Exception.Message
+            try {
+                & cmd.exe /c "rmdir /s /q `"$path`"" | Out-Null
+            } catch {
+                $null = $_
+            }
         }
 
         if (-not (Test-Path -LiteralPath $path)) {
@@ -1014,15 +1032,34 @@ function Remove-PathWithRetry([string]$path, [string]$label, [int]$maxAttempts, 
             return $true
         }
 
+        if ($isInstallRoot -and $pathIsOneDriveLike -and $attempt -ge 3) {
+            $remainingLocks = @(Get-TrackedProcessCandidates -installRoot $path)
+            if ($remainingLocks.Count -eq 0) {
+                $earlyExitReason = "No process locks detected; OneDrive/file-provider lock likely."
+                Add-UninstallDetail $ui "No app process locks detected; OneDrive/file-provider lock likely. Stopping retries early."
+                break
+            }
+        }
+
         $progressSpan = 12
-        $pct = $basePercent + [int][Math]::Min($progressSpan, [Math]::Floor(($attempt / [double]$maxAttempts) * $progressSpan))
-        Set-UninstallProgress $ui $pct "Step 3 of 4 - Removing files" ("Retrying {0} remove..." -f $label) ("Attempt {0}/{1}" -f $attempt, $maxAttempts)
-        Add-UninstallDetail $ui ("Attempt {0}/{1} failed for {2}" -f $attempt, $maxAttempts, $label)
-        $delay = [Math]::Min(2000, [int](150 * [Math]::Pow(2, [Math]::Min(4, $attempt))))
+        $pct = $basePercent + [int][Math]::Min($progressSpan, [Math]::Floor(($attempt / [double]$attemptLimit) * $progressSpan))
+        Set-UninstallProgress $ui $pct "Step 3 of 4 - Removing files" ("Retrying {0} remove..." -f $label) ("Attempt {0}/{1}" -f $attempt, $attemptLimit)
+        Add-UninstallDetail $ui ("Attempt {0}/{1} failed for {2}" -f $attempt, $attemptLimit, $label)
+        if (-not [string]::IsNullOrWhiteSpace($lastErrorMessage)) {
+            Add-UninstallDetail $ui ("Delete error: {0}" -f $lastErrorMessage)
+        }
+        if ($pathIsOneDriveLike) {
+            $delay = [Math]::Min(900, [int](120 * [Math]::Pow(2, [Math]::Min(3, $attempt))))
+        } else {
+            $delay = [Math]::Min(2000, [int](150 * [Math]::Pow(2, [Math]::Min(4, $attempt))))
+        }
         Start-Sleep -Milliseconds $delay
     }
 
     if (Test-Path -LiteralPath $path) {
+        if (-not [string]::IsNullOrWhiteSpace($earlyExitReason)) {
+            Add-UninstallDetail $ui ("Stopped retry loop for {0}: {1}" -f $label, $earlyExitReason)
+        }
         Add-UninstallDetail $ui ("Failed to remove {0}: {1}" -f $label, $path)
         return $false
     }
