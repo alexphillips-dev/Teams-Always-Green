@@ -244,7 +244,8 @@ function Complete-Uninstall {
         [string]$Summary,
         [switch]$NotifyUser,
         [System.Windows.Forms.MessageBoxIcon]$Icon = [System.Windows.Forms.MessageBoxIcon]::Information,
-        [string]$Title = "Uninstall Teams Always Green"
+        [string]$Title = "Uninstall Teams Always Green",
+        $Ui = $null
     )
 
     if (-not [string]::IsNullOrWhiteSpace($Summary)) {
@@ -256,10 +257,56 @@ function Complete-Uninstall {
     Save-UninstallReport
 
     if ($NotifyUser) {
-        Show-UninstallMessage -Summary $Summary -Title $Title -Icon $Icon -LogPath $script:UninstallLogPath -ReportPath $script:UninstallReportPath
+        if ($Ui -and $Ui.Form -and -not $Ui.Form.IsDisposed) {
+            Show-UninstallCompletionInUi -ui $Ui -Summary $Summary -Title $Title -Icon $Icon -LogPath $script:UninstallLogPath -ReportPath $script:UninstallReportPath
+        } else {
+            Show-UninstallMessage -Summary $Summary -Title $Title -Icon $Icon -LogPath $script:UninstallLogPath -ReportPath $script:UninstallReportPath
+        }
+    } else {
+        Close-UninstallProgress $Ui
     }
 
     exit $ExitCode
+}
+
+function Show-UninstallCompletionInUi {
+    param(
+        $ui,
+        [string]$Summary,
+        [string]$Title,
+        [System.Windows.Forms.MessageBoxIcon]$Icon,
+        [string]$LogPath,
+        [string]$ReportPath
+    )
+
+    if (-not $ui -or -not $ui.Form -or $ui.Form.IsDisposed) { return }
+
+    $ui.State.NextClicked = $false
+    $ui.State.BackClicked = $false
+    $ui.State.Cancelled = $false
+    $ui.Stepper.Text = "Step 4 of 4 - Complete"
+    $ui.Label.Text = [string]$Title
+    $ui.Meta.Text = [string]$Summary
+    $ui.Progress.Value = 100
+    $ui.OptionsPanel.Visible = $false
+    $ui.BackButton.Visible = $false
+    $ui.CancelButton.Visible = $false
+    $ui.NextButton.Visible = $true
+    $ui.NextButton.Enabled = $true
+    $ui.NextButton.Text = "Finish"
+    $ui.Form.AcceptButton = $ui.NextButton
+    $ui.Form.CancelButton = $ui.NextButton
+
+    Add-UninstallDetail $ui ("Log: {0}" -f [string]$LogPath)
+    Add-UninstallDetail $ui ("Report: {0}" -f [string]$ReportPath)
+    [System.Windows.Forms.Application]::DoEvents()
+
+    while (-not $ui.State.NextClicked -and -not $ui.State.Cancelled -and -not $ui.Form.IsDisposed) {
+        [System.Windows.Forms.Application]::DoEvents()
+        Start-Sleep -Milliseconds 60
+    }
+
+    Close-UninstallProgress $ui
 }
 
 function Get-PowerShellPath {
@@ -409,7 +456,7 @@ function New-UninstallProgressUi {
     $form = New-Object System.Windows.Forms.Form
     $form.Text = "Teams Always Green - Uninstall"
     $form.Width = 640
-    $form.Height = 240
+    $form.Height = 350
     $form.StartPosition = "CenterScreen"
     $form.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::FixedDialog
     $form.MaximizeBox = $false
@@ -448,37 +495,118 @@ function New-UninstallProgressUi {
     $meta.Location = New-Object System.Drawing.Point(16, 104)
     $meta.Text = ""
 
+    $optionsPanel = New-Object System.Windows.Forms.Panel
+    $optionsPanel.Width = 590
+    $optionsPanel.Height = 72
+    $optionsPanel.Location = New-Object System.Drawing.Point(16, 126)
+
+    $optionsPrompt = New-Object System.Windows.Forms.Label
+    $optionsPrompt.AutoSize = $true
+    $optionsPrompt.Font = New-Object System.Drawing.Font("Segoe UI", 8.5, [System.Drawing.FontStyle]::Regular)
+    $optionsPrompt.Location = New-Object System.Drawing.Point(0, 0)
+    $optionsPrompt.Text = "Review uninstall options, then click Next to continue."
+
+    $removeDataCheck = New-Object System.Windows.Forms.CheckBox
+    $removeDataCheck.AutoSize = $true
+    $removeDataCheck.Location = New-Object System.Drawing.Point(0, 20)
+    $removeDataCheck.Text = "Also remove local settings and logs"
+
+    $appDataPathLabel = New-Object System.Windows.Forms.Label
+    $appDataPathLabel.AutoSize = $false
+    $appDataPathLabel.Width = 590
+    $appDataPathLabel.Height = 34
+    $appDataPathLabel.Font = New-Object System.Drawing.Font("Segoe UI", 8.25, [System.Drawing.FontStyle]::Regular)
+    $appDataPathLabel.ForeColor = [System.Drawing.Color]::FromArgb(85, 85, 85)
+    $appDataPathLabel.Location = New-Object System.Drawing.Point(0, 38)
+    $appDataPathLabel.Text = ""
+
+    $optionsPanel.Controls.Add($optionsPrompt)
+    $optionsPanel.Controls.Add($removeDataCheck)
+    $optionsPanel.Controls.Add($appDataPathLabel)
+
     $detailsLink = New-Object System.Windows.Forms.LinkLabel
     $detailsLink.Text = "Show details"
     $detailsLink.AutoSize = $true
-    $detailsLink.Location = New-Object System.Drawing.Point(525, 104)
+    $detailsLink.Location = New-Object System.Drawing.Point(525, 202)
 
     $detailsList = New-Object System.Windows.Forms.ListBox
     $detailsList.Width = 590
-    $detailsList.Height = 70
-    $detailsList.Location = New-Object System.Drawing.Point(16, 126)
+    $detailsList.Height = 64
+    $detailsList.Location = New-Object System.Drawing.Point(16, 224)
     $detailsList.Visible = $false
 
-    $baseHeight = 240
-    $expandedHeight = 320
+    $backButton = New-Object System.Windows.Forms.Button
+    $backButton.Text = "Back"
+    $backButton.Width = 90
+    $backButton.Height = 30
+    $backButton.Location = New-Object System.Drawing.Point(322, 280)
+    $backButton.Enabled = $false
+
+    $nextButton = New-Object System.Windows.Forms.Button
+    $nextButton.Text = "Next"
+    $nextButton.Width = 90
+    $nextButton.Height = 30
+    $nextButton.Location = New-Object System.Drawing.Point(420, 280)
+    $nextButton.Enabled = $true
+
+    $cancelButton = New-Object System.Windows.Forms.Button
+    $cancelButton.Text = "Cancel"
+    $cancelButton.Width = 90
+    $cancelButton.Height = 30
+    $cancelButton.Location = New-Object System.Drawing.Point(518, 280)
+    $cancelButton.Enabled = $true
+
+    $state = @{
+        NextClicked = $false
+        BackClicked = $false
+        Cancelled = $false
+        AllowClose = $false
+    }
+
+    $nextButton.Add_Click({ $state.NextClicked = $true })
+    $backButton.Add_Click({ $state.BackClicked = $true })
+    $cancelButton.Add_Click({ $state.Cancelled = $true })
+
+    $form.Add_FormClosing({
+        param($sender, $args)
+        if (-not [bool]$state.AllowClose) {
+            $state.Cancelled = $true
+            $args.Cancel = $true
+        }
+    })
+
+    $baseHeight = 350
+    $expandedHeight = 420
     $detailsLink.Add_LinkClicked({
         $detailsList.Visible = -not $detailsList.Visible
         if ($detailsList.Visible) {
             $detailsLink.Text = "Hide details"
             $form.Height = $expandedHeight
+            $backButton.Location = New-Object System.Drawing.Point(322, 350)
+            $nextButton.Location = New-Object System.Drawing.Point(420, 350)
+            $cancelButton.Location = New-Object System.Drawing.Point(518, 350)
         } else {
             $detailsLink.Text = "Show details"
             $form.Height = $baseHeight
+            $backButton.Location = New-Object System.Drawing.Point(322, 280)
+            $nextButton.Location = New-Object System.Drawing.Point(420, 280)
+            $cancelButton.Location = New-Object System.Drawing.Point(518, 280)
         }
     })
 
+    $form.AcceptButton = $nextButton
+    $form.CancelButton = $cancelButton
     $form.Controls.Add($title)
     $form.Controls.Add($stepper)
     $form.Controls.Add($label)
     $form.Controls.Add($progress)
     $form.Controls.Add($meta)
+    $form.Controls.Add($optionsPanel)
     $form.Controls.Add($detailsLink)
     $form.Controls.Add($detailsList)
+    $form.Controls.Add($backButton)
+    $form.Controls.Add($nextButton)
+    $form.Controls.Add($cancelButton)
     $form.Show()
     [System.Windows.Forms.Application]::DoEvents()
 
@@ -488,8 +616,33 @@ function New-UninstallProgressUi {
         Label = $label
         Progress = $progress
         Meta = $meta
+        OptionsPanel = $optionsPanel
+        OptionsPrompt = $optionsPrompt
+        RemoveDataCheck = $removeDataCheck
+        AppDataPathLabel = $appDataPathLabel
         DetailsList = $detailsList
+        DetailsLink = $detailsLink
+        BackButton = $backButton
+        NextButton = $nextButton
+        CancelButton = $cancelButton
+        State = $state
     }
+}
+
+function Wait-UninstallWizardAction($ui) {
+    if (-not $ui -or -not $ui.Form -or $ui.Form.IsDisposed) { return "Next" }
+
+    $ui.State.NextClicked = $false
+    $ui.State.BackClicked = $false
+    $ui.State.Cancelled = $false
+    while (-not $ui.Form.IsDisposed) {
+        if ($ui.State.Cancelled) { return "Cancel" }
+        if ($ui.State.BackClicked) { return "Back" }
+        if ($ui.State.NextClicked) { return "Next" }
+        [System.Windows.Forms.Application]::DoEvents()
+        Start-Sleep -Milliseconds 60
+    }
+    return "Cancel"
 }
 
 function Set-UninstallProgress($ui, [int]$percent, [string]$stepText, [string]$message, [string]$metaText) {
@@ -518,6 +671,7 @@ function Close-UninstallProgress($ui) {
     if (-not $ui) { return }
     try {
         if ($ui.Form -and -not $ui.Form.IsDisposed) {
+            if ($ui.State) { $ui.State.AllowClose = $true }
             $ui.Form.Close()
             $ui.Form.Dispose()
         }
@@ -546,7 +700,7 @@ function Ensure-TempExecution([string]$resolvedInstallRoot) {
     if ($RemoveAppData) { $argLine += " -RemoveAppData" }
     if ($script:IsDryRun) { $argLine += " -WhatIf" }
 
-    $windowStyle = if ($Silent) { "Hidden" } else { "Normal" }
+    $windowStyle = "Hidden"
     try {
         Write-UninstallLog ("Relaunching uninstall from temp runner: {0}" -f $runnerPath)
         Start-Process -FilePath (Get-PowerShellPath) -ArgumentList $argLine -WindowStyle $windowStyle -WorkingDirectory $tempRoot -ErrorAction Stop | Out-Null
@@ -784,6 +938,7 @@ function Remove-PathWithRetry([string]$path, [string]$label, [int]$maxAttempts, 
     return $true
 }
 
+$ui = $null
 try {
     $scriptPath = [string]$script:ScriptFilePath
     $resolvedInstallRoot = if ([string]::IsNullOrWhiteSpace($InstallRoot)) {
@@ -814,54 +969,64 @@ try {
 
     Ensure-TempExecution -resolvedInstallRoot $resolvedInstallRoot
 
+    $effectivePolicy = Get-EffectiveAppDataPolicy -SilentMode:$Silent -RemoveAppDataSwitch:$RemoveAppData -RequestedPolicy $AppDataPolicy
+    if ($effectivePolicy -eq "Prompt" -and $Silent) {
+        $effectivePolicy = "Keep"
+    }
+
     $ui = New-UninstallProgressUi
     Set-UninstallProgress $ui 5 "Step 1 of 4 - Verify" "Verifying install path and options..." ("Install path: {0}" -f $resolvedInstallRoot)
     if ($oneDrivePathInfo.IsOneDriveLike) {
         Add-UninstallDetail $ui ("OneDrive advisory: sync/file-provider locks can delay cleanup. Signals={0}" -f $oneDrivePathInfo.Summary)
     }
 
+    if ($ui -and $ui.Form -and -not $ui.Form.IsDisposed) {
+        $ui.OptionsPanel.Visible = $true
+        $ui.OptionsPrompt.Text = "Review uninstall options, then click Next to continue."
+        $ui.AppDataPathLabel.Text = ("Path: {0}" -f $script:AppDataRoot)
+        $ui.RemoveDataCheck.Checked = ($effectivePolicy -eq "Remove")
+        $ui.RemoveDataCheck.Enabled = ($effectivePolicy -eq "Prompt")
+        if ($effectivePolicy -eq "Keep") {
+            $ui.OptionsPrompt.Text = "Local settings/logs will be kept by policy. Click Next to continue."
+        } elseif ($effectivePolicy -eq "Remove") {
+            $ui.OptionsPrompt.Text = "Local settings/logs will be removed by policy. Click Next to continue."
+        }
+        Add-UninstallDetail $ui ("Ready to remove app files from: {0}" -f $resolvedInstallRoot)
+        Add-UninstallDetail $ui "Next step will stop running app processes and begin file cleanup."
+
+        $choice = Wait-UninstallWizardAction $ui
+        if ($choice -eq "Cancel") {
+            Complete-Uninstall -ExitCode $script:ExitCodes.UserCancelled -Result "Cancelled" -Summary "Uninstall cancelled by user." -Ui $ui
+        }
+        if ($effectivePolicy -eq "Prompt") {
+            if ($ui.RemoveDataCheck.Checked) {
+                $effectivePolicy = "Remove"
+            } else {
+                $effectivePolicy = "Keep"
+            }
+        }
+
+        $ui.OptionsPanel.Visible = $false
+        $ui.BackButton.Visible = $false
+        $ui.NextButton.Enabled = $false
+        $ui.CancelButton.Enabled = $false
+        $ui.CancelButton.Visible = $false
+        $ui.Form.AcceptButton = $null
+        $ui.Form.CancelButton = $null
+    }
+
     $operation = "Remove app files, shortcuts, and selected local data"
     if (-not $PSCmdlet.ShouldProcess($resolvedInstallRoot, $operation)) {
         if ($script:IsDryRun) {
-            $previewPolicy = Get-EffectiveAppDataPolicy -SilentMode:$Silent -RemoveAppDataSwitch:$RemoveAppData -RequestedPolicy $AppDataPolicy
-            Complete-Uninstall -ExitCode $script:ExitCodes.Success -Result "DryRun" -Summary ("Dry run complete. Planned uninstall root: {0}. AppData policy: {1}." -f $resolvedInstallRoot, $previewPolicy)
+            Complete-Uninstall -ExitCode $script:ExitCodes.Success -Result "DryRun" -Summary ("Dry run complete. Planned uninstall root: {0}. AppData policy: {1}." -f $resolvedInstallRoot, $effectivePolicy) -Ui $ui
         }
-        Complete-Uninstall -ExitCode $script:ExitCodes.UserCancelled -Result "Cancelled" -Summary "Uninstall cancelled by confirmation prompt."
-    }
-
-    $effectivePolicy = Get-EffectiveAppDataPolicy -SilentMode:$Silent -RemoveAppDataSwitch:$RemoveAppData -RequestedPolicy $AppDataPolicy
-    if ($effectivePolicy -eq "Prompt" -and -not $Silent) {
-        $dataResp = [System.Windows.Forms.MessageBox]::Show(
-            "Also remove local settings and logs?`n`nDefault is to keep local data.`nPath: $script:AppDataRoot",
-            "Uninstall Teams Always Green",
-            [System.Windows.Forms.MessageBoxButtons]::YesNo,
-            [System.Windows.Forms.MessageBoxIcon]::Question
-        )
-        if ($dataResp -eq [System.Windows.Forms.DialogResult]::Yes) {
-            $effectivePolicy = "Remove"
-        } else {
-            $effectivePolicy = "Keep"
-        }
-    } elseif ($effectivePolicy -eq "Prompt") {
-        $effectivePolicy = "Keep"
+        Complete-Uninstall -ExitCode $script:ExitCodes.UserCancelled -Result "Cancelled" -Summary "Uninstall cancelled by confirmation prompt." -Ui $ui
     }
 
     $removeAppDataRequested = ($effectivePolicy -eq "Remove")
     $script:UninstallReport.AppDataPolicyEffective = $effectivePolicy
     $script:UninstallReport.RemoveAppDataResolved = [bool]$removeAppDataRequested
     Add-UninstallDetail $ui ("AppData policy: {0}" -f $effectivePolicy)
-
-    if (-not $Silent -and -not $script:IsDryRun) {
-        $resp = [System.Windows.Forms.MessageBox]::Show(
-            "Remove app files from:`n$resolvedInstallRoot`n`nRunning app processes will be stopped.",
-            "Uninstall Teams Always Green",
-            [System.Windows.Forms.MessageBoxButtons]::YesNo,
-            [System.Windows.Forms.MessageBoxIcon]::Warning
-        )
-        if ($resp -ne [System.Windows.Forms.DialogResult]::Yes) {
-            Complete-Uninstall -ExitCode $script:ExitCodes.UserCancelled -Result "Cancelled" -Summary "Uninstall cancelled by user."
-        }
-    }
 
     Set-UninstallProgress $ui 18 "Step 2 of 4 - Cleanup" "Removing shortcuts..." ""
     $shortcutMap = Get-ShortcutMap
@@ -896,19 +1061,21 @@ try {
 
     Set-UninstallProgress $ui 100 "Step 4 of 4 - Complete" "Finalizing uninstall..." ""
     Start-Sleep -Milliseconds 300
-    Close-UninstallProgress $ui
 
     if ($allGood) {
-        Complete-Uninstall -ExitCode $script:ExitCodes.Success -Result "Completed" -Summary "Uninstall completed successfully." -NotifyUser:(-not $Silent) -Icon ([System.Windows.Forms.MessageBoxIcon]::Information) -Title "Uninstall complete"
+        Complete-Uninstall -ExitCode $script:ExitCodes.Success -Result "Completed" -Summary "Uninstall completed successfully." -NotifyUser:(-not $Silent) -Icon ([System.Windows.Forms.MessageBoxIcon]::Information) -Title "Uninstall complete" -Ui $ui
     }
 
     $partialSummary = "Uninstall completed with warnings. Some files could not be removed."
     if ([bool]$script:UninstallReport.OneDrivePathLike -or ([string]$script:UninstallReport.LockDiagnostics -match 'OneDrivePathLike=True')) {
         $partialSummary += " OneDrive sync or file-provider locks may be preventing removal."
     }
-    Complete-Uninstall -ExitCode $script:ExitCodes.PartialCleanup -Result "PartialCleanup" -Summary $partialSummary -NotifyUser -Icon ([System.Windows.Forms.MessageBoxIcon]::Warning) -Title "Uninstall completed with warnings"
+    Complete-Uninstall -ExitCode $script:ExitCodes.PartialCleanup -Result "PartialCleanup" -Summary $partialSummary -NotifyUser -Icon ([System.Windows.Forms.MessageBoxIcon]::Warning) -Title "Uninstall completed with warnings" -Ui $ui
 } catch {
     $message = "Unhandled uninstall error: {0}" -f $_.Exception.Message
+    if ($ui -and $ui.Form -and -not $ui.Form.IsDisposed) {
+        Complete-Uninstall -ExitCode $script:ExitCodes.UnhandledError -Result "UnhandledError" -Summary $message -NotifyUser:(-not $Silent) -Icon ([System.Windows.Forms.MessageBoxIcon]::Error) -Title "Uninstall failed" -Ui $ui
+    }
     Write-UninstallLog $message
     $script:UninstallReport.Result = "UnhandledError"
     $script:UninstallReport.ExitCode = $script:ExitCodes.UnhandledError

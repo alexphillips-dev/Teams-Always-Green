@@ -374,7 +374,9 @@ Describe "Quality: Uninstall Flow" {
         $script:uninstallText | Should -Match '\$script:ExitCodes\s*=\s*@\{'
         $script:uninstallText | Should -Match 'Install signature files were not found'
         $script:uninstallText | Should -Match 'Uninstall completed successfully\.'
-        $script:uninstallText | Should -Match '\[System\.Windows\.Forms\.MessageBox\]::Show\('
+        $script:uninstallText | Should -Match 'function\s+Wait-UninstallWizardAction'
+        $script:uninstallText | Should -Match 'NextButton'
+        $script:uninstallText | Should -Not -Match '\[System\.Windows\.Forms\.MessageBox\]::Show\('
     }
 
     It "verifies uninstall assets against signed manifest trust before shortcuts" {
