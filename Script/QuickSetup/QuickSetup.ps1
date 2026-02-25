@@ -323,6 +323,24 @@ function Resolve-QuickSetupChannel {
     return [pscustomobject]@{ Channel = "main"; Source = "default" }
 }
 
+function Resolve-QuickSetupChannelFallback {
+    $msg = @(
+        "Quick Setup could not auto-detect the install channel in this PowerShell session.",
+        "",
+        "Yes = install Stable (main)",
+        "No = install Testing (dev)",
+        "Cancel = exit setup"
+    ) -join "`n"
+    $choice = Show-SetupPrompt -message $msg -title "Choose Install Channel" -buttons ([System.Windows.Forms.MessageBoxButtons]::YesNoCancel) -icon ([System.Windows.Forms.MessageBoxIcon]::Question) -owner $null
+    if ($choice -eq [System.Windows.Forms.DialogResult]::Yes) {
+        return [pscustomobject]@{ Channel = "main"; Source = "manual-fallback" ; Cancelled = $false }
+    }
+    if ($choice -eq [System.Windows.Forms.DialogResult]::No) {
+        return [pscustomobject]@{ Channel = "dev"; Source = "manual-fallback" ; Cancelled = $false }
+    }
+    return [pscustomobject]@{ Channel = "main"; Source = "manual-fallback-cancelled" ; Cancelled = $true }
+}
+
 function Get-RecommendedInstallPath {
     $base = Join-Path $env:LOCALAPPDATA "Programs"
     return (Join-Path $base "Teams Always Green")
@@ -2760,6 +2778,17 @@ function Show-SetupWizard {
 }
 
 $channelResolution = Resolve-QuickSetupChannel
+if ([string]$channelResolution.Source -eq "default") {
+    $fallbackResolution = Resolve-QuickSetupChannelFallback
+    if ($fallbackResolution -and [bool]$fallbackResolution.Cancelled) {
+        Write-SetupLog "Install canceled at channel selection prompt."
+        Cleanup-SetupTempFiles -success $true
+        exit 1
+    }
+    if ($fallbackResolution -and -not [string]::IsNullOrWhiteSpace([string]$fallbackResolution.Channel)) {
+        $channelResolution = $fallbackResolution
+    }
+}
 $script:QuickSetupChannel = [string]$channelResolution.Channel
 $script:QuickSetupChannelSource = [string]$channelResolution.Source
 $script:QuickSetupRawBase = Get-QuickSetupRemoteBase -channel $script:QuickSetupChannel
