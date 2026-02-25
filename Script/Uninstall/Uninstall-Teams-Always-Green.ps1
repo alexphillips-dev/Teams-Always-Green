@@ -736,7 +736,7 @@ function Ensure-TempExecution([string]$resolvedInstallRoot) {
         Complete-Uninstall -ExitCode $script:ExitCodes.RelaunchFailed -Result "RelaunchFailed" -Summary ("Unable to stage uninstall runner: {0}" -f $_.Exception.Message) -NotifyUser -Icon ([System.Windows.Forms.MessageBoxIcon]::Error) -Title "Uninstall failed"
     }
 
-    $argLine = "-NoProfile -ExecutionPolicy RemoteSigned -File `"{0}`" -Relaunched -InstallRoot `"{1}`" -AppDataPolicy {2}" -f $runnerPath, $resolvedInstallRoot, $AppDataPolicy
+    $argLine = "-NoProfile -ExecutionPolicy Bypass -File `"{0}`" -Relaunched -InstallRoot `"{1}`" -AppDataPolicy {2}" -f $runnerPath, $resolvedInstallRoot, $AppDataPolicy
     if ($Silent) { $argLine += " -Silent" }
     if ($RemoveAppData) { $argLine += " -RemoveAppData" }
     if ($script:IsDryRun) { $argLine += " -WhatIf" }
@@ -991,6 +991,14 @@ try {
     Write-UninstallLog ("Uninstall started. Script={0}" -f $scriptPath)
     Write-UninstallLog ("InstallRoot parameter={0}" -f $resolvedInstallRoot)
     Write-UninstallLog ("Relaunched={0} Silent={1} DryRun={2}" -f $Relaunched, $Silent, $script:IsDryRun)
+    try {
+        $policyMachine = Get-ExecutionPolicy -Scope LocalMachine -ErrorAction SilentlyContinue
+        $policyUser = Get-ExecutionPolicy -Scope CurrentUser -ErrorAction SilentlyContinue
+        $policyProcess = Get-ExecutionPolicy -Scope Process -ErrorAction SilentlyContinue
+        Write-UninstallLog ("ExecutionPolicy LocalMachine={0} CurrentUser={1} Process={2}" -f $policyMachine, $policyUser, $policyProcess)
+    } catch {
+        $null = $_
+    }
     $oneDrivePathInfo = Get-OneDrivePathDiagnostics -path $resolvedInstallRoot
     $script:UninstallReport.OneDrivePathLike = [bool]$oneDrivePathInfo.IsOneDriveLike
     $script:UninstallReport.OneDriveSignals = @($oneDrivePathInfo.Signals)
