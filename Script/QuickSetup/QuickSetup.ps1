@@ -1909,6 +1909,28 @@ function Show-SetupWizard {
     $stepper.Location = New-Object System.Drawing.Point(120, 14)
     $stepper.Text = "Step 1 of 4 - Welcome"
 
+    $channelValue = [string]$script:QuickSetupChannel
+    if ([string]::IsNullOrWhiteSpace($channelValue)) { $channelValue = "main" }
+    $channelValue = $channelValue.Trim().ToLowerInvariant()
+    if ($channelValue -notin $script:QuickSetupAllowedChannels) { $channelValue = "main" }
+
+    $channelLabel = New-Object System.Windows.Forms.Label
+    $channelLabel.AutoSize = $false
+    $channelLabel.Width = 120
+    $channelLabel.Height = 22
+    $channelLabel.Location = New-Object System.Drawing.Point(500, 10)
+    $channelLabel.Font = New-Object System.Drawing.Font("Segoe UI", 8.5, [System.Drawing.FontStyle]::Bold)
+    $channelLabel.TextAlign = [System.Drawing.ContentAlignment]::MiddleCenter
+    $channelLabel.BorderStyle = [System.Windows.Forms.BorderStyle]::FixedSingle
+    $channelLabel.Text = ("Channel: {0}" -f $channelValue)
+    if ($channelValue -eq "dev") {
+        $channelLabel.BackColor = [System.Drawing.Color]::FromArgb(255, 244, 214)
+        $channelLabel.ForeColor = [System.Drawing.Color]::FromArgb(120, 76, 0)
+    } else {
+        $channelLabel.BackColor = [System.Drawing.Color]::FromArgb(235, 243, 252)
+        $channelLabel.ForeColor = [System.Drawing.Color]::FromArgb(24, 72, 118)
+    }
+
     $panelWelcome = New-Object System.Windows.Forms.Panel
     $panelWelcome.Location = New-Object System.Drawing.Point(16, 44)
     $panelWelcome.Size = New-Object System.Drawing.Size(600, 340)
@@ -2299,6 +2321,7 @@ function Show-SetupWizard {
 
     $form.Controls.Add($title)
     $form.Controls.Add($stepper)
+    $form.Controls.Add($channelLabel)
     $form.Controls.Add($panelWelcome)
     $form.Controls.Add($panelLocation)
     $form.Controls.Add($panelDownload)
