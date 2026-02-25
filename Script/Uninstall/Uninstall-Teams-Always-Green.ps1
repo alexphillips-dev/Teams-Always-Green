@@ -12,11 +12,22 @@ param(
     [ValidateSet("Keep", "Remove", "Prompt")]
     [string]$AppDataPolicy = "Prompt",
     [string]$InstallRoot = "",
-    [switch]$Relaunched
+    [switch]$Relaunched,
+    [switch]$HideConsole
 )
 
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
+Add-Type -TypeDefinition @"
+using System;
+using System.Runtime.InteropServices;
+public static class TAGNativeConsole {
+    [DllImport("kernel32.dll")]
+    public static extern IntPtr GetConsoleWindow();
+    [DllImport("user32.dll")]
+    public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+}
+"@
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 $script:ScriptFilePath = if (-not [string]::IsNullOrWhiteSpace($PSCommandPath)) {
@@ -455,18 +466,20 @@ function New-UninstallProgressUi {
 
     $form = New-Object System.Windows.Forms.Form
     $form.Text = "Teams Always Green - Uninstall"
-    $form.Width = 640
-    $form.Height = 350
+    $form.Width = 760
+    $form.Height = 390
     $form.StartPosition = "CenterScreen"
     $form.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::FixedDialog
     $form.MaximizeBox = $false
     $form.MinimizeBox = $false
     $form.TopMost = $true
+    $contentLeft = 16
+    $contentWidth = 710
 
     $title = New-Object System.Windows.Forms.Label
     $title.AutoSize = $true
     $title.Font = New-Object System.Drawing.Font("Segoe UI", 11, [System.Drawing.FontStyle]::Bold)
-    $title.Location = New-Object System.Drawing.Point(16, 12)
+    $title.Location = New-Object System.Drawing.Point($contentLeft, 12)
     $title.Text = "Uninstall"
 
     $stepper = New-Object System.Windows.Forms.Label
@@ -478,13 +491,13 @@ function New-UninstallProgressUi {
 
     $label = New-Object System.Windows.Forms.Label
     $label.AutoSize = $true
-    $label.Location = New-Object System.Drawing.Point(16, 52)
+    $label.Location = New-Object System.Drawing.Point($contentLeft, 52)
     $label.Text = "Preparing uninstall..."
 
     $progress = New-Object System.Windows.Forms.ProgressBar
-    $progress.Width = 590
+    $progress.Width = $contentWidth
     $progress.Height = 20
-    $progress.Location = New-Object System.Drawing.Point(16, 76)
+    $progress.Location = New-Object System.Drawing.Point($contentLeft, 76)
     $progress.Minimum = 0
     $progress.Maximum = 100
     $progress.Style = [System.Windows.Forms.ProgressBarStyle]::Continuous
@@ -492,70 +505,93 @@ function New-UninstallProgressUi {
 
     $meta = New-Object System.Windows.Forms.Label
     $meta.AutoSize = $true
-    $meta.MaximumSize = New-Object System.Drawing.Size(590, 0)
+    $meta.MaximumSize = New-Object System.Drawing.Size($contentWidth, 0)
     $meta.Font = New-Object System.Drawing.Font("Segoe UI", 8.5, [System.Drawing.FontStyle]::Regular)
-    $meta.Location = New-Object System.Drawing.Point(16, 78)
+    $meta.Location = New-Object System.Drawing.Point($contentLeft, 78)
     $meta.Text = ""
 
     $optionsPanel = New-Object System.Windows.Forms.Panel
-    $optionsPanel.Width = 590
-    $optionsPanel.Height = 72
-    $optionsPanel.Location = New-Object System.Drawing.Point(16, 126)
+    $optionsPanel.Width = $contentWidth
+    $optionsPanel.Height = 126
+    $optionsPanel.Location = New-Object System.Drawing.Point($contentLeft, 126)
+    $optionsPanel.BorderStyle = [System.Windows.Forms.BorderStyle]::FixedSingle
 
     $optionsPrompt = New-Object System.Windows.Forms.Label
     $optionsPrompt.AutoSize = $true
-    $optionsPrompt.Font = New-Object System.Drawing.Font("Segoe UI", 8.5, [System.Drawing.FontStyle]::Regular)
-    $optionsPrompt.Location = New-Object System.Drawing.Point(0, 0)
+    $optionsPrompt.Font = New-Object System.Drawing.Font("Segoe UI", 8.5, [System.Drawing.FontStyle]::Bold)
+    $optionsPrompt.Location = New-Object System.Drawing.Point(10, 8)
     $optionsPrompt.Text = "Review uninstall options, then click Next to continue."
+
+    $installPathLabel = New-Object System.Windows.Forms.Label
+    $installPathLabel.AutoSize = $true
+    $installPathLabel.Font = New-Object System.Drawing.Font("Segoe UI", 8.25, [System.Drawing.FontStyle]::Regular)
+    $installPathLabel.ForeColor = [System.Drawing.Color]::FromArgb(85, 85, 85)
+    $installPathLabel.Location = New-Object System.Drawing.Point(10, 30)
+    $installPathLabel.Text = "Install location"
+
+    $installPathBox = New-Object System.Windows.Forms.TextBox
+    $installPathBox.Location = New-Object System.Drawing.Point(10, 46)
+    $installPathBox.Width = ($contentWidth - 22)
+    $installPathBox.Height = 20
+    $installPathBox.ReadOnly = $true
+    $installPathBox.BackColor = [System.Drawing.Color]::FromArgb(249, 249, 249)
+    $installPathBox.BorderStyle = [System.Windows.Forms.BorderStyle]::FixedSingle
+    $installPathBox.TabStop = $false
+    $installPathBox.Text = ""
 
     $removeDataCheck = New-Object System.Windows.Forms.CheckBox
     $removeDataCheck.AutoSize = $true
-    $removeDataCheck.Location = New-Object System.Drawing.Point(0, 20)
+    $removeDataCheck.Location = New-Object System.Drawing.Point(10, 72)
     $removeDataCheck.Text = "Also remove local settings and logs"
 
     $appDataPathLabel = New-Object System.Windows.Forms.Label
     $appDataPathLabel.AutoSize = $false
-    $appDataPathLabel.Width = 590
-    $appDataPathLabel.Height = 34
+    $appDataPathLabel.Width = ($contentWidth - 22)
+    $appDataPathLabel.Height = 30
     $appDataPathLabel.Font = New-Object System.Drawing.Font("Segoe UI", 8.25, [System.Drawing.FontStyle]::Regular)
     $appDataPathLabel.ForeColor = [System.Drawing.Color]::FromArgb(85, 85, 85)
-    $appDataPathLabel.Location = New-Object System.Drawing.Point(0, 38)
+    $appDataPathLabel.Location = New-Object System.Drawing.Point(10, 92)
     $appDataPathLabel.Text = ""
 
     $optionsPanel.Controls.Add($optionsPrompt)
+    $optionsPanel.Controls.Add($installPathLabel)
+    $optionsPanel.Controls.Add($installPathBox)
     $optionsPanel.Controls.Add($removeDataCheck)
     $optionsPanel.Controls.Add($appDataPathLabel)
 
     $detailsLink = New-Object System.Windows.Forms.LinkLabel
     $detailsLink.Text = "Show details"
     $detailsLink.AutoSize = $true
-    $detailsLink.Location = New-Object System.Drawing.Point(525, 202)
+    $detailsLink.Location = New-Object System.Drawing.Point(630, 256)
 
     $detailsList = New-Object System.Windows.Forms.ListBox
-    $detailsList.Width = 590
-    $detailsList.Height = 64
-    $detailsList.Location = New-Object System.Drawing.Point(16, 224)
+    $detailsList.Width = $contentWidth
+    $detailsList.Height = 84
+    $detailsList.Location = New-Object System.Drawing.Point($contentLeft, 278)
     $detailsList.Visible = $false
 
+    $cancelButtonX = $contentLeft + $contentWidth - 90
+    $nextButtonX = $cancelButtonX - 98
+    $backButtonX = $nextButtonX - 98
     $backButton = New-Object System.Windows.Forms.Button
     $backButton.Text = "Back"
     $backButton.Width = 90
     $backButton.Height = 30
-    $backButton.Location = New-Object System.Drawing.Point(322, 280)
+    $backButton.Location = New-Object System.Drawing.Point($backButtonX, 320)
     $backButton.Enabled = $false
 
     $nextButton = New-Object System.Windows.Forms.Button
     $nextButton.Text = "Next"
     $nextButton.Width = 90
     $nextButton.Height = 30
-    $nextButton.Location = New-Object System.Drawing.Point(420, 280)
+    $nextButton.Location = New-Object System.Drawing.Point($nextButtonX, 320)
     $nextButton.Enabled = $true
 
     $cancelButton = New-Object System.Windows.Forms.Button
     $cancelButton.Text = "Cancel"
     $cancelButton.Width = 90
     $cancelButton.Height = 30
-    $cancelButton.Location = New-Object System.Drawing.Point(518, 280)
+    $cancelButton.Location = New-Object System.Drawing.Point($cancelButtonX, 320)
     $cancelButton.Enabled = $true
 
     $state = @{
@@ -592,22 +628,22 @@ function New-UninstallProgressUi {
         }
     })
 
-    $baseHeight = 350
-    $expandedHeight = 420
+    $baseHeight = 390
+    $expandedHeight = 480
     $detailsLink.Add_LinkClicked({
         $detailsList.Visible = -not $detailsList.Visible
         if ($detailsList.Visible) {
             $detailsLink.Text = "Hide details"
             $form.Height = $expandedHeight
-            $backButton.Location = New-Object System.Drawing.Point(322, 350)
-            $nextButton.Location = New-Object System.Drawing.Point(420, 350)
-            $cancelButton.Location = New-Object System.Drawing.Point(518, 350)
+            $backButton.Location = New-Object System.Drawing.Point($backButtonX, 390)
+            $nextButton.Location = New-Object System.Drawing.Point($nextButtonX, 390)
+            $cancelButton.Location = New-Object System.Drawing.Point($cancelButtonX, 390)
         } else {
             $detailsLink.Text = "Show details"
             $form.Height = $baseHeight
-            $backButton.Location = New-Object System.Drawing.Point(322, 280)
-            $nextButton.Location = New-Object System.Drawing.Point(420, 280)
-            $cancelButton.Location = New-Object System.Drawing.Point(518, 280)
+            $backButton.Location = New-Object System.Drawing.Point($backButtonX, 320)
+            $nextButton.Location = New-Object System.Drawing.Point($nextButtonX, 320)
+            $cancelButton.Location = New-Object System.Drawing.Point($cancelButtonX, 320)
         }
     }.GetNewClosure())
 
@@ -635,6 +671,7 @@ function New-UninstallProgressUi {
         Meta = $meta
         OptionsPanel = $optionsPanel
         OptionsPrompt = $optionsPrompt
+        InstallPathBox = $installPathBox
         RemoveDataCheck = $removeDataCheck
         AppDataPathLabel = $appDataPathLabel
         DetailsList = $detailsList
@@ -662,6 +699,17 @@ function Wait-UninstallWizardAction($ui) {
     return "Cancel"
 }
 
+function Hide-ConsoleWindow {
+    try {
+        $hwnd = [TAGNativeConsole]::GetConsoleWindow()
+        if ($hwnd -ne [IntPtr]::Zero) {
+            [TAGNativeConsole]::ShowWindow($hwnd, 0) | Out-Null
+        }
+    } catch {
+        $null = $_
+    }
+}
+
 function Set-UninstallUiLayout($ui, [bool]$showProgress) {
     if (-not $ui -or -not $ui.Form -or $ui.Form.IsDisposed) { return }
     $metaTop = if ($showProgress) { 104 } else { 78 }
@@ -670,17 +718,18 @@ function Set-UninstallUiLayout($ui, [bool]$showProgress) {
     $optionsTop = $metaTop + $metaHeight + 8
     $detailsTop = $optionsTop + $ui.OptionsPanel.Height + 8
 
+    $detailsX = [Math]::Max(16, $ui.Progress.Right - [int]$ui.DetailsLink.PreferredWidth)
     if ($showProgress) {
         $ui.Progress.Visible = $true
         $ui.OptionsPanel.Location = New-Object System.Drawing.Point(16, $optionsTop)
-        $ui.DetailsLink.Location = New-Object System.Drawing.Point(525, $detailsTop)
+        $ui.DetailsLink.Location = New-Object System.Drawing.Point($detailsX, $detailsTop)
         $ui.DetailsList.Location = New-Object System.Drawing.Point(16, ($detailsTop + 22))
         return
     }
 
     $ui.Progress.Visible = $false
     $ui.OptionsPanel.Location = New-Object System.Drawing.Point(16, $optionsTop)
-    $ui.DetailsLink.Location = New-Object System.Drawing.Point(525, $detailsTop)
+    $ui.DetailsLink.Location = New-Object System.Drawing.Point($detailsX, $detailsTop)
     $ui.DetailsList.Location = New-Object System.Drawing.Point(16, ($detailsTop + 22))
 }
 
@@ -739,9 +788,10 @@ function Ensure-TempExecution([string]$resolvedInstallRoot) {
     $argLine = "-NoProfile -ExecutionPolicy Bypass -File `"{0}`" -Relaunched -InstallRoot `"{1}`" -AppDataPolicy {2}" -f $runnerPath, $resolvedInstallRoot, $AppDataPolicy
     if ($Silent) { $argLine += " -Silent" }
     if ($RemoveAppData) { $argLine += " -RemoveAppData" }
+    if ($HideConsole) { $argLine += " -HideConsole" }
     if ($script:IsDryRun) { $argLine += " -WhatIf" }
 
-    $windowStyle = if ($Silent) { "Hidden" } else { "Normal" }
+    $windowStyle = if ($Silent -or $HideConsole) { "Hidden" } else { "Normal" }
     try {
         Write-UninstallLog ("Relaunching uninstall from temp runner: {0}" -f $runnerPath)
         Write-UninstallLog ("Relaunch window style: {0}" -f $windowStyle)
@@ -992,6 +1042,7 @@ try {
     Write-UninstallLog ("Uninstall started. Script={0}" -f $scriptPath)
     Write-UninstallLog ("InstallRoot parameter={0}" -f $resolvedInstallRoot)
     Write-UninstallLog ("Relaunched={0} Silent={1} DryRun={2}" -f $Relaunched, $Silent, $script:IsDryRun)
+    Write-UninstallLog ("HideConsole={0}" -f [bool]$HideConsole)
     try {
         $policyMachine = Get-ExecutionPolicy -Scope LocalMachine -ErrorAction SilentlyContinue
         $policyUser = Get-ExecutionPolicy -Scope CurrentUser -ErrorAction SilentlyContinue
@@ -1019,13 +1070,18 @@ try {
 
     Ensure-TempExecution -resolvedInstallRoot $resolvedInstallRoot
 
+    if ($HideConsole -and -not $Silent) {
+        Hide-ConsoleWindow
+        Write-UninstallLog "Console window hidden for interactive uninstall."
+    }
+
     $effectivePolicy = Get-EffectiveAppDataPolicy -SilentMode:$Silent -RemoveAppDataSwitch:$RemoveAppData -RequestedPolicy $AppDataPolicy
     if ($effectivePolicy -eq "Prompt" -and $Silent) {
         $effectivePolicy = "Keep"
     }
 
     $ui = New-UninstallProgressUi
-    Set-UninstallProgress $ui 5 "Step 1 of 4 - Verify" "Verifying install path and options..." ("Install path: {0}" -f $resolvedInstallRoot)
+    Set-UninstallProgress $ui 5 "Step 1 of 4 - Verify" "Verify uninstall target and options." "Confirm the target path and local data preference."
     if ($oneDrivePathInfo.IsOneDriveLike) {
         Add-UninstallDetail $ui ("OneDrive advisory: sync/file-provider locks can delay cleanup. Signals={0}" -f $oneDrivePathInfo.Summary)
     }
@@ -1033,13 +1089,14 @@ try {
     if ($ui -and $ui.Form -and -not $ui.Form.IsDisposed) {
         $ui.OptionsPanel.Visible = $true
         $ui.OptionsPrompt.Text = "Review uninstall options, then click Next to continue."
-        $ui.AppDataPathLabel.Text = ("Path: {0}" -f $script:AppDataRoot)
+        $ui.InstallPathBox.Text = [string]$resolvedInstallRoot
+        $ui.AppDataPathLabel.Text = ("Local data path: {0}" -f $script:AppDataRoot)
         $ui.RemoveDataCheck.Checked = ($effectivePolicy -eq "Remove")
         $ui.RemoveDataCheck.Enabled = ($effectivePolicy -eq "Prompt")
         if ($effectivePolicy -eq "Keep") {
-            $ui.OptionsPrompt.Text = "Local settings/logs will be kept by policy. Click Next to continue."
+            $ui.OptionsPrompt.Text = "Local settings and logs will be kept by policy."
         } elseif ($effectivePolicy -eq "Remove") {
-            $ui.OptionsPrompt.Text = "Local settings/logs will be removed by policy. Click Next to continue."
+            $ui.OptionsPrompt.Text = "Local settings and logs will be removed by policy."
         }
         Add-UninstallDetail $ui ("Ready to remove app files from: {0}" -f $resolvedInstallRoot)
         Add-UninstallDetail $ui "Next step will stop running app processes and begin file cleanup."

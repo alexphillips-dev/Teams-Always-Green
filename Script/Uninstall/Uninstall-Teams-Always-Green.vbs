@@ -2,7 +2,7 @@ Option Explicit
 
 Dim shell, fso
 Dim vbsPath, uninstallDir, scriptDir, installRoot, uninstallPs1
-Dim tempDir, launcherLog, psPath, cmd, rc
+Dim tempDir, launcherLog, psPath, cmd, rc, runnerPs1
 Dim ts
 
 Set shell = CreateObject("WScript.Shell")
@@ -51,15 +51,28 @@ If Not fso.FileExists(uninstallPs1) Then
 End If
 
 psPath = ResolvePowerShellPath()
-cmd = """" & psPath & """ -NoProfile -ExecutionPolicy Bypass -WindowStyle Normal -File """ & uninstallPs1 & """ -InstallRoot """ & installRoot & """"
+Randomize
+runnerPs1 = fso.BuildPath(tempDir, "TAG-UninstallRunner-" & CStr(Int(Timer * 1000)) & "-" & CStr(Int((Rnd * 1000000) + 1)) & ".ps1")
 
-WriteLog "Launcher started. Version=2"
+On Error Resume Next
+fso.CopyFile uninstallPs1, runnerPs1, True
+If Err.Number <> 0 Then
+    WriteLog "Launcher failed to stage runner: " & Err.Description
+    MsgBox "Unable to stage uninstall runner." & vbCrLf & vbCrLf & "Log:" & vbCrLf & launcherLog, vbCritical, "Uninstall launcher error"
+    WScript.Quit 1
+End If
+On Error GoTo 0
+
+cmd = """" & psPath & """ -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File """ & runnerPs1 & """ -Relaunched -InstallRoot """ & installRoot & """ -HideConsole"
+
+WriteLog "Launcher started. Version=3"
 WriteLog "PowerShell path: " & psPath
 WriteLog "Install root: " & installRoot
+WriteLog "Runner path: " & runnerPs1
 WriteLog "Command: " & cmd
 
 On Error Resume Next
-rc = shell.Run(cmd, 1, True)
+rc = shell.Run(cmd, 0, True)
 If Err.Number <> 0 Then
     WriteLog "Launcher failed: " & Err.Description
     MsgBox "Unable to start uninstall." & vbCrLf & vbCrLf & "Log:" & vbCrLf & launcherLog, vbCritical, "Uninstall launcher error"
