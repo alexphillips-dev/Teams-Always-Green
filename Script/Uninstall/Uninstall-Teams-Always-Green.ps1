@@ -741,9 +741,10 @@ function Ensure-TempExecution([string]$resolvedInstallRoot) {
     if ($RemoveAppData) { $argLine += " -RemoveAppData" }
     if ($script:IsDryRun) { $argLine += " -WhatIf" }
 
-    $windowStyle = "Hidden"
+    $windowStyle = if ($Silent) { "Hidden" } else { "Normal" }
     try {
         Write-UninstallLog ("Relaunching uninstall from temp runner: {0}" -f $runnerPath)
+        Write-UninstallLog ("Relaunch window style: {0}" -f $windowStyle)
         Start-Process -FilePath (Get-PowerShellPath) -ArgumentList $argLine -WindowStyle $windowStyle -WorkingDirectory $tempRoot -ErrorAction Stop | Out-Null
         exit 0
     } catch {
