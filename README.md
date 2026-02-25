@@ -30,9 +30,19 @@ This was not created to avoid work or to encourage misuse. It was created to red
 
 **One-line install (PowerShell):**
 
+Stable (`main`):
+
 ```powershell
 irm "https://raw.githubusercontent.com/alexphillips-dev/Teams-Always-Green/main/Script/QuickSetup/QuickSetup.ps1?ts=$([guid]::NewGuid())" | iex
 ```
+
+Testing (`dev`):
+
+```powershell
+irm "https://raw.githubusercontent.com/alexphillips-dev/Teams-Always-Green/dev/Script/QuickSetup/QuickSetup.ps1?ts=$([guid]::NewGuid())" | iex
+```
+
+`dev` includes in-progress changes and may be unstable.
 
 1) Download `Script/QuickSetup/QuickSetup.cmd` from the repo (it always pulls the latest installer).  
 2) Double-click it.  

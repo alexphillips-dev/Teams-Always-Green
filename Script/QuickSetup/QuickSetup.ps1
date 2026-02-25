@@ -18,6 +18,10 @@ $script:QuickSetupManifestSignaturePublicKeyXml = @'
 $script:QuickSetupRequireManifestSignature = $true
 $script:QuickSetupTrustedOwner = "alexphillips-dev"
 $script:QuickSetupTrustedRepo = "Teams-Always-Green"
+$script:QuickSetupAllowedChannels = @("main", "dev")
+$script:QuickSetupChannel = "main"
+$script:QuickSetupChannelSource = "default"
+$script:QuickSetupRawBase = ""
 
 function Test-QuickSetupTrustedUrl([string]$url) {
     if ([string]::IsNullOrWhiteSpace($url)) { return $false }
@@ -127,6 +131,78 @@ function Get-QuickSetupLocalIconPath {
     $iconPath = Join-Path $sourceRoot "Meta\Icons\Tray_Icon.ico"
     if (Test-Path $iconPath) { return $iconPath }
     return $null
+}
+
+function Get-QuickSetupRemoteBase {
+    param([string]$channel = "")
+
+    $candidate = if ([string]::IsNullOrWhiteSpace($channel)) {
+        [string]$script:QuickSetupChannel
+    } else {
+        [string]$channel
+    }
+    if ([string]::IsNullOrWhiteSpace($candidate)) { $candidate = "main" }
+    $candidate = $candidate.Trim().ToLowerInvariant()
+    if ($candidate -notin $script:QuickSetupAllowedChannels) { $candidate = "main" }
+    return ("https://raw.githubusercontent.com/{0}/{1}/{2}" -f $script:QuickSetupTrustedOwner, $script:QuickSetupTrustedRepo, $candidate)
+}
+
+function Get-CurrentProcessCommandLine {
+    try {
+        $proc = Get-CimInstance Win32_Process -Filter ("ProcessId={0}" -f $PID) -ErrorAction Stop
+        return [string]$proc.CommandLine
+    } catch {
+        return ""
+    }
+}
+
+function Resolve-QuickSetupChannel {
+    $allowed = @($script:QuickSetupAllowedChannels | ForEach-Object { [string]$_ })
+
+    $envChannel = [string]$env:TAG_QUICKSETUP_CHANNEL
+    if (-not [string]::IsNullOrWhiteSpace($envChannel)) {
+        $candidate = $envChannel.Trim().ToLowerInvariant()
+        if ($candidate -in $allowed) {
+            return [pscustomobject]@{ Channel = $candidate; Source = "env:TAG_QUICKSETUP_CHANNEL" }
+        }
+    }
+
+    $sourceRoot = Get-QuickSetupSourceRoot
+    if (-not [string]::IsNullOrWhiteSpace($sourceRoot) -and (Test-Path -LiteralPath (Join-Path $sourceRoot ".git"))) {
+        try {
+            if (Get-Command git -ErrorAction SilentlyContinue) {
+                $branchName = (& git -C $sourceRoot rev-parse --abbrev-ref HEAD 2>$null | Select-Object -First 1)
+                $candidate = [string]$branchName
+                if (-not [string]::IsNullOrWhiteSpace($candidate)) {
+                    $candidate = $candidate.Trim().ToLowerInvariant()
+                    if ($candidate -in $allowed) {
+                        return [pscustomobject]@{ Channel = $candidate; Source = "local-git-branch" }
+                    }
+                }
+            }
+        } catch {
+            $null = $_
+        }
+    }
+
+    $owner = [regex]::Escape($script:QuickSetupTrustedOwner)
+    $repo = [regex]::Escape($script:QuickSetupTrustedRepo)
+    $cmdLine = Get-CurrentProcessCommandLine
+    if (-not [string]::IsNullOrWhiteSpace($cmdLine)) {
+        $patterns = @(
+            @{ Channel = "dev"; Pattern = ("raw\.githubusercontent\.com/{0}/{1}/refs/heads/dev/Script/QuickSetup/QuickSetup\.ps1" -f $owner, $repo) },
+            @{ Channel = "dev"; Pattern = ("raw\.githubusercontent\.com/{0}/{1}/dev/Script/QuickSetup/QuickSetup\.ps1" -f $owner, $repo) },
+            @{ Channel = "main"; Pattern = ("raw\.githubusercontent\.com/{0}/{1}/refs/heads/main/Script/QuickSetup/QuickSetup\.ps1" -f $owner, $repo) },
+            @{ Channel = "main"; Pattern = ("raw\.githubusercontent\.com/{0}/{1}/main/Script/QuickSetup/QuickSetup\.ps1" -f $owner, $repo) }
+        )
+        foreach ($entry in $patterns) {
+            if ($cmdLine -match [string]$entry.Pattern) {
+                return [pscustomobject]@{ Channel = [string]$entry.Channel; Source = "process-commandline" }
+            }
+        }
+    }
+
+    return [pscustomobject]@{ Channel = "main"; Source = "default" }
 }
 
 function Get-RecommendedInstallPath {
@@ -881,7 +957,7 @@ function Show-Welcome {
     if (-not $welcomeIcon) {
         try {
             try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 } catch { $null = $_ }
-            $remoteIconUrl = "https://raw.githubusercontent.com/alexphillips-dev/Teams-Always-Green/main/Meta/Icons/Tray_Icon.ico"
+            $remoteIconUrl = ("{0}/Meta/Icons/Tray_Icon.ico" -f (Get-QuickSetupRemoteBase))
             $remoteIconPath = Join-Path $env:TEMP "TeamsAlwaysGreen-Welcome.ico"
             $wc = New-Object System.Net.WebClient
             $wc.DownloadFile($remoteIconUrl, $remoteIconPath)
@@ -1315,7 +1391,7 @@ foreach ($legacyLocator in @(
     try { if (Test-Path $legacyLocator) { Remove-Item -Path $legacyLocator -Force -ErrorAction SilentlyContinue } } catch { $null = $_ }
 }
 
-$rawBase = "https://raw.githubusercontent.com/alexphillips-dev/Teams-Always-Green/main"
+$rawBase = Get-QuickSetupRemoteBase
 $cacheBuster = [Guid]::NewGuid().ToString("N")
 $filesToDownload = @(
     @{ Url = "$rawBase/Script/Teams%20Always%20Green.ps1"; Path = "Script\Teams Always Green.ps1" },
@@ -1758,7 +1834,7 @@ function Show-SetupWizard {
     if (-not $welcomeIcon) {
         try {
             try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 } catch { $null = $_ }
-            $remoteIconUrl = "https://raw.githubusercontent.com/alexphillips-dev/Teams-Always-Green/main/Meta/Icons/Tray_Icon.ico"
+            $remoteIconUrl = ("{0}/Meta/Icons/Tray_Icon.ico" -f (Get-QuickSetupRemoteBase))
             $remoteIconPath = Join-Path $env:TEMP "TeamsAlwaysGreen-Welcome.ico"
             $wc = New-Object System.Net.WebClient
             $wc.DownloadFile($remoteIconUrl, $remoteIconPath)
@@ -2542,7 +2618,10 @@ function Show-SetupWizard {
     return $state
 }
 
-$script:QuickSetupRawBase = "https://raw.githubusercontent.com/alexphillips-dev/Teams-Always-Green/main"
+$channelResolution = Resolve-QuickSetupChannel
+$script:QuickSetupChannel = [string]$channelResolution.Channel
+$script:QuickSetupChannelSource = [string]$channelResolution.Source
+$script:QuickSetupRawBase = Get-QuickSetupRemoteBase -channel $script:QuickSetupChannel
 $script:QuickSetupCacheBuster = [Guid]::NewGuid().ToString("N")
 $script:QuickSetupFiles = @(
     @{ Url = "$script:QuickSetupRawBase/Script/Teams%20Always%20Green.ps1"; Path = "Script\Teams Always Green.ps1" },
@@ -2577,7 +2656,12 @@ try {
         }
 
 Write-SetupLog "Quick setup started."
+Write-SetupLog ("Quick setup channel: {0} (source: {1})" -f $script:QuickSetupChannel, $script:QuickSetupChannelSource)
 $setupOwner = New-SetupOwner
+if ($script:QuickSetupChannel -eq "dev") {
+    Show-SetupPrompt -message "Dev channel detected.`n`nThis installer may include in-progress changes and some features may not work as expected." -title "Dev Channel Notice" -buttons ([System.Windows.Forms.MessageBoxButtons]::OK) -icon ([System.Windows.Forms.MessageBoxIcon]::Warning) -owner $setupOwner | Out-Null
+    Write-SetupLog "Dev channel notice shown."
+}
 $wizard = Show-SetupWizard -owner $setupOwner
 if ($setupOwner -and -not $setupOwner.IsDisposed) { $setupOwner.Close() }
 

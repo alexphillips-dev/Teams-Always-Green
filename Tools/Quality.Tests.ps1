@@ -313,6 +313,15 @@ Describe "Quality: QuickSetup Wizard Flow" {
         $script:quickSetupText | Should -Match 'Manifest expected hash is missing for'
     }
 
+    It "auto-detects installer channel and warns when using dev channel" {
+        $script:quickSetupText | Should -Match 'function\s+Resolve-QuickSetupChannel'
+        $script:quickSetupText | Should -Match 'TAG_QUICKSETUP_CHANNEL'
+        $script:quickSetupText | Should -Match 'process-commandline'
+        $script:quickSetupText | Should -Match 'Get-QuickSetupRemoteBase\s+-channel\s+\$script:QuickSetupChannel'
+        $script:quickSetupText | Should -Match 'Dev channel detected'
+        $script:quickSetupText | Should -Match 'Quick setup channel:'
+    }
+
     It "shows clearer step 2 guidance and summary source details" {
         $script:quickSetupText | Should -Match 'InstallSource\s*=\s*"Remote \(GitHub\)"'
         $script:quickSetupText | Should -Match 'Source:'
