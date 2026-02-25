@@ -11,6 +11,7 @@ BeforeAll {
     $script:schedulingFeatureScript = Join-Path $script:repoRoot "Script/Features/Scheduling.ps1"
     $script:profilesFeatureScript = Join-Path $script:repoRoot "Script/Features/Profiles.ps1"
     $script:quickSetupScript = Join-Path $script:repoRoot "Script/QuickSetup/QuickSetup.ps1"
+    $script:uninstallScript = Join-Path $script:repoRoot "Script/Uninstall/Uninstall-Teams-Always-Green.ps1"
     $script:coreRuntimeScript = Join-Path $script:repoRoot "Script/Core/Runtime.ps1"
     $script:uiStringsScript = Join-Path $script:repoRoot "Script/I18n/UiStrings.ps1"
     $script:versionPath = Join-Path $script:repoRoot "VERSION"
@@ -24,6 +25,7 @@ BeforeAll {
     $script:schedulingFeatureText = Get-Content -Raw -Path $script:schedulingFeatureScript
     $script:profilesFeatureText = Get-Content -Raw -Path $script:profilesFeatureScript
     $script:quickSetupText = Get-Content -Raw -Path $script:quickSetupScript
+    $script:uninstallText = Get-Content -Raw -Path $script:uninstallScript
     $script:coreRuntimeText = Get-Content -Raw -Path $script:coreRuntimeScript
 
     $tokens = $null
@@ -330,6 +332,26 @@ Describe "Quality: QuickSetup Wizard Flow" {
     It "avoids execution policy bypass in setup launchers" {
         $script:quickSetupText | Should -Not -Match 'ExecutionPolicy\s+Bypass'
         (Get-Content -Raw -Path (Join-Path $script:repoRoot "Script/QuickSetup/QuickSetup.cmd")) | Should -Not -Match 'ExecutionPolicy\s+Bypass'
+    }
+}
+
+Describe "Quality: Uninstall Flow" {
+    It "standalone uninstall script parses without syntax errors" {
+        $tokens = $null
+        $errors = $null
+        [System.Management.Automation.Language.Parser]::ParseFile($script:uninstallScript, [ref]$tokens, [ref]$errors) | Out-Null
+        $errors | Should -BeNullOrEmpty
+    }
+
+    It "targets install root and supports interactive prompt without helper dependencies" {
+        $rootPattern = '\$installRoot\s*=\s*Split-Path -Parent \(Split-Path -Parent \(Split-Path -Parent \$scriptPath\)\)'
+        $script:uninstallText | Should -Match $rootPattern
+        $script:uninstallText | Should -Match '\[System\.Windows\.Forms\.MessageBox\]::Show\('
+        $script:uninstallText | Should -Not -Match 'Show-SetupPrompt'
+
+        # QuickSetup's generated uninstall template should stay aligned with the standalone script.
+        $script:quickSetupText | Should -Match $rootPattern
+        $script:quickSetupText | Should -Match '\[System\.Windows\.Forms\.MessageBox\]::Show\('
     }
 }
 

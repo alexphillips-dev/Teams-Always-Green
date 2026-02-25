@@ -1305,13 +1305,13 @@ param([switch]$Silent)
 Add-Type -AssemblyName System.Windows.Forms
 
 $scriptPath = $MyInvocation.MyCommand.Path
-$installRoot = Split-Path -Parent (Split-Path -Parent $scriptPath)
+$installRoot = Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $scriptPath))
 $programsDir = [Environment]::GetFolderPath("Programs")
 $menuFolder = Join-Path $programsDir "Teams Always Green"
 $shortcuts = @(
-    Join-Path $menuFolder "Teams Always Green.lnk",
-    Join-Path $menuFolder "Uninstall Teams Always Green.lnk",
-    Join-Path ([Environment]::GetFolderPath("Desktop")) "Teams Always Green.lnk",
+    (Join-Path $menuFolder "Teams Always Green.lnk")
+    (Join-Path $menuFolder "Uninstall Teams Always Green.lnk")
+    (Join-Path ([Environment]::GetFolderPath("Desktop")) "Teams Always Green.lnk")
     Join-Path ([Environment]::GetFolderPath("Startup")) "Teams Always Green.lnk"
 )
 
@@ -1326,10 +1326,12 @@ try {
 
 $deleteFiles = $true
 if (-not $Silent) {
-        $resp = Show-SetupPrompt -message (
-            "Remove the app files from:`n$installRoot`n`nThis will close the app if it is running.",
-            "Uninstall Teams Always Green"
-        ) -title "Uninstall Teams Always Green" -buttons ([System.Windows.Forms.MessageBoxButtons]::YesNo) -icon ([System.Windows.Forms.MessageBoxIcon]::Warning)
+    $resp = [System.Windows.Forms.MessageBox]::Show(
+        "Remove the app files from:`n$installRoot`n`nThis will close the app if it is running.",
+        "Uninstall Teams Always Green",
+        [System.Windows.Forms.MessageBoxButtons]::YesNo,
+        [System.Windows.Forms.MessageBoxIcon]::Warning
+    )
     if ($resp -ne [System.Windows.Forms.DialogResult]::Yes) { $deleteFiles = $false }
 }
 
@@ -2334,13 +2336,13 @@ param([switch]$Silent)
 Add-Type -AssemblyName System.Windows.Forms
 
 $scriptPath = $MyInvocation.MyCommand.Path
-$installRoot = Split-Path -Parent (Split-Path -Parent $scriptPath)
+$installRoot = Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $scriptPath))
 $programsDir = [Environment]::GetFolderPath("Programs")
 $menuFolder = Join-Path $programsDir "Teams Always Green"
 $shortcuts = @(
-    Join-Path $menuFolder "Teams Always Green.lnk",
-    Join-Path $menuFolder "Uninstall Teams Always Green.lnk",
-    Join-Path ([Environment]::GetFolderPath("Desktop")) "Teams Always Green.lnk",
+    (Join-Path $menuFolder "Teams Always Green.lnk")
+    (Join-Path $menuFolder "Uninstall Teams Always Green.lnk")
+    (Join-Path ([Environment]::GetFolderPath("Desktop")) "Teams Always Green.lnk")
     Join-Path ([Environment]::GetFolderPath("Startup")) "Teams Always Green.lnk"
 )
 
@@ -2355,10 +2357,12 @@ try {
 
 $deleteFiles = $true
 if (-not $Silent) {
-        $resp = Show-SetupPrompt -message (
-            "Remove the app files from:`n$installRoot`n`nThis will close the app if it is running.",
-            "Uninstall Teams Always Green"
-        ) -title "Uninstall Teams Always Green" -buttons ([System.Windows.Forms.MessageBoxButtons]::YesNo) -icon ([System.Windows.Forms.MessageBoxIcon]::Warning)
+    $resp = [System.Windows.Forms.MessageBox]::Show(
+        "Remove the app files from:`n$installRoot`n`nThis will close the app if it is running.",
+        "Uninstall Teams Always Green",
+        [System.Windows.Forms.MessageBoxButtons]::YesNo,
+        [System.Windows.Forms.MessageBoxIcon]::Warning
+    )
     if ($resp -ne [System.Windows.Forms.DialogResult]::Yes) { $deleteFiles = $false }
 }
 
