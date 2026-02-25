@@ -512,7 +512,7 @@ function New-UninstallProgressUi {
 
     $optionsPanel = New-Object System.Windows.Forms.Panel
     $optionsPanel.Width = $contentWidth
-    $optionsPanel.Height = 126
+    $optionsPanel.Height = 148
     $optionsPanel.Location = New-Object System.Drawing.Point($contentLeft, 126)
     $optionsPanel.BorderStyle = [System.Windows.Forms.BorderStyle]::FixedSingle
 
@@ -544,19 +544,25 @@ function New-UninstallProgressUi {
     $removeDataCheck.Location = New-Object System.Drawing.Point(10, 72)
     $removeDataCheck.Text = "Also remove local settings and logs"
 
+    $dryRunCheck = New-Object System.Windows.Forms.CheckBox
+    $dryRunCheck.AutoSize = $true
+    $dryRunCheck.Location = New-Object System.Drawing.Point(10, 92)
+    $dryRunCheck.Text = "Dry run (preview only, no files are deleted)"
+
     $appDataPathLabel = New-Object System.Windows.Forms.Label
     $appDataPathLabel.AutoSize = $false
     $appDataPathLabel.Width = ($contentWidth - 22)
     $appDataPathLabel.Height = 30
     $appDataPathLabel.Font = New-Object System.Drawing.Font("Segoe UI", 8.25, [System.Drawing.FontStyle]::Regular)
     $appDataPathLabel.ForeColor = [System.Drawing.Color]::FromArgb(85, 85, 85)
-    $appDataPathLabel.Location = New-Object System.Drawing.Point(10, 92)
+    $appDataPathLabel.Location = New-Object System.Drawing.Point(10, 112)
     $appDataPathLabel.Text = ""
 
     $optionsPanel.Controls.Add($optionsPrompt)
     $optionsPanel.Controls.Add($installPathLabel)
     $optionsPanel.Controls.Add($installPathBox)
     $optionsPanel.Controls.Add($removeDataCheck)
+    $optionsPanel.Controls.Add($dryRunCheck)
     $optionsPanel.Controls.Add($appDataPathLabel)
 
     $detailsLink = New-Object System.Windows.Forms.LinkLabel
@@ -673,6 +679,7 @@ function New-UninstallProgressUi {
         OptionsPrompt = $optionsPrompt
         InstallPathBox = $installPathBox
         RemoveDataCheck = $removeDataCheck
+        DryRunCheck = $dryRunCheck
         AppDataPathLabel = $appDataPathLabel
         DetailsList = $detailsList
         DetailsLink = $detailsLink
@@ -1130,6 +1137,8 @@ try {
         $ui.AppDataPathLabel.Text = ("Local data path: {0}" -f $script:AppDataRoot)
         $ui.RemoveDataCheck.Checked = ($effectivePolicy -eq "Remove")
         $ui.RemoveDataCheck.Enabled = ($effectivePolicy -eq "Prompt")
+        $ui.DryRunCheck.Checked = [bool]$script:IsDryRun
+        $ui.DryRunCheck.Enabled = $true
         if ($effectivePolicy -eq "Keep") {
             $ui.OptionsPrompt.Text = "Local settings and logs will be kept by policy."
         } elseif ($effectivePolicy -eq "Remove") {
@@ -1148,6 +1157,11 @@ try {
             } else {
                 $effectivePolicy = "Keep"
             }
+        }
+        if ($ui.DryRunCheck.Checked -and -not $script:IsDryRun) {
+            $script:IsDryRun = $true
+            $script:UninstallReport.DryRun = $true
+            Add-UninstallDetail $ui "Dry run enabled from uninstall wizard. No files will be deleted."
         }
 
         $ui.OptionsPanel.Visible = $false
@@ -1205,6 +1219,10 @@ try {
 
     Set-UninstallProgress $ui 100 "Step 4 of 4 - Complete" "Finalizing uninstall..." ""
     Start-Sleep -Milliseconds 300
+
+    if ($script:IsDryRun) {
+        Complete-Uninstall -ExitCode $script:ExitCodes.Success -Result "DryRun" -Summary ("Dry run complete. Planned uninstall root: {0}. AppData policy: {1}." -f $resolvedInstallRoot, $effectivePolicy) -NotifyUser:(-not $Silent) -Icon ([System.Windows.Forms.MessageBoxIcon]::Information) -Title "Uninstall dry run complete" -Ui $ui
+    }
 
     if ($allGood) {
         Complete-Uninstall -ExitCode $script:ExitCodes.Success -Result "Completed" -Summary "Uninstall completed successfully." -NotifyUser:(-not $Silent) -Icon ([System.Windows.Forms.MessageBoxIcon]::Information) -Title "Uninstall complete" -Ui $ui
