@@ -97,14 +97,144 @@ function Save-UninstallReport {
     }
 }
 
-function Show-UninstallMessage([string]$message, [string]$title, [System.Windows.Forms.MessageBoxIcon]$icon) {
-    if ($Silent) { return }
-    [void][System.Windows.Forms.MessageBox]::Show(
-        $message,
-        $title,
-        [System.Windows.Forms.MessageBoxButtons]::OK,
-        $icon
+function Show-UninstallMessage {
+    param(
+        [string]$Summary,
+        [string]$Title,
+        [System.Windows.Forms.MessageBoxIcon]$Icon,
+        [string]$LogPath,
+        [string]$ReportPath
     )
+
+    if ($Silent) { return }
+
+    $form = New-Object System.Windows.Forms.Form
+    $form.Text = $Title
+    $form.Width = 760
+    $form.Height = 350
+    $form.StartPosition = "CenterScreen"
+    $form.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::FixedDialog
+    $form.MaximizeBox = $false
+    $form.MinimizeBox = $false
+    $form.BackColor = [System.Drawing.Color]::White
+    $form.TopMost = $true
+
+    $header = New-Object System.Windows.Forms.Panel
+    $header.Width = 720
+    $header.Height = 72
+    $header.Location = New-Object System.Drawing.Point(16, 12)
+    switch ($Icon) {
+        ([System.Windows.Forms.MessageBoxIcon]::Warning) { $header.BackColor = [System.Drawing.Color]::FromArgb(255, 244, 214) }
+        ([System.Windows.Forms.MessageBoxIcon]::Error) { $header.BackColor = [System.Drawing.Color]::FromArgb(255, 228, 228) }
+        default { $header.BackColor = [System.Drawing.Color]::FromArgb(227, 243, 255) }
+    }
+
+    $iconBox = New-Object System.Windows.Forms.PictureBox
+    $iconBox.Size = New-Object System.Drawing.Size(28, 28)
+    $iconBox.Location = New-Object System.Drawing.Point(14, 22)
+    $iconBox.SizeMode = [System.Windows.Forms.PictureBoxSizeMode]::StretchImage
+    switch ($Icon) {
+        ([System.Windows.Forms.MessageBoxIcon]::Warning) { $iconBox.Image = [System.Drawing.SystemIcons]::Warning.ToBitmap() }
+        ([System.Windows.Forms.MessageBoxIcon]::Error) { $iconBox.Image = [System.Drawing.SystemIcons]::Error.ToBitmap() }
+        default { $iconBox.Image = [System.Drawing.SystemIcons]::Information.ToBitmap() }
+    }
+
+    $summaryTitle = New-Object System.Windows.Forms.Label
+    $summaryTitle.AutoSize = $true
+    $summaryTitle.Font = New-Object System.Drawing.Font("Segoe UI", 11, [System.Drawing.FontStyle]::Bold)
+    $summaryTitle.Location = New-Object System.Drawing.Point(52, 10)
+    $summaryTitle.Text = $Title
+
+    $summaryLabel = New-Object System.Windows.Forms.Label
+    $summaryLabel.AutoSize = $false
+    $summaryLabel.Width = 650
+    $summaryLabel.Height = 36
+    $summaryLabel.Font = New-Object System.Drawing.Font("Segoe UI", 9.5, [System.Drawing.FontStyle]::Regular)
+    $summaryLabel.Location = New-Object System.Drawing.Point(52, 32)
+    $summaryLabel.Text = [string]$Summary
+
+    $header.Controls.Add($iconBox)
+    $header.Controls.Add($summaryTitle)
+    $header.Controls.Add($summaryLabel)
+
+    $logLabel = New-Object System.Windows.Forms.Label
+    $logLabel.AutoSize = $true
+    $logLabel.Font = New-Object System.Drawing.Font("Segoe UI", 9.5, [System.Drawing.FontStyle]::Bold)
+    $logLabel.Location = New-Object System.Drawing.Point(18, 100)
+    $logLabel.Text = "Log file"
+
+    $logText = New-Object System.Windows.Forms.TextBox
+    $logText.Location = New-Object System.Drawing.Point(20, 122)
+    $logText.Width = 614
+    $logText.Height = 50
+    $logText.Multiline = $true
+    $logText.ReadOnly = $true
+    $logText.BackColor = [System.Drawing.Color]::FromArgb(250, 250, 250)
+    $logText.Text = [string]$LogPath
+
+    $openLogBtn = New-Object System.Windows.Forms.Button
+    $openLogBtn.Text = "Open Log"
+    $openLogBtn.Width = 94
+    $openLogBtn.Height = 28
+    $openLogBtn.Location = New-Object System.Drawing.Point(642, 133)
+    $openLogBtn.Add_Click({
+        try {
+            if (-not [string]::IsNullOrWhiteSpace($logText.Text) -and (Test-Path -LiteralPath $logText.Text -PathType Leaf)) {
+                Start-Process -FilePath "notepad.exe" -ArgumentList @($logText.Text) | Out-Null
+            }
+        } catch {
+            $null = $_
+        }
+    })
+
+    $reportLabel = New-Object System.Windows.Forms.Label
+    $reportLabel.AutoSize = $true
+    $reportLabel.Font = New-Object System.Drawing.Font("Segoe UI", 9.5, [System.Drawing.FontStyle]::Bold)
+    $reportLabel.Location = New-Object System.Drawing.Point(18, 183)
+    $reportLabel.Text = "Report file"
+
+    $reportText = New-Object System.Windows.Forms.TextBox
+    $reportText.Location = New-Object System.Drawing.Point(20, 205)
+    $reportText.Width = 614
+    $reportText.Height = 50
+    $reportText.Multiline = $true
+    $reportText.ReadOnly = $true
+    $reportText.BackColor = [System.Drawing.Color]::FromArgb(250, 250, 250)
+    $reportText.Text = [string]$ReportPath
+
+    $openReportBtn = New-Object System.Windows.Forms.Button
+    $openReportBtn.Text = "Open Report"
+    $openReportBtn.Width = 94
+    $openReportBtn.Height = 28
+    $openReportBtn.Location = New-Object System.Drawing.Point(642, 216)
+    $openReportBtn.Add_Click({
+        try {
+            if (-not [string]::IsNullOrWhiteSpace($reportText.Text) -and (Test-Path -LiteralPath $reportText.Text -PathType Leaf)) {
+                Start-Process -FilePath "notepad.exe" -ArgumentList @($reportText.Text) | Out-Null
+            }
+        } catch {
+            $null = $_
+        }
+    })
+
+    $okButton = New-Object System.Windows.Forms.Button
+    $okButton.Text = "OK"
+    $okButton.Width = 96
+    $okButton.Height = 30
+    $okButton.Location = New-Object System.Drawing.Point(640, 270)
+    $okButton.DialogResult = [System.Windows.Forms.DialogResult]::OK
+
+    $form.AcceptButton = $okButton
+    $form.CancelButton = $okButton
+    $form.Controls.Add($header)
+    $form.Controls.Add($logLabel)
+    $form.Controls.Add($logText)
+    $form.Controls.Add($openLogBtn)
+    $form.Controls.Add($reportLabel)
+    $form.Controls.Add($reportText)
+    $form.Controls.Add($openReportBtn)
+    $form.Controls.Add($okButton)
+    [void]$form.ShowDialog()
 }
 
 function Complete-Uninstall {
@@ -126,8 +256,7 @@ function Complete-Uninstall {
     Save-UninstallReport
 
     if ($NotifyUser) {
-        $message = "{0}`n`nLog: {1}`nReport: {2}" -f $Summary, $script:UninstallLogPath, $script:UninstallReportPath
-        Show-UninstallMessage -message $message -title $Title -icon $Icon
+        Show-UninstallMessage -Summary $Summary -Title $Title -Icon $Icon -LogPath $script:UninstallLogPath -ReportPath $script:UninstallReportPath
     }
 
     exit $ExitCode
@@ -785,6 +914,6 @@ try {
     $script:UninstallReport.ExitCode = $script:ExitCodes.UnhandledError
     $script:UninstallReport.Summary = $message
     Save-UninstallReport
-    Show-UninstallMessage -message ("{0}`n`nLog: {1}`nReport: {2}" -f $message, $script:UninstallLogPath, $script:UninstallReportPath) -title "Uninstall failed" -icon ([System.Windows.Forms.MessageBoxIcon]::Error)
+    Show-UninstallMessage -Summary $message -Title "Uninstall failed" -Icon ([System.Windows.Forms.MessageBoxIcon]::Error) -LogPath $script:UninstallLogPath -ReportPath $script:UninstallReportPath
     exit $script:ExitCodes.UnhandledError
 }
