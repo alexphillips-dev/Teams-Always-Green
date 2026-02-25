@@ -157,20 +157,33 @@ function Get-CurrentProcessCommandLine {
     }
 }
 
-function Resolve-QuickSetupChannelFromHistory {
+function Resolve-QuickSetupChannelFromCommandText([string]$text) {
+    if ([string]::IsNullOrWhiteSpace($text)) { return "" }
     $owner = [regex]::Escape($script:QuickSetupTrustedOwner)
     $repo = [regex]::Escape($script:QuickSetupTrustedRepo)
-    $pattern = ("raw\.githubusercontent\.com/{0}/{1}/(?:refs/heads/)?(?<channel>main|dev)/Script/QuickSetup/QuickSetup\.ps1" -f $owner, $repo)
+    $patterns = @(
+        @{ Channel = "dev"; Pattern = ("raw\.githubusercontent\.com/{0}/{1}/refs/heads/dev/Script/QuickSetup/QuickSetup\.ps1" -f $owner, $repo) },
+        @{ Channel = "dev"; Pattern = ("raw\.githubusercontent\.com/{0}/{1}/dev/Script/QuickSetup/QuickSetup\.ps1" -f $owner, $repo) },
+        @{ Channel = "main"; Pattern = ("raw\.githubusercontent\.com/{0}/{1}/refs/heads/main/Script/QuickSetup/QuickSetup\.ps1" -f $owner, $repo) },
+        @{ Channel = "main"; Pattern = ("raw\.githubusercontent\.com/{0}/{1}/main/Script/QuickSetup/QuickSetup\.ps1" -f $owner, $repo) }
+    )
+    foreach ($entry in $patterns) {
+        if ($text -match [string]$entry.Pattern) {
+            return [string]$entry.Channel
+        }
+    }
+    return ""
+}
+
+function Resolve-QuickSetupChannelFromHistory {
     try {
         $entries = @(Get-History -Count 25 -ErrorAction Stop | Sort-Object Id -Descending)
         foreach ($entry in $entries) {
             $line = [string]$entry.CommandLine
             if ([string]::IsNullOrWhiteSpace($line)) { continue }
-            if ($line -match $pattern) {
-                $candidate = [string]$Matches["channel"]
-                if ($candidate -in $script:QuickSetupAllowedChannels) {
-                    return $candidate
-                }
+            $candidate = Resolve-QuickSetupChannelFromCommandText -text $line
+            if ($candidate -in $script:QuickSetupAllowedChannels) {
+                return [string]$candidate
             }
         }
     } catch {
@@ -225,6 +238,7 @@ function Resolve-QuickSetupChannelFromSelfHash([string]$selfHash) {
 
     try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 } catch { $null = $_ }
 
+    $matches = New-Object System.Collections.Generic.List[string]
     foreach ($candidate in @("main", "dev")) {
         $base = Get-QuickSetupRemoteBase -channel $candidate
         $url = ("{0}/Script/QuickSetup/QuickSetup.ps1?v={1}" -f $base, [Guid]::NewGuid().ToString("N"))
@@ -234,13 +248,16 @@ function Resolve-QuickSetupChannelFromSelfHash([string]$selfHash) {
             $resp = Invoke-WebRequest -Uri $url -UseBasicParsing -ErrorAction Stop
             $remoteHash = Get-QuickSetupTextHash -text ([string]$resp.Content)
             if (-not [string]::IsNullOrWhiteSpace($remoteHash) -and ($remoteHash -eq $selfHash)) {
-                return [string]$candidate
+                $matches.Add([string]$candidate)
             }
         } catch {
             $null = $_
         }
     }
 
+    if ($matches.Count -eq 1) {
+        return [string]$matches[0]
+    }
     return ""
 }
 
@@ -255,9 +272,10 @@ function Resolve-QuickSetupChannel {
         }
     }
 
-    $historyChannel = Resolve-QuickSetupChannelFromHistory
-    if (-not [string]::IsNullOrWhiteSpace($historyChannel) -and ($historyChannel -in $allowed)) {
-        return [pscustomobject]@{ Channel = [string]$historyChannel; Source = "session-history" }
+    $cmdLine = Get-CurrentProcessCommandLine
+    $processChannel = Resolve-QuickSetupChannelFromCommandText -text $cmdLine
+    if (-not [string]::IsNullOrWhiteSpace($processChannel) -and ($processChannel -in $allowed)) {
+        return [pscustomobject]@{ Channel = [string]$processChannel; Source = "process-commandline" }
     }
 
     $selfText = Get-QuickSetupSelfText
@@ -267,21 +285,9 @@ function Resolve-QuickSetupChannel {
         return [pscustomobject]@{ Channel = [string]$hashMatchedChannel; Source = "self-hash-match" }
     }
 
-    $owner = [regex]::Escape($script:QuickSetupTrustedOwner)
-    $repo = [regex]::Escape($script:QuickSetupTrustedRepo)
-    $cmdLine = Get-CurrentProcessCommandLine
-    if (-not [string]::IsNullOrWhiteSpace($cmdLine)) {
-        $patterns = @(
-            @{ Channel = "dev"; Pattern = ("raw\.githubusercontent\.com/{0}/{1}/refs/heads/dev/Script/QuickSetup/QuickSetup\.ps1" -f $owner, $repo) },
-            @{ Channel = "dev"; Pattern = ("raw\.githubusercontent\.com/{0}/{1}/dev/Script/QuickSetup/QuickSetup\.ps1" -f $owner, $repo) },
-            @{ Channel = "main"; Pattern = ("raw\.githubusercontent\.com/{0}/{1}/refs/heads/main/Script/QuickSetup/QuickSetup\.ps1" -f $owner, $repo) },
-            @{ Channel = "main"; Pattern = ("raw\.githubusercontent\.com/{0}/{1}/main/Script/QuickSetup/QuickSetup\.ps1" -f $owner, $repo) }
-        )
-        foreach ($entry in $patterns) {
-            if ($cmdLine -match [string]$entry.Pattern) {
-                return [pscustomobject]@{ Channel = [string]$entry.Channel; Source = "process-commandline" }
-            }
-        }
+    $historyChannel = Resolve-QuickSetupChannelFromHistory
+    if (-not [string]::IsNullOrWhiteSpace($historyChannel) -and ($historyChannel -in $allowed)) {
+        return [pscustomobject]@{ Channel = [string]$historyChannel; Source = "session-history" }
     }
 
     $sourceRoot = Get-QuickSetupSourceRoot

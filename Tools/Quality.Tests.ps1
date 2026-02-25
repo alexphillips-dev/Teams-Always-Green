@@ -315,6 +315,7 @@ Describe "Quality: QuickSetup Wizard Flow" {
 
     It "auto-detects installer channel and warns when using dev channel" {
         $script:quickSetupText | Should -Match 'function\s+Resolve-QuickSetupChannel'
+        $script:quickSetupText | Should -Match 'function\s+Resolve-QuickSetupChannelFromCommandText'
         $script:quickSetupText | Should -Match 'function\s+Resolve-QuickSetupChannelFromHistory'
         $script:quickSetupText | Should -Match 'function\s+Resolve-QuickSetupChannelFromSelfHash'
         $script:quickSetupText | Should -Match 'function\s+Get-QuickSetupSelfText'
@@ -329,9 +330,15 @@ Describe "Quality: QuickSetup Wizard Flow" {
         $script:quickSetupText | Should -Match 'Channel:\s*\{0\}'
 
         $selfHashIndex = $script:quickSetupText.IndexOf('self-hash-match')
+        $processChannelIndex = $script:quickSetupText.IndexOf('process-commandline')
+        $historyChannelIndex = $script:quickSetupText.IndexOf('session-history')
         $localBranchIndex = $script:quickSetupText.IndexOf('local-git-branch')
         $selfHashIndex | Should -BeGreaterThan -1
+        $processChannelIndex | Should -BeGreaterThan -1
+        $historyChannelIndex | Should -BeGreaterThan -1
         $localBranchIndex | Should -BeGreaterThan -1
+        $processChannelIndex | Should -BeLessThan $selfHashIndex
+        $selfHashIndex | Should -BeLessThan $historyChannelIndex
         $selfHashIndex | Should -BeLessThan $localBranchIndex
     }
 
