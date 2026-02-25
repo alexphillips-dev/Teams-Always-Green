@@ -2,7 +2,7 @@ Option Explicit
 
 Dim shell, fso
 Dim vbsPath, uninstallDir, scriptDir, installRoot, uninstallPs1
-Dim tempDir, launcherLog, psPath, cmd
+Dim tempDir, launcherLog, psPath, cmd, rc
 Dim ts
 
 Set shell = CreateObject("WScript.Shell")
@@ -51,18 +51,23 @@ If Not fso.FileExists(uninstallPs1) Then
 End If
 
 psPath = ResolvePowerShellPath()
-cmd = """" & psPath & """ -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File """ & uninstallPs1 & """ -InstallRoot """ & installRoot & """"
+cmd = """" & psPath & """ -NoProfile -ExecutionPolicy Bypass -WindowStyle Normal -File """ & uninstallPs1 & """ -InstallRoot """ & installRoot & """"
 
-WriteLog "Launcher started."
+WriteLog "Launcher started. Version=2"
 WriteLog "PowerShell path: " & psPath
 WriteLog "Install root: " & installRoot
 WriteLog "Command: " & cmd
 
 On Error Resume Next
-shell.Run cmd, 0, False
+rc = shell.Run(cmd, 1, True)
 If Err.Number <> 0 Then
     WriteLog "Launcher failed: " & Err.Description
     MsgBox "Unable to start uninstall." & vbCrLf & vbCrLf & "Log:" & vbCrLf & launcherLog, vbCritical, "Uninstall launcher error"
     WScript.Quit 1
+End If
+WriteLog "Launcher exit code: " & rc
+If rc <> 0 Then
+    MsgBox "Uninstall failed to start (exit code " & rc & ")." & vbCrLf & vbCrLf & "Log:" & vbCrLf & launcherLog, vbCritical, "Uninstall launcher error"
+    WScript.Quit rc
 End If
 On Error GoTo 0
