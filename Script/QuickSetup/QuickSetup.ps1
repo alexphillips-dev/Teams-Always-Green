@@ -255,24 +255,6 @@ function Resolve-QuickSetupChannel {
         }
     }
 
-    $sourceRoot = Get-QuickSetupSourceRoot
-    if (-not [string]::IsNullOrWhiteSpace($sourceRoot) -and (Test-Path -LiteralPath (Join-Path $sourceRoot ".git"))) {
-        try {
-            if (Get-Command git -ErrorAction SilentlyContinue) {
-                $branchName = (& git -C $sourceRoot rev-parse --abbrev-ref HEAD 2>$null | Select-Object -First 1)
-                $candidate = [string]$branchName
-                if (-not [string]::IsNullOrWhiteSpace($candidate)) {
-                    $candidate = $candidate.Trim().ToLowerInvariant()
-                    if ($candidate -in $allowed) {
-                        return [pscustomobject]@{ Channel = $candidate; Source = "local-git-branch" }
-                    }
-                }
-            }
-        } catch {
-            $null = $_
-        }
-    }
-
     $historyChannel = Resolve-QuickSetupChannelFromHistory
     if (-not [string]::IsNullOrWhiteSpace($historyChannel) -and ($historyChannel -in $allowed)) {
         return [pscustomobject]@{ Channel = [string]$historyChannel; Source = "session-history" }
@@ -299,6 +281,24 @@ function Resolve-QuickSetupChannel {
             if ($cmdLine -match [string]$entry.Pattern) {
                 return [pscustomobject]@{ Channel = [string]$entry.Channel; Source = "process-commandline" }
             }
+        }
+    }
+
+    $sourceRoot = Get-QuickSetupSourceRoot
+    if (-not [string]::IsNullOrWhiteSpace($sourceRoot) -and (Test-Path -LiteralPath (Join-Path $sourceRoot ".git"))) {
+        try {
+            if (Get-Command git -ErrorAction SilentlyContinue) {
+                $branchName = (& git -C $sourceRoot rev-parse --abbrev-ref HEAD 2>$null | Select-Object -First 1)
+                $candidate = [string]$branchName
+                if (-not [string]::IsNullOrWhiteSpace($candidate)) {
+                    $candidate = $candidate.Trim().ToLowerInvariant()
+                    if ($candidate -in $allowed) {
+                        return [pscustomobject]@{ Channel = $candidate; Source = "local-git-branch" }
+                    }
+                }
+            }
+        } catch {
+            $null = $_
         }
     }
 

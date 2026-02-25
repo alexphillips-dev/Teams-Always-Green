@@ -326,6 +326,12 @@ Describe "Quality: QuickSetup Wizard Flow" {
         $script:quickSetupText | Should -Match 'Get-QuickSetupRemoteBase\s+-channel\s+\$script:QuickSetupChannel'
         $script:quickSetupText | Should -Match 'Dev channel detected'
         $script:quickSetupText | Should -Match 'Quick setup channel:'
+
+        $selfHashIndex = $script:quickSetupText.IndexOf('self-hash-match')
+        $localBranchIndex = $script:quickSetupText.IndexOf('local-git-branch')
+        $selfHashIndex | Should -BeGreaterThan -1
+        $localBranchIndex | Should -BeGreaterThan -1
+        $selfHashIndex | Should -BeLessThan $localBranchIndex
     }
 
     It "shows clearer step 2 guidance and summary source details" {
