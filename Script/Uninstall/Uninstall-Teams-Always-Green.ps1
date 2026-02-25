@@ -1176,6 +1176,7 @@ try {
 
     $dryRunFromParameter = [bool]$script:IsDryRun
     $ui = New-UninstallProgressUi
+    $wizardDryRunSummary = ""
     while ($true) {
         $effectivePolicy = Get-EffectiveAppDataPolicy -SilentMode:$Silent -RemoveAppDataSwitch:$RemoveAppData -RequestedPolicy $AppDataPolicy
         if ($effectivePolicy -eq "Prompt" -and $Silent) {
@@ -1183,13 +1184,22 @@ try {
         }
         $cycleDryRunFromWizard = $false
 
-        Set-UninstallProgress $ui 5 "Step 1 of 4 - Verify" "Verify uninstall target and options." "Confirm the target path and local data preference."
+        $stepOneMessage = "Verify uninstall target and options."
+        $stepOneMeta = "Confirm the target path and local data preference."
+        if (-not [string]::IsNullOrWhiteSpace($wizardDryRunSummary)) {
+            $stepOneMessage = "Dry run completed successfully."
+            $stepOneMeta = $wizardDryRunSummary
+        }
+        Set-UninstallProgress $ui 5 "Step 1 of 4 - Verify" $stepOneMessage $stepOneMeta
         if ($oneDrivePathInfo.IsOneDriveLike) {
             Add-UninstallDetail $ui ("OneDrive advisory: sync/file-provider locks can delay cleanup. Signals={0}" -f $oneDrivePathInfo.Summary)
         }
 
         if ($ui -and $ui.Form -and -not $ui.Form.IsDisposed) {
             Prepare-UninstallWizardStep1 -ui $ui -resolvedInstallRoot $resolvedInstallRoot -effectivePolicy $effectivePolicy -dryRunChecked ([bool]$script:IsDryRun)
+            if (-not [string]::IsNullOrWhiteSpace($wizardDryRunSummary)) {
+                $ui.OptionsPrompt.Text = "Dry run completed successfully. Review options and click Next to continue."
+            }
             Add-UninstallDetail $ui ("Ready to remove app files from: {0}" -f $resolvedInstallRoot)
             Add-UninstallDetail $ui "Next step will stop running app processes and begin file cleanup."
 
@@ -1197,6 +1207,7 @@ try {
             if ($choice -eq "Cancel") {
                 Complete-Uninstall -ExitCode $script:ExitCodes.UserCancelled -Result "Cancelled" -Summary "Uninstall cancelled by user." -Ui $ui
             }
+            $wizardDryRunSummary = ""
             if ($effectivePolicy -eq "Prompt") {
                 if ($ui.RemoveDataCheck.Checked) {
                     $effectivePolicy = "Remove"
@@ -1227,7 +1238,8 @@ try {
         if (-not $PSCmdlet.ShouldProcess($resolvedInstallRoot, $operation)) {
             if ($script:IsDryRun) {
                 if ($cycleDryRunFromWizard -and $ui -and $ui.Form -and -not $ui.Form.IsDisposed) {
-                    Add-UninstallDetail $ui ("Dry run complete. Planned uninstall root: {0}. AppData policy: {1}." -f $resolvedInstallRoot, $effectivePolicy)
+                    $wizardDryRunSummary = ("Dry run complete. Planned uninstall root: {0}. AppData policy: {1}." -f $resolvedInstallRoot, $effectivePolicy)
+                    Add-UninstallDetail $ui $wizardDryRunSummary
                     Add-UninstallDetail $ui "Returned to Step 1. Uncheck dry run to perform actual uninstall."
                     $script:IsDryRun = $false
                     $script:UninstallReport.DryRun = $false
@@ -1279,7 +1291,8 @@ try {
 
         if ($script:IsDryRun) {
             if ($cycleDryRunFromWizard -and $ui -and $ui.Form -and -not $ui.Form.IsDisposed) {
-                Add-UninstallDetail $ui ("Dry run complete. Planned uninstall root: {0}. AppData policy: {1}." -f $resolvedInstallRoot, $effectivePolicy)
+                $wizardDryRunSummary = ("Dry run complete. Planned uninstall root: {0}. AppData policy: {1}." -f $resolvedInstallRoot, $effectivePolicy)
+                Add-UninstallDetail $ui $wizardDryRunSummary
                 Add-UninstallDetail $ui "Returned to Step 1. Uncheck dry run to perform actual uninstall."
                 $script:IsDryRun = $false
                 $script:UninstallReport.DryRun = $false
