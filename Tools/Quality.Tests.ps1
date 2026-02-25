@@ -346,22 +346,34 @@ Describe "Quality: Uninstall Flow" {
     It "hardens uninstall with safety checks, process stop, and cleanup worker" {
         $rootPattern = '\$installRoot\s*=\s*Get-InstallRootFromScriptPath'
         $script:uninstallText | Should -Match $rootPattern
+        $script:uninstallText | Should -Match '\[CmdletBinding\(SupportsShouldProcess\s*=\s*\$true'
         $script:uninstallText | Should -Match '\[switch\]\$RemoveAppData'
+        $script:uninstallText | Should -Match '\[ValidateSet\(\"Keep\", \"Remove\", \"Prompt\"\)\]'
+        $script:uninstallText | Should -Match 'function\s+Get-EffectiveAppDataPolicy'
         $script:uninstallText | Should -Match 'function\s+Test-UninstallTargetPath'
+        $script:uninstallText | Should -Match 'function\s+Get-TrackedProcessCandidates'
         $script:uninstallText | Should -Match 'function\s+Stop-AppProcesses'
+        $script:uninstallText | Should -Match 'function\s+Get-PathLockDiagnostics'
         $script:uninstallText | Should -Match 'function\s+Start-RemovalWorker'
         $script:uninstallText | Should -Match 'function\s+Remove-AppShortcuts'
+        $script:uninstallText | Should -Match 'function\s+Ensure-UninstallShortcut'
+        $script:uninstallText | Should -Match '\$script:ExitCodes\s*=\s*@\{'
         $script:uninstallText | Should -Match 'Install signature files were not found'
         $script:uninstallText | Should -Match 'Cleanup worker started\.'
         $script:uninstallText | Should -Match '\[System\.Windows\.Forms\.MessageBox\]::Show\('
     }
 
-    It "stages canonical uninstall assets from local or trusted remote source" {
+    It "verifies uninstall assets against signed manifest trust before shortcuts" {
         $script:quickSetupText | Should -Match 'function\s+Install-UninstallAssets'
-        $script:quickSetupText | Should -Match 'Uninstall assets copied from local repository\.'
+        $script:quickSetupText | Should -Match 'function\s+Test-UninstallAssetTrust'
+        $script:quickSetupText | Should -Match 'function\s+Get-ManifestExpectedHash'
+        $script:quickSetupText | Should -Match 'function\s+Test-AssetHashMatchesManifest'
+        $script:quickSetupText | Should -Match 'Get-AuthenticodeSignature'
         $script:quickSetupText | Should -Match '\$script:QuickSetupRawBase/Script/Uninstall/Uninstall-Teams-Always-Green\.ps1'
         $script:quickSetupText | Should -Match 'Blocked untrusted uninstall asset URL'
-        $script:quickSetupText | Should -Match 'Install-UninstallAssets -installPath \$installPath'
+        $script:quickSetupText | Should -Match 'Install-UninstallAssets -installPath \$installPath -manifest \$manifest'
+        $script:quickSetupText | Should -Match 'Finalize-Install -installPath \$state.InstallPath.*-manifest \$state.Manifest'
+        $script:quickSetupText | Should -Match 'Path = \"Script\\Uninstall\\Uninstall-Teams-Always-Green\.ps1\"'
         $script:quickSetupText | Should -Not -Match '\$uninstallScript = @'''
     }
 }

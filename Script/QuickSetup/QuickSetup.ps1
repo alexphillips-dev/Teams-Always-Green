@@ -394,6 +394,91 @@ function Test-QuickSetupManifestSignature {
     }
 }
 
+function Get-ManifestExpectedHash([object]$manifest, [string]$relativePath) {
+    if (-not $manifest -or -not $manifest.files -or [string]::IsNullOrWhiteSpace($relativePath)) { return $null }
+    $manifestKey = $relativePath.Replace("\", "/")
+    if ($manifest.files.PSObject.Properties.Name -contains $manifestKey) {
+        return [string]$manifest.files.$manifestKey
+    }
+    return $null
+}
+
+function Test-AssetHashMatchesManifest([object]$manifest, [string]$relativePath, [string]$path) {
+    if ([string]::IsNullOrWhiteSpace($path) -or -not (Test-Path -LiteralPath $path -PathType Leaf)) {
+        return [pscustomobject]@{ IsValid = $false; Reason = "Asset file is missing."; Actual = ""; Expected = "" }
+    }
+
+    $expected = Get-ManifestExpectedHash -manifest $manifest -relativePath $relativePath
+    if ([string]::IsNullOrWhiteSpace($expected)) {
+        return [pscustomobject]@{ IsValid = $false; Reason = "Manifest expected hash is missing."; Actual = ""; Expected = "" }
+    }
+
+    $actual = Get-FileHashHex $path
+    if (-not $actual -or ($actual.ToLowerInvariant() -ne [string]$expected.ToLowerInvariant())) {
+        $matched = $false
+        if (Is-TextFile $relativePath) {
+            $lineEnding = if ($manifest -and $manifest.normalizedLineEndings) { [string]$manifest.normalizedLineEndings } else { "LF" }
+            $normalizedHash = Get-NormalizedBytesHash $path $lineEnding
+            if ($normalizedHash -and ($normalizedHash.ToLowerInvariant() -eq [string]$expected.ToLowerInvariant())) {
+                $actual = $normalizedHash
+                $matched = $true
+            }
+        }
+        if (-not $matched) {
+            return [pscustomobject]@{
+                IsValid = $false
+                Reason = "Asset hash mismatch."
+                Actual = [string]$actual
+                Expected = [string]$expected
+            }
+        }
+    }
+
+    return [pscustomobject]@{
+        IsValid = $true
+        Reason = ""
+        Actual = [string]$actual
+        Expected = [string]$expected
+    }
+}
+
+function Test-UninstallAssetTrust([object]$manifest, [string]$relativePath, [string]$path) {
+    $hashCheck = Test-AssetHashMatchesManifest -manifest $manifest -relativePath $relativePath -path $path
+    if (-not $hashCheck.IsValid) {
+        return [pscustomobject]@{
+            IsValid = $false
+            TrustMode = "None"
+            Reason = ("{0} Expected={1} Actual={2}" -f $hashCheck.Reason, $hashCheck.Expected, $hashCheck.Actual)
+        }
+    }
+
+    try {
+        $sig = Get-AuthenticodeSignature -FilePath $path -ErrorAction Stop
+        if ($sig -and $sig.SignerCertificate) {
+            if ([string]$sig.Status -ne "Valid") {
+                return [pscustomobject]@{
+                    IsValid = $false
+                    TrustMode = "Authenticode"
+                    Reason = ("Authenticode signature is present but invalid: {0}" -f [string]$sig.Status)
+                }
+            }
+            return [pscustomobject]@{
+                IsValid = $true
+                TrustMode = "Manifest+Authenticode"
+                Reason = ""
+            }
+        }
+    } catch {
+        Write-SetupLog ("Authenticode check skipped for {0}: {1}" -f $relativePath, $_.Exception.Message)
+    }
+
+    return [pscustomobject]@{
+        IsValid = $true
+        TrustMode = "ManifestSignature"
+        Reason = ""
+    }
+}
+
 function New-ProgressForm {
     $form = New-Object System.Windows.Forms.Form
     $form.Text = "Teams Always Green - Setup"
@@ -1004,7 +1089,8 @@ $folders = @(
     "Script\Features",
     "Script\I18n",
     "Script\Tray",
-    "Script\UI"
+    "Script\UI",
+    "Script\Uninstall"
 )
 if ($portableMode) {
     $folders += @("Logs", "Settings")
@@ -1053,6 +1139,8 @@ $filesToDownload = @(
     @{ Url = "$rawBase/Script/Tray/Menu.ps1"; Path = "Script\Tray\Menu.ps1" },
     @{ Url = "$rawBase/Script/UI/SettingsDialog.ps1"; Path = "Script\UI\SettingsDialog.ps1" },
     @{ Url = "$rawBase/Script/UI/HistoryDialog.ps1"; Path = "Script\UI\HistoryDialog.ps1" },
+    @{ Url = "$rawBase/Script/Uninstall/Uninstall-Teams-Always-Green.ps1"; Path = "Script\Uninstall\Uninstall-Teams-Always-Green.ps1" },
+    @{ Url = "$rawBase/Script/Uninstall/Uninstall-Teams-Always-Green.vbs"; Path = "Script\Uninstall\Uninstall-Teams-Always-Green.vbs" },
     @{ Url = "$rawBase/VERSION"; Path = "VERSION" },
     @{ Url = "$rawBase/Teams%20Always%20Green.VBS"; Path = "Teams Always Green.VBS" },
     @{ Url = "$rawBase/Debug/Teams%20Always%20Green%20-%20Debug.VBS"; Path = "Debug\Teams Always Green - Debug.VBS" },
@@ -1275,7 +1363,10 @@ function New-VbsShortcut([string]$shortcutPath, [string]$vbsPath, [string]$worki
 }
 
 function Install-UninstallAssets {
-    param([string]$installPath)
+    param(
+        [string]$installPath,
+        [object]$manifest
+    )
 
     $uninstallDir = Join-Path $installPath "Script\Uninstall"
     $uninstallScriptPath = Join-Path $uninstallDir "Uninstall-Teams-Always-Green.ps1"
@@ -1284,36 +1375,56 @@ function Install-UninstallAssets {
         New-Item -ItemType Directory -Path $uninstallDir -Force | Out-Null
     }
 
-    $sourceRoot = Get-QuickSetupSourceRoot
-    if ($sourceRoot) {
-        $localScriptPath = Join-Path $sourceRoot "Script\Uninstall\Uninstall-Teams-Always-Green.ps1"
-        $localVbsPath = Join-Path $sourceRoot "Script\Uninstall\Uninstall-Teams-Always-Green.vbs"
-        if ((Test-Path -LiteralPath $localScriptPath -PathType Leaf) -and (Test-Path -LiteralPath $localVbsPath -PathType Leaf)) {
-            Copy-Item -Path $localScriptPath -Destination $uninstallScriptPath -Force
-            Copy-Item -Path $localVbsPath -Destination $uninstallVbsPath -Force
-            Write-SetupLog "Uninstall assets copied from local repository."
-            return @{
-                ScriptPath = $uninstallScriptPath
-                VbsPath = $uninstallVbsPath
-            }
+    $assets = @(
+        @{
+            RelativePath = "Script\Uninstall\Uninstall-Teams-Always-Green.ps1"
+            Url = "$script:QuickSetupRawBase/Script/Uninstall/Uninstall-Teams-Always-Green.ps1"
+            Path = $uninstallScriptPath
+        },
+        @{
+            RelativePath = "Script\Uninstall\Uninstall-Teams-Always-Green.vbs"
+            Url = "$script:QuickSetupRawBase/Script/Uninstall/Uninstall-Teams-Always-Green.vbs"
+            Path = $uninstallVbsPath
         }
+    )
+
+    $stagedFromFallback = $false
+    $sourceRoot = Get-QuickSetupSourceRoot
+    foreach ($asset in $assets) {
+        $targetPath = [string]$asset.Path
+        if (-not (Test-Path -LiteralPath $targetPath -PathType Leaf)) {
+            if ($sourceRoot) {
+                $localPath = Join-Path $sourceRoot ([string]$asset.RelativePath)
+                if (Test-Path -LiteralPath $localPath -PathType Leaf) {
+                    Copy-Item -Path $localPath -Destination $targetPath -Force
+                    $stagedFromFallback = $true
+                    continue
+                }
+            }
+
+            if (-not (Test-QuickSetupTrustedUrl $asset.Url)) {
+                throw ("Blocked untrusted uninstall asset URL: {0}" -f [string]$asset.Url)
+            }
+            $downloadUrl = if ([string]$asset.Url -match "\?") { "$($asset.Url)&v=$script:QuickSetupCacheBuster" } else { "$($asset.Url)?v=$script:QuickSetupCacheBuster" }
+            Invoke-WebRequest -Uri $downloadUrl -OutFile $targetPath -UseBasicParsing
+            $stagedFromFallback = $true
+        }
+        if (-not (Test-Path -LiteralPath $targetPath -PathType Leaf)) {
+            throw ("Failed to stage uninstall asset: {0}" -f $targetPath)
+        }
+
+        $trust = Test-UninstallAssetTrust -manifest $manifest -relativePath ([string]$asset.RelativePath) -path $targetPath
+        if (-not $trust.IsValid) {
+            throw ("Uninstall asset trust check failed for {0}: {1}" -f [string]$asset.RelativePath, [string]$trust.Reason)
+        }
+        Write-SetupLog ("Uninstall asset trusted: {0} ({1})" -f [string]$asset.RelativePath, [string]$trust.TrustMode)
     }
 
-    $assets = @(
-        @{ Url = "$script:QuickSetupRawBase/Script/Uninstall/Uninstall-Teams-Always-Green.ps1"; Path = $uninstallScriptPath },
-        @{ Url = "$script:QuickSetupRawBase/Script/Uninstall/Uninstall-Teams-Always-Green.vbs"; Path = $uninstallVbsPath }
-    )
-    foreach ($asset in $assets) {
-        if (-not (Test-QuickSetupTrustedUrl $asset.Url)) {
-            throw ("Blocked untrusted uninstall asset URL: {0}" -f [string]$asset.Url)
-        }
-        $downloadUrl = if ([string]$asset.Url -match "\?") { "$($asset.Url)&v=$script:QuickSetupCacheBuster" } else { "$($asset.Url)?v=$script:QuickSetupCacheBuster" }
-        Invoke-WebRequest -Uri $downloadUrl -OutFile $asset.Path -UseBasicParsing
-        if (-not (Test-Path -LiteralPath $asset.Path -PathType Leaf)) {
-            throw ("Failed to stage uninstall asset: {0}" -f [string]$asset.Path)
-        }
+    if ($stagedFromFallback) {
+        Write-SetupLog "Uninstall assets staged from fallback source and verified."
+    } else {
+        Write-SetupLog "Uninstall assets were pre-staged and verified."
     }
-    Write-SetupLog "Uninstall assets downloaded from trusted source."
 
     return @{
         ScriptPath = $uninstallScriptPath
@@ -1326,7 +1437,8 @@ function Finalize-Install {
         [string]$installPath,
         [string]$targetScript,
         [bool]$portableMode,
-        [bool]$enableStartup
+        [bool]$enableStartup,
+        [object]$manifest
     )
 
     $programsDir = [Environment]::GetFolderPath("Programs")
@@ -1346,7 +1458,7 @@ function Finalize-Install {
 
     $uninstallVbsPath = $null
     try {
-        $uninstallAssets = Install-UninstallAssets -installPath $installPath
+        $uninstallAssets = Install-UninstallAssets -installPath $installPath -manifest $manifest
         $uninstallVbsPath = [string]$uninstallAssets.VbsPath
     } catch {
         Write-SetupLog ("Failed to stage uninstall assets: {0}" -f $_.Exception.Message)
@@ -1391,6 +1503,7 @@ function Show-SetupWizard {
         PortableMode = $false
         FinalizeCompleted = $false
         AllowSummary = $false
+        Manifest = $null
     }
 
     $form = New-Object System.Windows.Forms.Form
@@ -1894,7 +2007,7 @@ function Show-SetupWizard {
                 if ($dlLabel) { $dlLabel.Text = "Finalizing install..." }
                 [System.Windows.Forms.Application]::DoEvents()
                 try {
-                    $state.ShortcutsCreated = Finalize-Install -installPath $state.InstallPath -targetScript $targetScript -portableMode $state.PortableMode -enableStartup $state.EnableStartup
+                    $state.ShortcutsCreated = Finalize-Install -installPath $state.InstallPath -targetScript $targetScript -portableMode $state.PortableMode -enableStartup $state.EnableStartup -manifest $state.Manifest
                     $state.FinalizeCompleted = $true
                 } catch {
                     Write-SetupLog ("Finalize-Install failed: {0}" -f $_.Exception.Message)
@@ -1963,7 +2076,7 @@ function Show-SetupWizard {
             $targetScript = Join-Path $state.InstallPath "Script\Teams Always Green.ps1"
 
             $folders = @(
-                "Debug","Meta","Meta\Icons","Meta\Keys","Script","Script\Core","Script\Features","Script\I18n","Script\Tray","Script\UI"
+                "Debug","Meta","Meta\Icons","Meta\Keys","Script","Script\Core","Script\Features","Script\I18n","Script\Tray","Script\UI","Script\Uninstall"
             )
             if ($state.PortableMode) {
                 $folders += @("Logs", "Settings")
@@ -2063,6 +2176,7 @@ function Show-SetupWizard {
             } elseif ($manifestSignatureCheck.Status -eq "NoPublicKey") {
                 $state.IntegrityStatus = "Verified (signature present, key not configured)"
             }
+            $state.Manifest = $manifest
 
     $downloadUi = @{
         Form = $form
@@ -2216,6 +2330,8 @@ $script:QuickSetupFiles = @(
     @{ Url = "$script:QuickSetupRawBase/Script/Tray/Menu.ps1"; Path = "Script\Tray\Menu.ps1" },
     @{ Url = "$script:QuickSetupRawBase/Script/UI/SettingsDialog.ps1"; Path = "Script\UI\SettingsDialog.ps1" },
     @{ Url = "$script:QuickSetupRawBase/Script/UI/HistoryDialog.ps1"; Path = "Script\UI\HistoryDialog.ps1" },
+    @{ Url = "$script:QuickSetupRawBase/Script/Uninstall/Uninstall-Teams-Always-Green.ps1"; Path = "Script\Uninstall\Uninstall-Teams-Always-Green.ps1" },
+    @{ Url = "$script:QuickSetupRawBase/Script/Uninstall/Uninstall-Teams-Always-Green.vbs"; Path = "Script\Uninstall\Uninstall-Teams-Always-Green.vbs" },
     @{ Url = "$script:QuickSetupRawBase/VERSION"; Path = "VERSION" },
     @{ Url = "$script:QuickSetupRawBase/Teams%20Always%20Green.VBS"; Path = "Teams Always Green.VBS" },
     @{ Url = "$script:QuickSetupRawBase/Debug/Teams%20Always%20Green%20-%20Debug.VBS"; Path = "Debug\Teams Always Green - Debug.VBS" },
