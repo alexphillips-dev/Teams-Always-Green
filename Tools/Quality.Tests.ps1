@@ -315,7 +315,11 @@ Describe "Quality: QuickSetup Wizard Flow" {
 
     It "auto-detects installer channel and warns when using dev channel" {
         $script:quickSetupText | Should -Match 'function\s+Resolve-QuickSetupChannel'
+        $script:quickSetupText | Should -Match 'function\s+Resolve-QuickSetupChannelFromSelfHash'
+        $script:quickSetupText | Should -Match 'function\s+Get-QuickSetupSelfText'
+        $script:quickSetupText | Should -Match 'function\s+Get-QuickSetupTextHash'
         $script:quickSetupText | Should -Match 'TAG_QUICKSETUP_CHANNEL'
+        $script:quickSetupText | Should -Match 'self-hash-match'
         $script:quickSetupText | Should -Match 'process-commandline'
         $script:quickSetupText | Should -Match 'Get-QuickSetupRemoteBase\s+-channel\s+\$script:QuickSetupChannel'
         $script:quickSetupText | Should -Match 'Dev channel detected'

@@ -22,6 +22,7 @@ $script:QuickSetupAllowedChannels = @("main", "dev")
 $script:QuickSetupChannel = "main"
 $script:QuickSetupChannelSource = "default"
 $script:QuickSetupRawBase = ""
+$script:QuickSetupSelfText = ""
 
 function Test-QuickSetupTrustedUrl([string]$url) {
     if ([string]::IsNullOrWhiteSpace($url)) { return $false }
@@ -156,6 +157,71 @@ function Get-CurrentProcessCommandLine {
     }
 }
 
+function Get-QuickSetupSelfText {
+    if (-not [string]::IsNullOrWhiteSpace($script:QuickSetupSelfText)) {
+        return [string]$script:QuickSetupSelfText
+    }
+
+    $text = ""
+    try {
+        if (-not [string]::IsNullOrWhiteSpace($PSCommandPath) -and (Test-Path -LiteralPath $PSCommandPath -PathType Leaf)) {
+            $text = Get-Content -Path $PSCommandPath -Raw -ErrorAction Stop
+        }
+    } catch {
+        $null = $_
+    }
+
+    if ([string]::IsNullOrWhiteSpace($text)) {
+        try {
+            if ($MyInvocation -and $MyInvocation.MyCommand -and $MyInvocation.MyCommand.ScriptBlock) {
+                $text = [string]$MyInvocation.MyCommand.ScriptBlock.ToString()
+            }
+        } catch {
+            $null = $_
+        }
+    }
+
+    $script:QuickSetupSelfText = [string]$text
+    return [string]$script:QuickSetupSelfText
+}
+
+function Get-QuickSetupTextHash([string]$text) {
+    if ([string]::IsNullOrWhiteSpace($text)) { return "" }
+    $normalized = $text.Replace("`r`n", "`n").Replace("`r", "`n")
+    $bytes = [System.Text.Encoding]::UTF8.GetBytes($normalized)
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $hash = $sha.ComputeHash($bytes)
+        return ([BitConverter]::ToString($hash)).Replace("-", "")
+    } finally {
+        $sha.Dispose()
+    }
+}
+
+function Resolve-QuickSetupChannelFromSelfHash([string]$selfHash) {
+    if ([string]::IsNullOrWhiteSpace($selfHash)) { return "" }
+
+    try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 } catch { $null = $_ }
+
+    foreach ($candidate in @("main", "dev")) {
+        $base = Get-QuickSetupRemoteBase -channel $candidate
+        $url = ("{0}/Script/QuickSetup/QuickSetup.ps1?v={1}" -f $base, [Guid]::NewGuid().ToString("N"))
+        if (-not (Test-QuickSetupTrustedUrl $url)) { continue }
+
+        try {
+            $resp = Invoke-WebRequest -Uri $url -UseBasicParsing -ErrorAction Stop
+            $remoteHash = Get-QuickSetupTextHash -text ([string]$resp.Content)
+            if (-not [string]::IsNullOrWhiteSpace($remoteHash) -and ($remoteHash -eq $selfHash)) {
+                return [string]$candidate
+            }
+        } catch {
+            $null = $_
+        }
+    }
+
+    return ""
+}
+
 function Resolve-QuickSetupChannel {
     $allowed = @($script:QuickSetupAllowedChannels | ForEach-Object { [string]$_ })
 
@@ -183,6 +249,13 @@ function Resolve-QuickSetupChannel {
         } catch {
             $null = $_
         }
+    }
+
+    $selfText = Get-QuickSetupSelfText
+    $selfHash = Get-QuickSetupTextHash -text $selfText
+    $hashMatchedChannel = Resolve-QuickSetupChannelFromSelfHash -selfHash $selfHash
+    if (-not [string]::IsNullOrWhiteSpace($hashMatchedChannel) -and ($hashMatchedChannel -in $allowed)) {
+        return [pscustomobject]@{ Channel = [string]$hashMatchedChannel; Source = "self-hash-match" }
     }
 
     $owner = [regex]::Escape($script:QuickSetupTrustedOwner)
