@@ -249,7 +249,7 @@ function Is-TextFile([string]$relativePath) {
     $ext = [System.IO.Path]::GetExtension($relativePath)
     if ([string]::IsNullOrWhiteSpace($ext)) { return $true }
     $ext = $ext.ToLowerInvariant()
-    return @(".ps1", ".cmd", ".vbs", ".json", ".md", ".txt", ".log", ".csv", ".ini") -contains $ext
+    return @(".ps1", ".cmd", ".vbs", ".json", ".xml", ".md", ".txt", ".log", ".csv", ".ini") -contains $ext
 }
 
 function Get-NormalizedBytesHash([string]$path, [string]$lineEnding) {

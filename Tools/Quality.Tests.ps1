@@ -319,6 +319,10 @@ Describe "Quality: QuickSetup Wizard Flow" {
         $script:quickSetupText | Should -Match 'Download \+ integrity verification complete\. Click Next to finalize install\.'
     }
 
+    It "treats xml files as text for manifest hash normalization" {
+        $script:quickSetupText | Should -Match 'return\s+@\([^\)]*"\.xml"[^\)]*\)\s+-contains\s+\$ext'
+    }
+
     It "unlocks summary step before advancing from step 2" {
         $script:quickSetupText | Should -Match '\$state\.AllowSummary\s*=\s*\$true\s*[\r\n]+\s*&\s*\$showStep\s+3'
     }
