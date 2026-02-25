@@ -753,6 +753,44 @@ function Set-UninstallProgress($ui, [int]$percent, [string]$stepText, [string]$m
     [System.Windows.Forms.Application]::DoEvents()
 }
 
+function Prepare-UninstallWizardStep1 {
+    param(
+        $ui,
+        [string]$resolvedInstallRoot,
+        [string]$effectivePolicy,
+        [bool]$dryRunChecked
+    )
+
+    if (-not $ui -or -not $ui.Form -or $ui.Form.IsDisposed) { return }
+
+    $ui.State.NextClicked = $false
+    $ui.State.BackClicked = $false
+    $ui.State.Cancelled = $false
+    $ui.OptionsPanel.Visible = $true
+    $ui.BackButton.Visible = $true
+    $ui.BackButton.Enabled = $false
+    $ui.NextButton.Visible = $true
+    $ui.NextButton.Enabled = $true
+    $ui.NextButton.Text = "Next"
+    $ui.CancelButton.Visible = $true
+    $ui.CancelButton.Enabled = $true
+    $ui.Form.AcceptButton = $ui.NextButton
+    $ui.Form.CancelButton = $ui.CancelButton
+
+    $ui.OptionsPrompt.Text = "Review uninstall options, then click Next to continue."
+    $ui.InstallPathBox.Text = [string]$resolvedInstallRoot
+    $ui.AppDataPathLabel.Text = ("Local data path: {0}" -f $script:AppDataRoot)
+    $ui.RemoveDataCheck.Checked = ($effectivePolicy -eq "Remove")
+    $ui.RemoveDataCheck.Enabled = ($effectivePolicy -eq "Prompt")
+    $ui.DryRunCheck.Checked = [bool]$dryRunChecked
+    $ui.DryRunCheck.Enabled = $true
+    if ($effectivePolicy -eq "Keep") {
+        $ui.OptionsPrompt.Text = "Local settings and logs will be kept by policy."
+    } elseif ($effectivePolicy -eq "Remove") {
+        $ui.OptionsPrompt.Text = "Local settings and logs will be removed by policy."
+    }
+}
+
 function Add-UninstallDetail($ui, [string]$message) {
     if ([string]::IsNullOrWhiteSpace($message)) { return }
     Write-UninstallLog $message
@@ -1119,120 +1157,130 @@ try {
         Write-UninstallLog "Console window hidden for interactive uninstall."
     }
 
-    $effectivePolicy = Get-EffectiveAppDataPolicy -SilentMode:$Silent -RemoveAppDataSwitch:$RemoveAppData -RequestedPolicy $AppDataPolicy
-    if ($effectivePolicy -eq "Prompt" -and $Silent) {
-        $effectivePolicy = "Keep"
-    }
-
+    $dryRunFromParameter = [bool]$script:IsDryRun
     $ui = New-UninstallProgressUi
-    Set-UninstallProgress $ui 5 "Step 1 of 4 - Verify" "Verify uninstall target and options." "Confirm the target path and local data preference."
-    if ($oneDrivePathInfo.IsOneDriveLike) {
-        Add-UninstallDetail $ui ("OneDrive advisory: sync/file-provider locks can delay cleanup. Signals={0}" -f $oneDrivePathInfo.Summary)
-    }
-
-    if ($ui -and $ui.Form -and -not $ui.Form.IsDisposed) {
-        $ui.OptionsPanel.Visible = $true
-        $ui.OptionsPrompt.Text = "Review uninstall options, then click Next to continue."
-        $ui.InstallPathBox.Text = [string]$resolvedInstallRoot
-        $ui.AppDataPathLabel.Text = ("Local data path: {0}" -f $script:AppDataRoot)
-        $ui.RemoveDataCheck.Checked = ($effectivePolicy -eq "Remove")
-        $ui.RemoveDataCheck.Enabled = ($effectivePolicy -eq "Prompt")
-        $ui.DryRunCheck.Checked = [bool]$script:IsDryRun
-        $ui.DryRunCheck.Enabled = $true
-        if ($effectivePolicy -eq "Keep") {
-            $ui.OptionsPrompt.Text = "Local settings and logs will be kept by policy."
-        } elseif ($effectivePolicy -eq "Remove") {
-            $ui.OptionsPrompt.Text = "Local settings and logs will be removed by policy."
+    while ($true) {
+        $effectivePolicy = Get-EffectiveAppDataPolicy -SilentMode:$Silent -RemoveAppDataSwitch:$RemoveAppData -RequestedPolicy $AppDataPolicy
+        if ($effectivePolicy -eq "Prompt" -and $Silent) {
+            $effectivePolicy = "Keep"
         }
-        Add-UninstallDetail $ui ("Ready to remove app files from: {0}" -f $resolvedInstallRoot)
-        Add-UninstallDetail $ui "Next step will stop running app processes and begin file cleanup."
+        $cycleDryRunFromWizard = $false
 
-        $choice = Wait-UninstallWizardAction $ui
-        if ($choice -eq "Cancel") {
-            Complete-Uninstall -ExitCode $script:ExitCodes.UserCancelled -Result "Cancelled" -Summary "Uninstall cancelled by user." -Ui $ui
+        Set-UninstallProgress $ui 5 "Step 1 of 4 - Verify" "Verify uninstall target and options." "Confirm the target path and local data preference."
+        if ($oneDrivePathInfo.IsOneDriveLike) {
+            Add-UninstallDetail $ui ("OneDrive advisory: sync/file-provider locks can delay cleanup. Signals={0}" -f $oneDrivePathInfo.Summary)
         }
-        if ($effectivePolicy -eq "Prompt") {
-            if ($ui.RemoveDataCheck.Checked) {
-                $effectivePolicy = "Remove"
-            } else {
-                $effectivePolicy = "Keep"
+
+        if ($ui -and $ui.Form -and -not $ui.Form.IsDisposed) {
+            Prepare-UninstallWizardStep1 -ui $ui -resolvedInstallRoot $resolvedInstallRoot -effectivePolicy $effectivePolicy -dryRunChecked:[bool]$script:IsDryRun
+            Add-UninstallDetail $ui ("Ready to remove app files from: {0}" -f $resolvedInstallRoot)
+            Add-UninstallDetail $ui "Next step will stop running app processes and begin file cleanup."
+
+            $choice = Wait-UninstallWizardAction $ui
+            if ($choice -eq "Cancel") {
+                Complete-Uninstall -ExitCode $script:ExitCodes.UserCancelled -Result "Cancelled" -Summary "Uninstall cancelled by user." -Ui $ui
             }
-        }
-        if ($ui.DryRunCheck.Checked -and -not $script:IsDryRun) {
-            $script:IsDryRun = $true
-            $script:UninstallReport.DryRun = $true
-            Add-UninstallDetail $ui "Dry run enabled from uninstall wizard. No files will be deleted."
+            if ($effectivePolicy -eq "Prompt") {
+                if ($ui.RemoveDataCheck.Checked) {
+                    $effectivePolicy = "Remove"
+                } else {
+                    $effectivePolicy = "Keep"
+                }
+            }
+            if ($ui.DryRunCheck.Checked -and -not $dryRunFromParameter) {
+                $script:IsDryRun = $true
+                $script:UninstallReport.DryRun = $true
+                $cycleDryRunFromWizard = $true
+                Add-UninstallDetail $ui "Dry run enabled from uninstall wizard. No files will be deleted."
+            } elseif (-not $dryRunFromParameter) {
+                $script:IsDryRun = $false
+                $script:UninstallReport.DryRun = $false
+            }
+
+            $ui.OptionsPanel.Visible = $false
+            $ui.BackButton.Visible = $false
+            $ui.NextButton.Enabled = $false
+            $ui.CancelButton.Enabled = $false
+            $ui.CancelButton.Visible = $false
+            $ui.Form.AcceptButton = $null
+            $ui.Form.CancelButton = $null
         }
 
-        $ui.OptionsPanel.Visible = $false
-        $ui.BackButton.Visible = $false
-        $ui.NextButton.Enabled = $false
-        $ui.CancelButton.Enabled = $false
-        $ui.CancelButton.Visible = $false
-        $ui.Form.AcceptButton = $null
-        $ui.Form.CancelButton = $null
-    }
+        $operation = "Remove app files, shortcuts, and selected local data"
+        if (-not $PSCmdlet.ShouldProcess($resolvedInstallRoot, $operation)) {
+            if ($script:IsDryRun) {
+                if ($cycleDryRunFromWizard -and $ui -and $ui.Form -and -not $ui.Form.IsDisposed) {
+                    Add-UninstallDetail $ui ("Dry run complete. Planned uninstall root: {0}. AppData policy: {1}." -f $resolvedInstallRoot, $effectivePolicy)
+                    Add-UninstallDetail $ui "Returned to Step 1. Uncheck dry run to perform actual uninstall."
+                    $script:IsDryRun = $false
+                    $script:UninstallReport.DryRun = $false
+                    continue
+                }
+                Complete-Uninstall -ExitCode $script:ExitCodes.Success -Result "DryRun" -Summary ("Dry run complete. Planned uninstall root: {0}. AppData policy: {1}." -f $resolvedInstallRoot, $effectivePolicy) -Ui $ui
+            }
+            Complete-Uninstall -ExitCode $script:ExitCodes.UserCancelled -Result "Cancelled" -Summary "Uninstall cancelled by confirmation prompt." -Ui $ui
+        }
 
-    $operation = "Remove app files, shortcuts, and selected local data"
-    if (-not $PSCmdlet.ShouldProcess($resolvedInstallRoot, $operation)) {
+        $removeAppDataRequested = ($effectivePolicy -eq "Remove")
+        $script:UninstallReport.AppDataPolicyEffective = $effectivePolicy
+        $script:UninstallReport.RemoveAppDataResolved = [bool]$removeAppDataRequested
+        Add-UninstallDetail $ui ("AppData policy: {0}" -f $effectivePolicy)
+
+        Set-UninstallProgress $ui 18 "Step 2 of 4 - Cleanup" "Removing shortcuts..." ""
+        $shortcutMap = Get-ShortcutMap
+        $shortcutResult = Remove-AppShortcuts -shortcutMap $shortcutMap -ui $ui
+        $script:UninstallReport.ShortcutsRemoved = @($shortcutResult.Removed)
+        $script:UninstallReport.ShortcutRemoveFailures = @($shortcutResult.Failed)
+
+        Set-UninstallProgress $ui 32 "Step 2 of 4 - Cleanup" "Stopping running processes..." ""
+        $processResult = Stop-AppProcesses -installRoot $resolvedInstallRoot -ui $ui
+        $script:UninstallReport.ProcessCandidates = @($processResult.Candidates)
+        $script:UninstallReport.ProcessesStopped = @($processResult.Stopped)
+        $script:UninstallReport.ProcessStopFailures = @($processResult.Failed)
+
+        Set-UninstallProgress $ui 48 "Step 3 of 4 - Removing files" "Removing app files..." ""
+        $removedInstallRoot = Remove-PathWithRetry -path $resolvedInstallRoot -label "install root" -maxAttempts 18 -ui $ui -basePercent 48
+        $script:UninstallReport.RemovedInstallRoot = [bool]$removedInstallRoot
+
+        if ($removeAppDataRequested) {
+            Set-UninstallProgress $ui 78 "Step 3 of 4 - Removing files" "Removing local settings and logs..." ""
+            $removedAppDataRoot = Remove-PathWithRetry -path $script:AppDataRoot -label "app data" -maxAttempts 12 -ui $ui -basePercent 78
+            $script:UninstallReport.RemovedAppDataRoot = [bool]$removedAppDataRoot
+        } else {
+            $script:UninstallReport.RemovedAppDataRoot = $false
+            Add-UninstallDetail $ui "Local settings/logs retained."
+        }
+
+        $allGood = $removedInstallRoot -and (-not $removeAppDataRequested -or $script:UninstallReport.RemovedAppDataRoot)
+        if (-not $allGood) {
+            $script:UninstallReport.LockDiagnostics = Get-PathLockDiagnostics -installRoot $resolvedInstallRoot
+            Add-UninstallDetail $ui ("Lock diagnostics: {0}" -f $script:UninstallReport.LockDiagnostics)
+        }
+
+        Set-UninstallProgress $ui 100 "Step 4 of 4 - Complete" "Finalizing uninstall..." ""
+        Start-Sleep -Milliseconds 300
+
         if ($script:IsDryRun) {
-            Complete-Uninstall -ExitCode $script:ExitCodes.Success -Result "DryRun" -Summary ("Dry run complete. Planned uninstall root: {0}. AppData policy: {1}." -f $resolvedInstallRoot, $effectivePolicy) -Ui $ui
+            if ($cycleDryRunFromWizard -and $ui -and $ui.Form -and -not $ui.Form.IsDisposed) {
+                Add-UninstallDetail $ui ("Dry run complete. Planned uninstall root: {0}. AppData policy: {1}." -f $resolvedInstallRoot, $effectivePolicy)
+                Add-UninstallDetail $ui "Returned to Step 1. Uncheck dry run to perform actual uninstall."
+                $script:IsDryRun = $false
+                $script:UninstallReport.DryRun = $false
+                continue
+            }
+            Complete-Uninstall -ExitCode $script:ExitCodes.Success -Result "DryRun" -Summary ("Dry run complete. Planned uninstall root: {0}. AppData policy: {1}." -f $resolvedInstallRoot, $effectivePolicy) -NotifyUser:(-not $Silent) -Icon ([System.Windows.Forms.MessageBoxIcon]::Information) -Title "Uninstall dry run complete" -Ui $ui
         }
-        Complete-Uninstall -ExitCode $script:ExitCodes.UserCancelled -Result "Cancelled" -Summary "Uninstall cancelled by confirmation prompt." -Ui $ui
+
+        if ($allGood) {
+            Complete-Uninstall -ExitCode $script:ExitCodes.Success -Result "Completed" -Summary "Uninstall completed successfully." -NotifyUser:(-not $Silent) -Icon ([System.Windows.Forms.MessageBoxIcon]::Information) -Title "Uninstall complete" -Ui $ui
+        }
+
+        $partialSummary = "Uninstall completed with warnings. Some files could not be removed."
+        if ([bool]$script:UninstallReport.OneDrivePathLike -or ([string]$script:UninstallReport.LockDiagnostics -match 'OneDrivePathLike=True')) {
+            $partialSummary += " OneDrive sync or file-provider locks may be preventing removal."
+        }
+        Complete-Uninstall -ExitCode $script:ExitCodes.PartialCleanup -Result "PartialCleanup" -Summary $partialSummary -NotifyUser -Icon ([System.Windows.Forms.MessageBoxIcon]::Warning) -Title "Uninstall completed with warnings" -Ui $ui
     }
-
-    $removeAppDataRequested = ($effectivePolicy -eq "Remove")
-    $script:UninstallReport.AppDataPolicyEffective = $effectivePolicy
-    $script:UninstallReport.RemoveAppDataResolved = [bool]$removeAppDataRequested
-    Add-UninstallDetail $ui ("AppData policy: {0}" -f $effectivePolicy)
-
-    Set-UninstallProgress $ui 18 "Step 2 of 4 - Cleanup" "Removing shortcuts..." ""
-    $shortcutMap = Get-ShortcutMap
-    $shortcutResult = Remove-AppShortcuts -shortcutMap $shortcutMap -ui $ui
-    $script:UninstallReport.ShortcutsRemoved = @($shortcutResult.Removed)
-    $script:UninstallReport.ShortcutRemoveFailures = @($shortcutResult.Failed)
-
-    Set-UninstallProgress $ui 32 "Step 2 of 4 - Cleanup" "Stopping running processes..." ""
-    $processResult = Stop-AppProcesses -installRoot $resolvedInstallRoot -ui $ui
-    $script:UninstallReport.ProcessCandidates = @($processResult.Candidates)
-    $script:UninstallReport.ProcessesStopped = @($processResult.Stopped)
-    $script:UninstallReport.ProcessStopFailures = @($processResult.Failed)
-
-    Set-UninstallProgress $ui 48 "Step 3 of 4 - Removing files" "Removing app files..." ""
-    $removedInstallRoot = Remove-PathWithRetry -path $resolvedInstallRoot -label "install root" -maxAttempts 18 -ui $ui -basePercent 48
-    $script:UninstallReport.RemovedInstallRoot = [bool]$removedInstallRoot
-
-    if ($removeAppDataRequested) {
-        Set-UninstallProgress $ui 78 "Step 3 of 4 - Removing files" "Removing local settings and logs..." ""
-        $removedAppDataRoot = Remove-PathWithRetry -path $script:AppDataRoot -label "app data" -maxAttempts 12 -ui $ui -basePercent 78
-        $script:UninstallReport.RemovedAppDataRoot = [bool]$removedAppDataRoot
-    } else {
-        $script:UninstallReport.RemovedAppDataRoot = $false
-        Add-UninstallDetail $ui "Local settings/logs retained."
-    }
-
-    $allGood = $removedInstallRoot -and (-not $removeAppDataRequested -or $script:UninstallReport.RemovedAppDataRoot)
-    if (-not $allGood) {
-        $script:UninstallReport.LockDiagnostics = Get-PathLockDiagnostics -installRoot $resolvedInstallRoot
-        Add-UninstallDetail $ui ("Lock diagnostics: {0}" -f $script:UninstallReport.LockDiagnostics)
-    }
-
-    Set-UninstallProgress $ui 100 "Step 4 of 4 - Complete" "Finalizing uninstall..." ""
-    Start-Sleep -Milliseconds 300
-
-    if ($script:IsDryRun) {
-        Complete-Uninstall -ExitCode $script:ExitCodes.Success -Result "DryRun" -Summary ("Dry run complete. Planned uninstall root: {0}. AppData policy: {1}." -f $resolvedInstallRoot, $effectivePolicy) -NotifyUser:(-not $Silent) -Icon ([System.Windows.Forms.MessageBoxIcon]::Information) -Title "Uninstall dry run complete" -Ui $ui
-    }
-
-    if ($allGood) {
-        Complete-Uninstall -ExitCode $script:ExitCodes.Success -Result "Completed" -Summary "Uninstall completed successfully." -NotifyUser:(-not $Silent) -Icon ([System.Windows.Forms.MessageBoxIcon]::Information) -Title "Uninstall complete" -Ui $ui
-    }
-
-    $partialSummary = "Uninstall completed with warnings. Some files could not be removed."
-    if ([bool]$script:UninstallReport.OneDrivePathLike -or ([string]$script:UninstallReport.LockDiagnostics -match 'OneDrivePathLike=True')) {
-        $partialSummary += " OneDrive sync or file-provider locks may be preventing removal."
-    }
-    Complete-Uninstall -ExitCode $script:ExitCodes.PartialCleanup -Result "PartialCleanup" -Summary $partialSummary -NotifyUser -Icon ([System.Windows.Forms.MessageBoxIcon]::Warning) -Title "Uninstall completed with warnings" -Ui $ui
 } catch {
     $message = "Unhandled uninstall error: {0}" -f $_.Exception.Message
     if ($ui -and $ui.Form -and -not $ui.Form.IsDisposed) {
