@@ -157,6 +157,28 @@ function Get-CurrentProcessCommandLine {
     }
 }
 
+function Resolve-QuickSetupChannelFromHistory {
+    $owner = [regex]::Escape($script:QuickSetupTrustedOwner)
+    $repo = [regex]::Escape($script:QuickSetupTrustedRepo)
+    $pattern = ("raw\.githubusercontent\.com/{0}/{1}/(?<channel>main|dev)/Script/QuickSetup/QuickSetup\.ps1" -f $owner, $repo)
+    try {
+        $entries = @(Get-History -Count 25 -ErrorAction Stop | Sort-Object Id -Descending)
+        foreach ($entry in $entries) {
+            $line = [string]$entry.CommandLine
+            if ([string]::IsNullOrWhiteSpace($line)) { continue }
+            if ($line -match $pattern) {
+                $candidate = [string]$Matches["channel"]
+                if ($candidate -in $script:QuickSetupAllowedChannels) {
+                    return $candidate
+                }
+            }
+        }
+    } catch {
+        $null = $_
+    }
+    return ""
+}
+
 function Get-QuickSetupSelfText {
     if (-not [string]::IsNullOrWhiteSpace($script:QuickSetupSelfText)) {
         return [string]$script:QuickSetupSelfText
@@ -249,6 +271,11 @@ function Resolve-QuickSetupChannel {
         } catch {
             $null = $_
         }
+    }
+
+    $historyChannel = Resolve-QuickSetupChannelFromHistory
+    if (-not [string]::IsNullOrWhiteSpace($historyChannel) -and ($historyChannel -in $allowed)) {
+        return [pscustomobject]@{ Channel = [string]$historyChannel; Source = "session-history" }
     }
 
     $selfText = Get-QuickSetupSelfText
