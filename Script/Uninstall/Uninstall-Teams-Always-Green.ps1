@@ -19,6 +19,11 @@ Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
+$script:ScriptFilePath = if (-not [string]::IsNullOrWhiteSpace($PSCommandPath)) {
+    [string]$PSCommandPath
+} else {
+    [string]$MyInvocation.MyCommand.Path
+}
 
 $script:ExitCodes = @{
     Success        = 0
@@ -47,7 +52,7 @@ $script:UninstallReportPath = Join-Path $tempRoot ("TeamsAlwaysGreen-Uninstall-{
 
 $script:UninstallReport = [ordered]@{
     StartedAtUtc             = [DateTime]::UtcNow.ToString("o")
-    ScriptPath               = [string]$MyInvocation.MyCommand.Path
+    ScriptPath               = [string]$script:ScriptFilePath
     InstallRoot              = [string]$InstallRoot
     Relaunched               = [bool]$Relaunched
     Silent                   = [bool]$Silent
@@ -63,6 +68,8 @@ $script:UninstallReport = [ordered]@{
     ShortcutRemoveFailures   = @()
     RemovedInstallRoot       = $false
     RemovedAppDataRoot       = $false
+    OneDrivePathLike         = $false
+    OneDriveSignals          = @()
     LockDiagnostics          = ""
     Result                   = "Pending"
     ExitCode                 = -1
@@ -194,6 +201,59 @@ function Test-UninstallTargetPath([string]$path) {
     }
 
     return [pscustomobject]@{ IsSafe = $true; Reason = ""; Path = $resolved }
+}
+
+function Get-OneDrivePathDiagnostics([string]$path) {
+    $resolved = ""
+    if (-not [string]::IsNullOrWhiteSpace($path)) {
+        try {
+            $resolved = [System.IO.Path]::GetFullPath($path)
+        } catch {
+            $resolved = [string]$path
+        }
+    }
+
+    $signals = New-Object System.Collections.Generic.List[string]
+    if (-not [string]::IsNullOrWhiteSpace($resolved)) {
+        foreach ($candidate in @([string]$env:OneDriveCommercial, [string]$env:OneDriveConsumer, [string]$env:OneDrive)) {
+            if ([string]::IsNullOrWhiteSpace($candidate)) { continue }
+            $root = ""
+            try { $root = [System.IO.Path]::GetFullPath($candidate).TrimEnd('\') } catch { $root = [string]$candidate.TrimEnd('\') }
+            if ([string]::IsNullOrWhiteSpace($root)) { continue }
+            if ($resolved.Equals($root, [System.StringComparison]::OrdinalIgnoreCase) -or
+                $resolved.StartsWith(($root + "\"), [System.StringComparison]::OrdinalIgnoreCase)) {
+                $signals.Add(("UnderOneDriveRoot={0}" -f $root))
+            }
+        }
+
+        if ($resolved -match '(?i)[\\/](OneDrive)(\s-\s[^\\/]+)?([\\/]|$)') {
+            $signals.Add("OneDrivePathLike=True")
+        }
+
+        try {
+            $current = $resolved
+            while (-not [string]::IsNullOrWhiteSpace($current) -and (Test-Path -LiteralPath $current)) {
+                $item = Get-Item -LiteralPath $current -Force -ErrorAction Stop
+                if ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) {
+                    $signals.Add(("ReparsePointAt={0}" -f $current))
+                    break
+                }
+                $parent = Split-Path -Path $current -Parent
+                if ([string]::IsNullOrWhiteSpace($parent) -or $parent -eq $current) { break }
+                $current = $parent
+            }
+        } catch {
+            $null = $_
+        }
+    }
+
+    $uniqueSignals = @($signals | Select-Object -Unique)
+    return [pscustomobject]@{
+        Path = $resolved
+        IsOneDriveLike = ($uniqueSignals.Count -gt 0)
+        Signals = $uniqueSignals
+        Summary = if ($uniqueSignals.Count -gt 0) { $uniqueSignals -join "; " } else { "none" }
+    }
 }
 
 function Get-EffectiveAppDataPolicy {
@@ -340,7 +400,7 @@ function Close-UninstallProgress($ui) {
 function Ensure-TempExecution([string]$resolvedInstallRoot) {
     if ($Relaunched) { return }
 
-    $scriptPath = [string]$MyInvocation.MyCommand.Path
+    $scriptPath = [string]$script:ScriptFilePath
     if ([string]::IsNullOrWhiteSpace($scriptPath) -or -not (Test-Path -LiteralPath $scriptPath -PathType Leaf)) {
         Complete-Uninstall -ExitCode $script:ExitCodes.RelaunchFailed -Result "RelaunchFailed" -Summary "Unable to resolve uninstall script path for temp execution." -NotifyUser -Icon ([System.Windows.Forms.MessageBoxIcon]::Error) -Title "Uninstall failed"
     }
@@ -352,25 +412,15 @@ function Ensure-TempExecution([string]$resolvedInstallRoot) {
         Complete-Uninstall -ExitCode $script:ExitCodes.RelaunchFailed -Result "RelaunchFailed" -Summary ("Unable to stage uninstall runner: {0}" -f $_.Exception.Message) -NotifyUser -Icon ([System.Windows.Forms.MessageBoxIcon]::Error) -Title "Uninstall failed"
     }
 
-    $args = New-Object System.Collections.Generic.List[string]
-    $args.Add("-NoProfile")
-    $args.Add("-ExecutionPolicy")
-    $args.Add("RemoteSigned")
-    $args.Add("-File")
-    $args.Add($runnerPath)
-    $args.Add("-Relaunched")
-    $args.Add("-InstallRoot")
-    $args.Add($resolvedInstallRoot)
-    $args.Add("-AppDataPolicy")
-    $args.Add($AppDataPolicy)
-    $args.Add("-Confirm:`$false")
-    if ($Silent) { $args.Add("-Silent") }
-    if ($RemoveAppData) { $args.Add("-RemoveAppData") }
-    if ($script:IsDryRun) { $args.Add("-WhatIf") }
+    $argLine = "-NoProfile -ExecutionPolicy RemoteSigned -File `"{0}`" -Relaunched -InstallRoot `"{1}`" -AppDataPolicy {2}" -f $runnerPath, $resolvedInstallRoot, $AppDataPolicy
+    if ($Silent) { $argLine += " -Silent" }
+    if ($RemoveAppData) { $argLine += " -RemoveAppData" }
+    if ($script:IsDryRun) { $argLine += " -WhatIf" }
 
-    $windowStyle = if ($Silent) { "Hidden" } else { "Normal" }
+    $windowStyle = "Hidden"
     try {
-        Start-Process -FilePath (Get-PowerShellPath) -ArgumentList @($args.ToArray()) -WindowStyle $windowStyle -ErrorAction Stop | Out-Null
+        Write-UninstallLog ("Relaunching uninstall from temp runner: {0}" -f $runnerPath)
+        Start-Process -FilePath (Get-PowerShellPath) -ArgumentList $argLine -WindowStyle $windowStyle -ErrorAction Stop | Out-Null
         exit 0
     } catch {
         Complete-Uninstall -ExitCode $script:ExitCodes.RelaunchFailed -Result "RelaunchFailed" -Summary ("Unable to launch temp uninstall runner: {0}" -f $_.Exception.Message) -NotifyUser -Icon ([System.Windows.Forms.MessageBoxIcon]::Error) -Title "Uninstall failed"
@@ -514,8 +564,20 @@ function Stop-AppProcesses([string]$installRoot, $ui) {
 }
 
 function Get-PathLockDiagnostics([string]$installRoot) {
+    $details = New-Object System.Collections.Generic.List[string]
+    $oneDrive = Get-OneDrivePathDiagnostics -path $installRoot
+    $details.Add(("OneDrivePathLike={0}" -f [bool]$oneDrive.IsOneDriveLike))
+    if ($oneDrive.Signals.Count -gt 0) {
+        foreach ($signal in @($oneDrive.Signals)) {
+            $details.Add(("OneDriveSignal={0}" -f [string]$signal))
+        }
+    }
+
     $candidates = @(Get-TrackedProcessCandidates -installRoot $installRoot)
-    if ($candidates.Count -eq 0) { return "none" }
+    if ($candidates.Count -eq 0) {
+        $details.Add("ProcessLocks=none")
+        return ($details -join " || ")
+    }
 
     $items = New-Object System.Collections.Generic.List[string]
     foreach ($candidate in $candidates) {
@@ -523,7 +585,8 @@ function Get-PathLockDiagnostics([string]$installRoot) {
         if ($cmd.Length -gt 160) { $cmd = $cmd.Substring(0, 160) + "..." }
         $items.Add(("PID={0};Name={1};Cmd={2}" -f $candidate.ProcessId, $candidate.Name, $cmd))
     }
-    return ($items -join " || ")
+    $details.Add(("ProcessLocks={0}" -f ($items -join " || ")))
+    return ($details -join " || ")
 }
 
 function Remove-PathWithRetry([string]$path, [string]$label, [int]$maxAttempts, $ui, [int]$basePercent) {
@@ -567,7 +630,7 @@ function Remove-PathWithRetry([string]$path, [string]$label, [int]$maxAttempts, 
 }
 
 try {
-    $scriptPath = [string]$MyInvocation.MyCommand.Path
+    $scriptPath = [string]$script:ScriptFilePath
     $resolvedInstallRoot = if ([string]::IsNullOrWhiteSpace($InstallRoot)) {
         Get-InstallRootFromScriptPath $scriptPath
     } else {
@@ -577,6 +640,10 @@ try {
     Write-UninstallLog ("Uninstall started. Script={0}" -f $scriptPath)
     Write-UninstallLog ("InstallRoot parameter={0}" -f $resolvedInstallRoot)
     Write-UninstallLog ("Relaunched={0} Silent={1} DryRun={2}" -f $Relaunched, $Silent, $script:IsDryRun)
+    $oneDrivePathInfo = Get-OneDrivePathDiagnostics -path $resolvedInstallRoot
+    $script:UninstallReport.OneDrivePathLike = [bool]$oneDrivePathInfo.IsOneDriveLike
+    $script:UninstallReport.OneDriveSignals = @($oneDrivePathInfo.Signals)
+    Write-UninstallLog ("InstallRoot OneDrive indicators: {0}" -f $oneDrivePathInfo.Summary)
 
     $validation = Test-UninstallTargetPath $resolvedInstallRoot
     if (-not $validation.IsSafe) {
@@ -584,11 +651,17 @@ try {
     }
     $resolvedInstallRoot = [string]$validation.Path
     $script:UninstallReport.InstallRoot = $resolvedInstallRoot
+    $oneDrivePathInfo = Get-OneDrivePathDiagnostics -path $resolvedInstallRoot
+    $script:UninstallReport.OneDrivePathLike = [bool]$oneDrivePathInfo.IsOneDriveLike
+    $script:UninstallReport.OneDriveSignals = @($oneDrivePathInfo.Signals)
 
     Ensure-TempExecution -resolvedInstallRoot $resolvedInstallRoot
 
     $ui = New-UninstallProgressUi
     Set-UninstallProgress $ui 5 "Step 1 of 4 - Verify" "Verifying install path and options..." ("Install path: {0}" -f $resolvedInstallRoot)
+    if ($oneDrivePathInfo.IsOneDriveLike) {
+        Add-UninstallDetail $ui ("OneDrive advisory: sync/file-provider locks can delay cleanup. Signals={0}" -f $oneDrivePathInfo.Summary)
+    }
 
     $operation = "Remove app files, shortcuts, and selected local data"
     if (-not $PSCmdlet.ShouldProcess($resolvedInstallRoot, $operation)) {
@@ -672,7 +745,11 @@ try {
         Complete-Uninstall -ExitCode $script:ExitCodes.Success -Result "Completed" -Summary "Uninstall completed successfully." -NotifyUser:(-not $Silent) -Icon ([System.Windows.Forms.MessageBoxIcon]::Information) -Title "Uninstall complete"
     }
 
-    Complete-Uninstall -ExitCode $script:ExitCodes.PartialCleanup -Result "PartialCleanup" -Summary "Uninstall completed with warnings. Some files could not be removed." -NotifyUser -Icon ([System.Windows.Forms.MessageBoxIcon]::Warning) -Title "Uninstall completed with warnings"
+    $partialSummary = "Uninstall completed with warnings. Some files could not be removed."
+    if ([bool]$script:UninstallReport.OneDrivePathLike -or ([string]$script:UninstallReport.LockDiagnostics -match 'OneDrivePathLike=True')) {
+        $partialSummary += " OneDrive sync or file-provider locks may be preventing removal."
+    }
+    Complete-Uninstall -ExitCode $script:ExitCodes.PartialCleanup -Result "PartialCleanup" -Summary $partialSummary -NotifyUser -Icon ([System.Windows.Forms.MessageBoxIcon]::Warning) -Title "Uninstall completed with warnings"
 } catch {
     $message = "Unhandled uninstall error: {0}" -f $_.Exception.Message
     Write-UninstallLog $message

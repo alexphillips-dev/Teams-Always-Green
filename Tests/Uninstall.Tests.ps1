@@ -7,9 +7,16 @@ Describe "Uninstall integration" {
         $script:pwshPath = Join-Path $env:WINDIR "System32/WindowsPowerShell/v1.0/powershell.exe"
 
         function New-UninstallSandbox {
-            param([bool]$WithMarkers)
+            param(
+                [bool]$WithMarkers,
+                [string]$RootPath = ""
+            )
 
-            $root = Join-Path $env:TEMP ("TAG-Uninstall-IT-" + [Guid]::NewGuid().ToString("N"))
+            $root = if ([string]::IsNullOrWhiteSpace($RootPath)) {
+                Join-Path $env:TEMP ("TAG-Uninstall-IT-" + [Guid]::NewGuid().ToString("N"))
+            } else {
+                [string]$RootPath
+            }
             $uninstallDir = Join-Path $root "Script/Uninstall"
             New-Item -ItemType Directory -Path $uninstallDir -Force | Out-Null
             Copy-Item -Path $script:uninstallSource -Destination (Join-Path $uninstallDir "Uninstall-Teams-Always-Green.ps1") -Force
@@ -31,14 +38,16 @@ Describe "Uninstall integration" {
                 [string]$InstallRoot,
                 [string]$Arguments,
                 [string]$LocalAppDataPath,
-                [string]$RuntimeTempRoot
+                [string]$RuntimeTempRoot,
+                [string]$OneDrivePath = ""
             )
 
             $escapedScript = $ScriptPath.Replace("'", "''")
             $escapedRoot = $InstallRoot.Replace("'", "''")
             $escapedLocal = $LocalAppDataPath.Replace("'", "''")
             $escapedTemp = $RuntimeTempRoot.Replace("'", "''")
-            $command = "`$env:LOCALAPPDATA='{0}'; `$env:TEMP='{1}'; `$env:TMP='{1}'; & '{2}' -Relaunched -InstallRoot '{3}' -Confirm:`$false {4}; exit `$LASTEXITCODE" -f $escapedLocal, $escapedTemp, $escapedScript, $escapedRoot, $Arguments
+            $escapedOneDrive = $OneDrivePath.Replace("'", "''")
+            $command = "`$env:LOCALAPPDATA='{0}'; `$env:TEMP='{1}'; `$env:TMP='{1}'; `$env:OneDrive='{4}'; & '{2}' -Relaunched -InstallRoot '{3}' -Confirm:`$false {5}; exit `$LASTEXITCODE" -f $escapedLocal, $escapedTemp, $escapedScript, $escapedRoot, $escapedOneDrive, $Arguments
             $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($command))
             $proc = Start-Process -FilePath $script:pwshPath -ArgumentList "-NoProfile -ExecutionPolicy RemoteSigned -EncodedCommand $encoded" -PassThru -Wait -WindowStyle Hidden
             return [int]$proc.ExitCode
@@ -144,6 +153,32 @@ Describe "Uninstall integration" {
         $artifacts.LogText | Should -Match "Install signature files were not found"
 
         Remove-Item -Path $root -Recurse -Force -ErrorAction SilentlyContinue
+        Remove-Item -Path $localAppData -Recurse -Force -ErrorAction SilentlyContinue
+        Remove-Item -Path $runTemp -Recurse -Force -ErrorAction SilentlyContinue
+    }
+
+    It "logs OneDrive-like path indicators for diagnostics" {
+        $oneDriveBase = Join-Path $env:TEMP (("One" + "Drive - TAG-Uninstall-IT-") + [Guid]::NewGuid().ToString("N"))
+        $root = Join-Path $oneDriveBase "Teams Always Green"
+        $root = New-UninstallSandbox -WithMarkers $false -RootPath $root
+        $scriptPath = Join-Path $root "Script/Uninstall/Uninstall-Teams-Always-Green.ps1"
+        $localAppData = Join-Path $env:TEMP ("TAG-Uninstall-IT-Local-" + [Guid]::NewGuid().ToString("N"))
+        $runTemp = Join-Path $env:TEMP ("TAG-Uninstall-IT-Run-" + [Guid]::NewGuid().ToString("N"))
+        New-Item -ItemType Directory -Path $localAppData -Force | Out-Null
+        New-Item -ItemType Directory -Path $runTemp -Force | Out-Null
+
+        $exitCode = Invoke-UninstallChild -ScriptPath $scriptPath -InstallRoot $root -Arguments "-Silent" -LocalAppDataPath $localAppData -RuntimeTempRoot $runTemp -OneDrivePath $oneDriveBase
+        $artifacts = Get-UninstallArtifacts -RuntimeTempRoot $runTemp
+
+        $exitCode | Should -Be 10
+        $artifacts.Report | Should -Not -BeNullOrEmpty
+        [bool]$artifacts.Report.OneDrivePathLike | Should -BeTrue
+        @($artifacts.Report.OneDriveSignals).Count | Should -BeGreaterThan 0
+        $artifacts.LogText | Should -Match "InstallRoot OneDrive indicators"
+        $artifacts.LogText | Should -Match "OneDrivePathLike=True"
+
+        Remove-Item -Path $root -Recurse -Force -ErrorAction SilentlyContinue
+        Remove-Item -Path $oneDriveBase -Recurse -Force -ErrorAction SilentlyContinue
         Remove-Item -Path $localAppData -Recurse -Force -ErrorAction SilentlyContinue
         Remove-Item -Path $runTemp -Recurse -Force -ErrorAction SilentlyContinue
     }

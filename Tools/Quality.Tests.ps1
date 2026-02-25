@@ -333,6 +333,14 @@ Describe "Quality: QuickSetup Wizard Flow" {
         $script:quickSetupText | Should -Not -Match 'ExecutionPolicy\s+Bypass'
         (Get-Content -Raw -Path (Join-Path $script:repoRoot "Script/QuickSetup/QuickSetup.cmd")) | Should -Not -Match 'ExecutionPolicy\s+Bypass'
     }
+
+    It "warns when install path appears OneDrive-managed and recommends a local path" {
+        $script:quickSetupText | Should -Match 'function\s+Get-OneDrivePathDiagnostics'
+        $script:quickSetupText | Should -Match 'OneDrive path warning'
+        $script:quickSetupText | Should -Match 'OneDrive install-path advisory'
+        $script:quickSetupText | Should -Match 'OneDrive:\s*Warning'
+        $script:quickSetupText | Should -Match 'LOCALAPPDATA'
+    }
 }
 
 Describe "Quality: Uninstall Flow" {
@@ -358,6 +366,9 @@ Describe "Quality: Uninstall Flow" {
         $script:uninstallText | Should -Match 'function\s+Get-TrackedProcessCandidates'
         $script:uninstallText | Should -Match 'function\s+Stop-AppProcesses'
         $script:uninstallText | Should -Match 'function\s+Get-PathLockDiagnostics'
+        $script:uninstallText | Should -Match 'function\s+Get-OneDrivePathDiagnostics'
+        $script:uninstallText | Should -Match 'InstallRoot OneDrive indicators'
+        $script:uninstallText | Should -Match 'OneDrivePathLike='
         $script:uninstallText | Should -Match 'function\s+Remove-PathWithRetry'
         $script:uninstallText | Should -Match 'function\s+Remove-AppShortcuts'
         $script:uninstallText | Should -Match '\$script:ExitCodes\s*=\s*@\{'
@@ -374,10 +385,22 @@ Describe "Quality: Uninstall Flow" {
         $script:quickSetupText | Should -Match 'Get-AuthenticodeSignature'
         $script:quickSetupText | Should -Match '\$script:QuickSetupRawBase/Script/Uninstall/Uninstall-Teams-Always-Green\.ps1'
         $script:quickSetupText | Should -Match 'Blocked untrusted uninstall asset URL'
+        $script:quickSetupText | Should -Match 'Uninstall assets copied from local repository and verified\.'
+        $script:quickSetupText | Should -Match 'Uninstall assets downloaded from trusted source and verified\.'
         $script:quickSetupText | Should -Match 'Install-UninstallAssets -installPath \$installPath -manifest \$manifest'
         $script:quickSetupText | Should -Match 'Finalize-Install -installPath \$state.InstallPath.*-manifest \$state.Manifest'
         $script:quickSetupText | Should -Match 'Path = \"Script\\Uninstall\\Uninstall-Teams-Always-Green\.ps1\"'
         $script:quickSetupText | Should -Not -Match '\$uninstallScript = @'''
+    }
+}
+
+Describe "Quality: Startup Path Advisories" {
+    It "logs startup OneDrive path advisories for app/data/log roots" {
+        $script:mainText | Should -Match 'function\s+Get-OneDrivePathRisk'
+        $script:mainText | Should -Match 'Startup path advisory: OneDrive-managed path detected'
+        $script:mainText | Should -Match 'Startup path advisory: no OneDrive-managed paths detected for app/data/log roots'
+        $script:mainText | Should -Match 'AppRoot'
+        $script:mainText | Should -Match 'DataRoot'
     }
 }
 

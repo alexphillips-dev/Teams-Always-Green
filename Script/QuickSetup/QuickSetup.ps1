@@ -129,6 +129,63 @@ function Get-QuickSetupLocalIconPath {
     return $null
 }
 
+function Get-RecommendedInstallPath {
+    $base = Join-Path $env:LOCALAPPDATA "Programs"
+    return (Join-Path $base "Teams Always Green")
+}
+
+function Get-OneDrivePathDiagnostics([string]$path) {
+    $resolved = ""
+    if (-not [string]::IsNullOrWhiteSpace($path)) {
+        try {
+            $resolved = [System.IO.Path]::GetFullPath($path)
+        } catch {
+            $resolved = [string]$path
+        }
+    }
+
+    $signals = New-Object System.Collections.Generic.List[string]
+    if (-not [string]::IsNullOrWhiteSpace($resolved)) {
+        foreach ($candidate in @([string]$env:OneDriveCommercial, [string]$env:OneDriveConsumer, [string]$env:OneDrive)) {
+            if ([string]::IsNullOrWhiteSpace($candidate)) { continue }
+            $root = ""
+            try { $root = [System.IO.Path]::GetFullPath($candidate).TrimEnd('\') } catch { $root = [string]$candidate.TrimEnd('\') }
+            if ([string]::IsNullOrWhiteSpace($root)) { continue }
+            if ($resolved.Equals($root, [System.StringComparison]::OrdinalIgnoreCase) -or
+                $resolved.StartsWith(($root + "\"), [System.StringComparison]::OrdinalIgnoreCase)) {
+                $signals.Add(("UnderOneDriveRoot={0}" -f $root))
+            }
+        }
+
+        if ($resolved -match '(?i)[\\/](OneDrive)(\s-\s[^\\/]+)?([\\/]|$)') {
+            $signals.Add("OneDrivePathLike=True")
+        }
+
+        try {
+            $current = $resolved
+            while (-not [string]::IsNullOrWhiteSpace($current) -and (Test-Path -LiteralPath $current)) {
+                $item = Get-Item -LiteralPath $current -Force -ErrorAction Stop
+                if ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) {
+                    $signals.Add(("ReparsePointAt={0}" -f $current))
+                    break
+                }
+                $parent = Split-Path -Path $current -Parent
+                if ([string]::IsNullOrWhiteSpace($parent) -or $parent -eq $current) { break }
+                $current = $parent
+            }
+        } catch { $null = $_ }
+    }
+
+    $uniqueSignals = @($signals | Select-Object -Unique)
+    return [pscustomobject]@{
+        Path = $resolved
+        IsOneDriveManaged = ($uniqueSignals.Count -gt 0)
+        Signals = $uniqueSignals
+        Summary = if ($uniqueSignals.Count -gt 0) { $uniqueSignals -join "; " } else { "none" }
+        RecommendedInstallPath = (Get-RecommendedInstallPath)
+    }
+}
+
 $tempRoot = $env:TEMP
 if ([string]::IsNullOrWhiteSpace($tempRoot)) { $tempRoot = $env:TMP }
 if ([string]::IsNullOrWhiteSpace($tempRoot)) { $tempRoot = [System.IO.Path]::GetTempPath() }
@@ -195,6 +252,16 @@ function Cleanup-SetupTempFiles {
 function Show-SetupError([string]$message) {
     Write-SetupLog "ERROR: $message"
     Show-SetupPrompt -message ($message + "`n`nLog: $logPath") -title "Quick Setup" -buttons ([System.Windows.Forms.MessageBoxButtons]::OK) -icon ([System.Windows.Forms.MessageBoxIcon]::Error) | Out-Null
+}
+
+function Show-SetupInfo {
+    param(
+        [string]$message,
+        [System.Windows.Forms.Form]$owner
+    )
+    if ([string]::IsNullOrWhiteSpace($message)) { return }
+    Write-SetupLog ("INFO: {0}" -f $message)
+    Show-SetupPrompt -message $message -title "Quick Setup" -buttons ([System.Windows.Forms.MessageBoxButtons]::OK) -icon ([System.Windows.Forms.MessageBoxIcon]::Information) -owner $owner | Out-Null
 }
 
 function Show-SetupPrompt {
@@ -1389,25 +1456,30 @@ function Install-UninstallAssets {
     )
 
     $stagedFromFallback = $false
+    $stagedFromLocal = $false
+    $stagedFromRemote = $false
     $sourceRoot = Get-QuickSetupSourceRoot
     foreach ($asset in $assets) {
         $targetPath = [string]$asset.Path
-        if (-not (Test-Path -LiteralPath $targetPath -PathType Leaf)) {
-            if ($sourceRoot) {
-                $localPath = Join-Path $sourceRoot ([string]$asset.RelativePath)
-                if (Test-Path -LiteralPath $localPath -PathType Leaf) {
-                    Copy-Item -Path $localPath -Destination $targetPath -Force
-                    $stagedFromFallback = $true
-                    continue
-                }
+        $localStaged = $false
+        if ($sourceRoot) {
+            $localPath = Join-Path $sourceRoot ([string]$asset.RelativePath)
+            if (Test-Path -LiteralPath $localPath -PathType Leaf) {
+                Copy-Item -Path $localPath -Destination $targetPath -Force
+                $localStaged = $true
+                $stagedFromFallback = $true
+                $stagedFromLocal = $true
             }
+        }
 
+        if (-not $localStaged) {
             if (-not (Test-QuickSetupTrustedUrl $asset.Url)) {
                 throw ("Blocked untrusted uninstall asset URL: {0}" -f [string]$asset.Url)
             }
             $downloadUrl = if ([string]$asset.Url -match "\?") { "$($asset.Url)&v=$script:QuickSetupCacheBuster" } else { "$($asset.Url)?v=$script:QuickSetupCacheBuster" }
             Invoke-WebRequest -Uri $downloadUrl -OutFile $targetPath -UseBasicParsing
             $stagedFromFallback = $true
+            $stagedFromRemote = $true
         }
         if (-not (Test-Path -LiteralPath $targetPath -PathType Leaf)) {
             throw ("Failed to stage uninstall asset: {0}" -f $targetPath)
@@ -1420,7 +1492,11 @@ function Install-UninstallAssets {
         Write-SetupLog ("Uninstall asset trusted: {0} ({1})" -f [string]$asset.RelativePath, [string]$trust.TrustMode)
     }
 
-    if ($stagedFromFallback) {
+    if ($stagedFromRemote) {
+        Write-SetupLog "Uninstall assets downloaded from trusted source and verified."
+    } elseif ($stagedFromLocal) {
+        Write-SetupLog "Uninstall assets copied from local repository and verified."
+    } elseif ($stagedFromFallback) {
         Write-SetupLog "Uninstall assets staged from fallback source and verified."
     } else {
         Write-SetupLog "Uninstall assets were pre-staged and verified."
@@ -1504,6 +1580,9 @@ function Show-SetupWizard {
         FinalizeCompleted = $false
         AllowSummary = $false
         Manifest = $null
+        OneDriveRiskDetected = $false
+        OneDriveRiskSummary = ""
+        OneDriveRecommendedPath = (Get-RecommendedInstallPath)
     }
 
     $form = New-Object System.Windows.Forms.Form
@@ -2017,7 +2096,7 @@ function Show-SetupWizard {
             }
             $sumInstall.Text = $state.InstallPath
             $sumMode.Text = if ($state.PortableMode) { "Portable (no shortcuts)" } else { "Standard" }
-            $sumSource.Text = $state.InstallSource
+            $sumSource.Text = if ($state.OneDriveRiskDetected) { "{0} | OneDrive path advisory" -f $state.InstallSource } else { $state.InstallSource }
             $sumIntegrity.Text = $state.IntegrityStatus
             $sumShortcuts.Text = if ($state.ShortcutsCreated.Count -gt 0) { $state.ShortcutsCreated -join "; " } else { "None" }
             $sumLog.Text = $logPath
@@ -2062,6 +2141,29 @@ function Show-SetupWizard {
             } else {
                 $state.InstallPath = Join-Path $selectedBase $appFolderName
             }
+
+            $oneDriveRisk = Get-OneDrivePathDiagnostics -path $state.InstallPath
+            $state.OneDriveRiskDetected = [bool]$oneDriveRisk.IsOneDriveManaged
+            $state.OneDriveRiskSummary = [string]$oneDriveRisk.Summary
+            $state.OneDriveRecommendedPath = [string]$oneDriveRisk.RecommendedInstallPath
+            if ($state.OneDriveRiskDetected) {
+                Write-SetupLog ("OneDrive install-path advisory: Path={0}; Signals={1}; Recommended={2}" -f $state.InstallPath, $state.OneDriveRiskSummary, $state.OneDriveRecommendedPath)
+                $warningMessage = @(
+                    "The selected install location appears to be OneDrive-managed."
+                    ""
+                    "Selected: $($state.InstallPath)"
+                    "Recommended: $($state.OneDriveRecommendedPath)"
+                    ""
+                    "Sync/file-provider locking can interrupt install, update, or uninstall for business users."
+                    "Continue anyway?"
+                ) -join [Environment]::NewLine
+                $warningResult = Show-SetupPrompt -message $warningMessage -title "OneDrive path warning" -buttons ([System.Windows.Forms.MessageBoxButtons]::YesNo) -icon ([System.Windows.Forms.MessageBoxIcon]::Warning) -owner $form
+                if ($warningResult -ne [System.Windows.Forms.DialogResult]::Yes) {
+                    Show-SetupInfo -message ("Choose a local non-synced folder. Recommended:`n{0}" -f $state.OneDriveRecommendedPath) -owner $form
+                    return
+                }
+            }
+
             if (-not (Test-Path $state.InstallPath)) {
                 New-Item -ItemType Directory -Path $state.InstallPath -Force | Out-Null
             }
@@ -2071,6 +2173,9 @@ function Show-SetupWizard {
             $modeSummary = if ($state.PortableMode) { "Mode: Portable" } else { "Mode: Standard" }
             if ($dlSummary) {
                 $dlSummary.Text = ("Install to: {0} | {1} | {2} | {3}" -f $state.InstallPath, $modeSummary, $shortcutsSummary, $startupSummary)
+                if ($state.OneDriveRiskDetected) {
+                    $dlSummary.Text = ("{0} | OneDrive: Warning" -f $dlSummary.Text)
+                }
             }
             & $showStep 2
             $targetScript = Join-Path $state.InstallPath "Script\Teams Always Green.ps1"

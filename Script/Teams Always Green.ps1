@@ -516,6 +516,52 @@ function Get-PathRelativeToRoot([string]$path, [string]$root) {
     return ""
 }
 
+function Get-OneDrivePathRisk([string]$path) {
+    if ([string]::IsNullOrWhiteSpace($path)) {
+        return [pscustomobject]@{
+            Path = ""
+            IsOneDriveManaged = $false
+            Signals = @()
+            Summary = "none"
+        }
+    }
+
+    $resolved = Get-CanonicalPath $path
+    if ([string]::IsNullOrWhiteSpace($resolved)) { $resolved = [string]$path }
+    $signals = New-Object System.Collections.Generic.List[string]
+
+    foreach ($candidate in @([string]$env:OneDriveCommercial, [string]$env:OneDriveConsumer, [string]$env:OneDrive)) {
+        if ([string]::IsNullOrWhiteSpace($candidate)) { continue }
+        $root = Get-CanonicalPath $candidate
+        if ([string]::IsNullOrWhiteSpace($root)) { $root = [string]$candidate.TrimEnd('\') }
+        if ($resolved.Equals($root, [System.StringComparison]::OrdinalIgnoreCase) -or
+            $resolved.StartsWith(($root + "\"), [System.StringComparison]::OrdinalIgnoreCase)) {
+            $signals.Add(("UnderOneDriveRoot={0}" -f $root))
+        }
+    }
+
+    if ($resolved -match '(?i)[\\/](OneDrive)(\s-\s[^\\/]+)?([\\/]|$)') {
+        $signals.Add("OneDrivePathLike=True")
+    }
+
+    try {
+        if (Test-Path -LiteralPath $resolved) {
+            $item = Get-Item -LiteralPath $resolved -Force -ErrorAction Stop
+            if ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) {
+                $signals.Add(("ReparsePointAt={0}" -f $resolved))
+            }
+        }
+    } catch { Write-IgnoredCatch $_ }
+
+    $uniqueSignals = @($signals | Select-Object -Unique)
+    return [pscustomobject]@{
+        Path = $resolved
+        IsOneDriveManaged = ($uniqueSignals.Count -gt 0)
+        Signals = $uniqueSignals
+        Summary = if ($uniqueSignals.Count -gt 0) { $uniqueSignals -join "; " } else { "none" }
+    }
+}
+
 function Test-TrustedFilePath([string]$path, [string]$root, [string]$tag = "Security", [string]$label = "File", [switch]$RequireExists) {
     if ([string]::IsNullOrWhiteSpace($path)) {
         $script:RuntimeModuleLastError = "Path is empty."
@@ -7371,6 +7417,23 @@ $psVersion = $PSVersionTable.PSVersion
 $osVersion = [Environment]::OSVersion.VersionString
 $pidValue = $PID
 Write-Log "Environment. PID=$pidValue PSVersion=$psVersion OS=$osVersion" "DEBUG" $null "Init"
+$oneDrivePathFindings = New-Object System.Collections.Generic.List[string]
+foreach ($pathCheck in @(
+    @{ Name = "AppRoot"; Path = $script:AppRoot },
+    @{ Name = "DataRoot"; Path = $script:DataRoot },
+    @{ Name = "SettingsDir"; Path = (Split-Path -Parent $settingsPath) },
+    @{ Name = "LogDir"; Path = (Split-Path -Parent $logPath) }
+)) {
+    $risk = Get-OneDrivePathRisk -path ([string]$pathCheck.Path)
+    if ($risk.IsOneDriveManaged) {
+        $oneDrivePathFindings.Add(("{0}={1} [{2}]" -f [string]$pathCheck.Name, [string]$risk.Path, [string]$risk.Summary))
+    }
+}
+if ($oneDrivePathFindings.Count -gt 0) {
+    Write-Log ("Startup path advisory: OneDrive-managed path detected. {0}" -f ($oneDrivePathFindings -join " || ")) "WARN" $null "Startup"
+} else {
+    Write-Log "Startup path advisory: no OneDrive-managed paths detected for app/data/log roots." "DEBUG" $null "Startup"
+}
 
 # --- Startup shortcut management (create/remove) ---
 function Get-StartupShortcutPath {
