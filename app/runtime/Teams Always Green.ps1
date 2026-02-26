@@ -1,21 +1,24 @@
 # Teams Always Green
 # PSScriptAnalyzerSettings -DisableRuleName PSUseApprovedVerbs
-# Main tray app script. Keeps Teams presence active by toggling Scroll Lock.
+# Main runtime tray app. Keeps Teams presence active by toggling Scroll Lock.
 # Includes profiles, schedule/pause controls, hotkeys, Settings/History UI,
-# startup prompts, recovery/self-heal, logging, and restart/exit handling.
+# startup safety prompts, recovery/self-heal, logging, and restart handling.
 #
-# Runtime data root (default): %LocalAppData%\TeamsAlwaysGreen
+# Install layout:
+# - app\runtime\   Main app + modules
+# - app\setup\     QuickSetup installer
+# - app\uninstall\ Uninstall wizard
+# - assets\icons\  Tray/UI icons
+# - security\      Public verification keys
+#
+# Runtime data root (standard install): %LocalAppData%\TeamsAlwaysGreen
 # - Logs\      App/bootstrap/audit logs
 # - Settings\  Settings/state JSON + backups
-# - Meta\      Crash/status markers, cache, and metadata
-# - assets\icons\ Tray/UI icons
-#
-# Launcher/install helpers:
-# - Teams Always Green.VBS
-# - app\setup\QuickSetup.cmd / app\setup\QuickSetup.ps1
+# - Meta\      Crash/status markers and runtime metadata
 #
 # Run mode:
 # - -SettingsOnly opens Settings without starting the tray loop
+# - -RelaunchedFromRestart marks controlled restart launch path
 
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseApprovedVerbs', '', Scope='Function', Target='*', Justification='Legacy function names are intentionally retained for compatibility.')]
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseSingularNouns', '', Scope='Function', Target='*', Justification='Legacy function names are intentionally retained for compatibility.')]

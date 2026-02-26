@@ -16,7 +16,7 @@ Keep your Microsoft Teams status active without babysitting your keyboard. Teams
 - **Smart scheduling:** Work hours, pauses, and quick overrides.
 - **Profiles:** Switch configurations in seconds.
 - **Helpful logging:** Debug detail when you need it.
-- **Language support:** English, Spanish, French, German (auto-detect + manual).
+- **Language support:** English, Spanish, French, German, Italian, Portuguese, Dutch, Polish (auto-detect + manual).
 
 ## Why This Project Exists
 
@@ -43,6 +43,7 @@ $env:TAG_QUICKSETUP_CHANNEL='dev'; irm https://raw.githubusercontent.com/alexphi
 ```
 
 `dev` includes in-progress changes and may be unstable.
+Quick Setup shows an always-visible `Channel: main` or `Channel: dev` label in the wizard header.
 
 1) Download `app/setup/QuickSetup.cmd` from the repo (it always pulls the latest installer).  
 2) Double-click it.  
@@ -83,7 +84,7 @@ Optional: choose **portable mode** to skip shortcuts. Setup logs are saved to `%
 
 1) Create a folder (example: `Documents\Teams Always Green`).  
 2) Copy the entire `app\` folder from the repo into it.  
-3) Copy `Meta\`, `assets\`, `security\`, `Teams Always Green.VBS`, and `VERSION` into the install folder.  
+3) Copy `assets\`, `security\`, `Teams Always Green.VBS`, and `VERSION` into the install folder.  
 4) Run:
 
 ```powershell
@@ -96,6 +97,12 @@ powershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File "app\runtime\Teams
 
 - Right-click the tray icon for Start/Stop, Settings, History, Restart, and more.
 - Use **Settings** for profiles, scheduling, hotkeys, appearance, and logging.
+
+### UI Languages
+
+- Auto-detect from system locale is supported.
+- You can set language manually in **Settings -> General -> Language**.
+- Current built-in options: English, Spanish, French, German, Italian, Portuguese, Dutch, Polish.
 
 ---
 
@@ -251,6 +258,20 @@ Versioning discipline:
 
 **Standard install (recommended):** Use the Start Menu shortcut  
 `Teams Always Green` -> **Uninstall Teams Always Green**
+
+The uninstall runs as a 4-step wizard in one window (verify, uninstall, cleanup, complete).
+
+Options in step 1:
+- **Also remove local settings and logs**
+- **Dry run (preview only, no files are deleted)**
+- **Force close likely locking apps before cleanup (advanced)**
+
+When **Dry run** completes, the wizard returns to step 1 with validation results so you can run the real uninstall.
+
+Uninstall logs and report:
+- Launcher log: `%TEMP%\TeamsAlwaysGreen-UninstallLauncher.log`
+- Session log: `%TEMP%\TeamsAlwaysGreen-Uninstall-*.log`
+- JSON report: `%TEMP%\TeamsAlwaysGreen-Uninstall-*.json`
 
 **Manual/portable uninstall:**
 1) Exit the app from the tray.  
