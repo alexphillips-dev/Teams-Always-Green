@@ -167,18 +167,51 @@ function Get-CurrentProcessCommandLine {
 
 function Resolve-QuickSetupChannelFromCommandText([string]$text) {
     if ([string]::IsNullOrWhiteSpace($text)) { return "" }
-    $owner = [regex]::Escape($script:QuickSetupTrustedOwner)
-    $repo = [regex]::Escape($script:QuickSetupTrustedRepo)
+    $owner = [regex]::Escape([string]$script:QuickSetupTrustedOwner)
+    $repo = [regex]::Escape([string]$script:QuickSetupTrustedRepo)
     $patterns = @(
-        @{ Channel = "dev"; Pattern = ("raw\.githubusercontent\.com/{0}/{1}/refs/heads/dev/Script/QuickSetup/QuickSetup\.ps1" -f $owner, $repo) },
-        @{ Channel = "dev"; Pattern = ("raw\.githubusercontent\.com/{0}/{1}/dev/Script/QuickSetup/QuickSetup\.ps1" -f $owner, $repo) },
-        @{ Channel = "main"; Pattern = ("raw\.githubusercontent\.com/{0}/{1}/refs/heads/main/Script/QuickSetup/QuickSetup\.ps1" -f $owner, $repo) },
-        @{ Channel = "main"; Pattern = ("raw\.githubusercontent\.com/{0}/{1}/main/Script/QuickSetup/QuickSetup\.ps1" -f $owner, $repo) }
+        ("(?i)raw\.githubusercontent\.com/{0}/{1}/(?:refs/heads/)?(?<channel>main|dev)/Script/QuickSetup/QuickSetup\.ps1(?:\?[^'""\s\)\|]*)?" -f $owner, $repo),
+        ("(?i)github\.com/{0}/{1}/(?:raw|blob)/(?:refs/heads/)?(?<channel>main|dev)/Script/QuickSetup/QuickSetup\.ps1(?:\?[^'""\s\)\|]*)?" -f $owner, $repo),
+        '(?i)\bTAG_QUICKSETUP_CHANNEL\s*=\s*["'']?(?<channel>main|dev)\b'
     )
-    foreach ($entry in $patterns) {
-        if ($text -match [string]$entry.Pattern) {
-            return [string]$entry.Channel
+    foreach ($pattern in $patterns) {
+        $match = [regex]::Match($text, [string]$pattern)
+        if ($match.Success) {
+            $candidate = [string]$match.Groups["channel"].Value
+            if (-not [string]::IsNullOrWhiteSpace($candidate)) {
+                $candidate = $candidate.Trim().ToLowerInvariant()
+                if ($candidate -in $script:QuickSetupAllowedChannels) {
+                    return [string]$candidate
+                }
+            }
         }
+    }
+    return ""
+}
+
+function Resolve-QuickSetupChannelFromCallStack {
+    try {
+        $frames = @(Get-PSCallStack -ErrorAction Stop)
+        foreach ($frame in $frames) {
+            if (-not $frame) { continue }
+
+            $line = ""
+            try {
+                if ($frame.InvocationInfo) {
+                    $line = [string]$frame.InvocationInfo.Line
+                }
+            } catch {
+                $line = ""
+            }
+            if ([string]::IsNullOrWhiteSpace($line)) { continue }
+
+            $candidate = Resolve-QuickSetupChannelFromCommandText -text $line
+            if ($candidate -in $script:QuickSetupAllowedChannels) {
+                return [string]$candidate
+            }
+        }
+    } catch {
+        $null = $_
     }
     return ""
 }
@@ -290,16 +323,21 @@ function Resolve-QuickSetupChannel {
         return [pscustomobject]@{ Channel = [string]$processChannel; Source = "process-commandline" }
     }
 
-    $selfText = Get-QuickSetupSelfText
-    $selfHash = Get-QuickSetupTextHash -text $selfText
-    $hashMatchedChannel = Resolve-QuickSetupChannelFromSelfHash -selfHash $selfHash
-    if (-not [string]::IsNullOrWhiteSpace($hashMatchedChannel) -and ($hashMatchedChannel -in $allowed)) {
-        return [pscustomobject]@{ Channel = [string]$hashMatchedChannel; Source = "self-hash-match" }
+    $callStackChannel = Resolve-QuickSetupChannelFromCallStack
+    if (-not [string]::IsNullOrWhiteSpace($callStackChannel) -and ($callStackChannel -in $allowed)) {
+        return [pscustomobject]@{ Channel = [string]$callStackChannel; Source = "callstack-invocation" }
     }
 
     $historyChannel = Resolve-QuickSetupChannelFromHistory
     if (-not [string]::IsNullOrWhiteSpace($historyChannel) -and ($historyChannel -in $allowed)) {
         return [pscustomobject]@{ Channel = [string]$historyChannel; Source = "session-history" }
+    }
+
+    $selfText = Get-QuickSetupSelfText
+    $selfHash = Get-QuickSetupTextHash -text $selfText
+    $hashMatchedChannel = Resolve-QuickSetupChannelFromSelfHash -selfHash $selfHash
+    if (-not [string]::IsNullOrWhiteSpace($hashMatchedChannel) -and ($hashMatchedChannel -in $allowed)) {
+        return [pscustomobject]@{ Channel = [string]$hashMatchedChannel; Source = "self-hash-match" }
     }
 
     $sourceRoot = Get-QuickSetupSourceRoot

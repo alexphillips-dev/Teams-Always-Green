@@ -1233,16 +1233,16 @@ function Stop-KnownLockerProcesses([object[]]$candidates, $ui) {
     }
     foreach ($proc in @($candidates)) {
         if (-not $proc) { continue }
-        $pid = [int]$proc.ProcessId
+        $processId = [int]$proc.ProcessId
         $name = [string]$proc.Name
         if ($script:IsDryRun) {
-            Add-UninstallDetail $ui ("WhatIf: would stop locker PID={0} Name={1}" -f $pid, $name)
+            Add-UninstallDetail $ui ("WhatIf: would stop locker PID={0} Name={1}" -f $processId, $name)
             continue
         }
         $stopped = $false
         foreach ($delay in @(120, 300, 600)) {
             try {
-                Stop-Process -Id $pid -Force -ErrorAction Stop
+                Stop-Process -Id $processId -Force -ErrorAction Stop
                 $stopped = $true
                 break
             } catch {
@@ -1250,11 +1250,11 @@ function Stop-KnownLockerProcesses([object[]]$candidates, $ui) {
             }
         }
         if ($stopped) {
-            $result.Stopped += ("PID={0}|Name={1}" -f $pid, $name)
-            Add-UninstallDetail $ui ("Stopped likely locker PID={0} Name={1}" -f $pid, $name)
+            $result.Stopped += ("PID={0}|Name={1}" -f $processId, $name)
+            Add-UninstallDetail $ui ("Stopped likely locker PID={0} Name={1}" -f $processId, $name)
         } else {
-            $result.Failed += ("PID={0}|Name={1}" -f $pid, $name)
-            Add-UninstallDetail $ui ("Failed to stop likely locker PID={0} Name={1}" -f $pid, $name)
+            $result.Failed += ("PID={0}|Name={1}" -f $processId, $name)
+            Add-UninstallDetail $ui ("Failed to stop likely locker PID={0} Name={1}" -f $processId, $name)
         }
     }
     return [pscustomobject]$result

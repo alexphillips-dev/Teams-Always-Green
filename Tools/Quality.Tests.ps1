@@ -316,12 +316,14 @@ Describe "Quality: QuickSetup Wizard Flow" {
     It "auto-detects installer channel and warns when using dev channel" {
         $script:quickSetupText | Should -Match 'function\s+Resolve-QuickSetupChannel'
         $script:quickSetupText | Should -Match 'function\s+Resolve-QuickSetupChannelFromCommandText'
+        $script:quickSetupText | Should -Match 'function\s+Resolve-QuickSetupChannelFromCallStack'
         $script:quickSetupText | Should -Match 'function\s+Resolve-QuickSetupChannelFromHistory'
         $script:quickSetupText | Should -Match 'function\s+Resolve-QuickSetupChannelFromSelfHash'
         $script:quickSetupText | Should -Match 'function\s+Get-QuickSetupSelfText'
         $script:quickSetupText | Should -Match 'function\s+Get-QuickSetupTextHash'
         $script:quickSetupText | Should -Match 'QuickSetupEntryScriptText'
         $script:quickSetupText | Should -Match 'TAG_QUICKSETUP_CHANNEL'
+        $script:quickSetupText | Should -Match 'callstack-invocation'
         $script:quickSetupText | Should -Match 'session-history'
         $script:quickSetupText | Should -Match 'self-hash-match'
         $script:quickSetupText | Should -Match 'process-commandline'
@@ -333,14 +335,17 @@ Describe "Quality: QuickSetup Wizard Flow" {
 
         $selfHashIndex = $script:quickSetupText.IndexOf('self-hash-match')
         $processChannelIndex = $script:quickSetupText.IndexOf('process-commandline')
+        $callStackChannelIndex = $script:quickSetupText.IndexOf('callstack-invocation')
         $historyChannelIndex = $script:quickSetupText.IndexOf('session-history')
         $localBranchIndex = $script:quickSetupText.IndexOf('local-git-branch')
         $selfHashIndex | Should -BeGreaterThan -1
         $processChannelIndex | Should -BeGreaterThan -1
+        $callStackChannelIndex | Should -BeGreaterThan -1
         $historyChannelIndex | Should -BeGreaterThan -1
         $localBranchIndex | Should -BeGreaterThan -1
-        $processChannelIndex | Should -BeLessThan $selfHashIndex
-        $selfHashIndex | Should -BeLessThan $historyChannelIndex
+        $processChannelIndex | Should -BeLessThan $callStackChannelIndex
+        $callStackChannelIndex | Should -BeLessThan $historyChannelIndex
+        $historyChannelIndex | Should -BeLessThan $selfHashIndex
         $selfHashIndex | Should -BeLessThan $localBranchIndex
     }
 
