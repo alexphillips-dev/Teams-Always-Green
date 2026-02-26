@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability (private)
+    url: https://github.com/alexphillips-dev/Teams-Always-Green/security/advisories/new
+    about: Please report security vulnerabilities privately using GitHub Security Advisories.
+  - name: Documentation and setup guide
+    url: https://github.com/alexphillips-dev/Teams-Always-Green/blob/main/README.md
+    about: Read install, uninstall, and troubleshooting guidance in the README.

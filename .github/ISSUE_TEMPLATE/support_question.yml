@@ -1,0 +1,41 @@
+name: Support question
+description: Ask for help with setup, uninstall, or configuration.
+title: "[Support]: "
+labels:
+  - question
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this form for usage help and troubleshooting requests.
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - QuickSetup
+        - Uninstall
+        - Runtime/tray app
+        - Update flow
+        - Security/settings
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: question
+    attributes:
+      label: Question or problem
+      placeholder: What are you trying to do, and where are you blocked?
+    validations:
+      required: true
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Context
+      description: Include version/channel, command used, and any error message.
+      render: text
+    validations:
+      required: false
