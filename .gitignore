@@ -27,3 +27,8 @@ Thumbs.db
 Meta/*.settings.lastgood.json
 coverage.xml
 secrets/
+
+# Local-only dev helpers (solo workflow)
+.githooks/
+Tools/Fix-EmptyCatchBlocks.ps1
+Tools/Update-QuickSetupManifest.ps1
