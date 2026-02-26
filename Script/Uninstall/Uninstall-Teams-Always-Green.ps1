@@ -699,22 +699,25 @@ function New-UninstallProgressUi {
         }
     })
 
-    $baseHeight = 390
-    $expandedHeight = 480
+    $baseHeight = 410
+    $expandedHeight = 560
     $detailsLink.Add_LinkClicked({
         $detailsList.Visible = -not $detailsList.Visible
         if ($detailsList.Visible) {
             $detailsLink.Text = "Hide details"
             $form.Height = $expandedHeight
-            $backButton.Location = New-Object System.Drawing.Point($backButtonX, 390)
-            $nextButton.Location = New-Object System.Drawing.Point($nextButtonX, 390)
-            $cancelButton.Location = New-Object System.Drawing.Point($cancelButtonX, 390)
         } else {
             $detailsLink.Text = "Show details"
             $form.Height = $baseHeight
-            $backButton.Location = New-Object System.Drawing.Point($backButtonX, 320)
-            $nextButton.Location = New-Object System.Drawing.Point($nextButtonX, 320)
-            $cancelButton.Location = New-Object System.Drawing.Point($cancelButtonX, 320)
+        }
+        $buttonY = [Math]::Max(0, $form.ClientSize.Height - $nextButton.Height - 12)
+        $backButton.Location = New-Object System.Drawing.Point($backButtonX, $buttonY)
+        $nextButton.Location = New-Object System.Drawing.Point($nextButtonX, $buttonY)
+        $cancelButton.Location = New-Object System.Drawing.Point($cancelButtonX, $buttonY)
+        if ($detailsList.Visible) {
+            $detailsTop = $detailsList.Location.Y
+            $maxDetailsHeight = [Math]::Max(60, $buttonY - $detailsTop - 8)
+            $detailsList.Height = $maxDetailsHeight
         }
     }.GetNewClosure())
 
@@ -797,13 +800,24 @@ function Set-UninstallUiLayout($ui, [bool]$showProgress) {
         $ui.OptionsPanel.Location = New-Object System.Drawing.Point(16, $optionsTop)
         $ui.DetailsLink.Location = New-Object System.Drawing.Point($detailsX, $detailsTop)
         $ui.DetailsList.Location = New-Object System.Drawing.Point(16, ($detailsTop + 22))
-        return
+    } else {
+        $ui.Progress.Visible = $false
+        $ui.OptionsPanel.Location = New-Object System.Drawing.Point(16, $optionsTop)
+        $ui.DetailsLink.Location = New-Object System.Drawing.Point($detailsX, $detailsTop)
+        $ui.DetailsList.Location = New-Object System.Drawing.Point(16, ($detailsTop + 22))
     }
 
-    $ui.Progress.Visible = $false
-    $ui.OptionsPanel.Location = New-Object System.Drawing.Point(16, $optionsTop)
-    $ui.DetailsLink.Location = New-Object System.Drawing.Point($detailsX, $detailsTop)
-    $ui.DetailsList.Location = New-Object System.Drawing.Point(16, ($detailsTop + 22))
+    $buttonBottomMargin = 12
+    $buttonY = [Math]::Max(0, $ui.Form.ClientSize.Height - $ui.NextButton.Height - $buttonBottomMargin)
+    $ui.BackButton.Location = New-Object System.Drawing.Point($ui.BackButton.Location.X, $buttonY)
+    $ui.NextButton.Location = New-Object System.Drawing.Point($ui.NextButton.Location.X, $buttonY)
+    $ui.CancelButton.Location = New-Object System.Drawing.Point($ui.CancelButton.Location.X, $buttonY)
+
+    if ($ui.DetailsList.Visible) {
+        $detailsTopDynamic = $ui.DetailsList.Location.Y
+        $availableHeight = [Math]::Max(60, $buttonY - $detailsTopDynamic - 8)
+        $ui.DetailsList.Height = $availableHeight
+    }
 }
 
 function Set-UninstallProgress($ui, [int]$percent, [string]$stepText, [string]$message, [string]$metaText) {
