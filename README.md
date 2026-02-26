@@ -33,13 +33,13 @@ This was not created to avoid work or to encourage misuse. It was created to red
 Stable (`main`):
 
 ```powershell
-$env:TAG_QUICKSETUP_CHANNEL='main'; try { irm "https://raw.githubusercontent.com/alexphillips-dev/Teams-Always-Green/refs/heads/main/Script/QuickSetup/QuickSetup.ps1?ts=$([guid]::NewGuid())" | iex } finally { Remove-Item Env:TAG_QUICKSETUP_CHANNEL -ErrorAction SilentlyContinue }
+$env:TAG_QUICKSETUP_CHANNEL='main'; irm https://raw.githubusercontent.com/alexphillips-dev/Teams-Always-Green/main/Script/QuickSetup/QuickSetup.ps1 | iex
 ```
 
 Testing (`dev`):
 
 ```powershell
-$env:TAG_QUICKSETUP_CHANNEL='dev'; try { irm "https://raw.githubusercontent.com/alexphillips-dev/Teams-Always-Green/refs/heads/dev/Script/QuickSetup/QuickSetup.ps1?ts=$([guid]::NewGuid())" | iex } finally { Remove-Item Env:TAG_QUICKSETUP_CHANNEL -ErrorAction SilentlyContinue }
+$env:TAG_QUICKSETUP_CHANNEL='dev'; irm https://raw.githubusercontent.com/alexphillips-dev/Teams-Always-Green/dev/Script/QuickSetup/QuickSetup.ps1 | iex
 ```
 
 `dev` includes in-progress changes and may be unstable.
