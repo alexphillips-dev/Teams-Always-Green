@@ -126,7 +126,7 @@ if ($warningIssues.Count -gt 0) {
 }
 
 Write-Host "Checking QuickSetup manifest freshness..."
-& $manifestScript -RepoRoot $repoRoot -Check -RequireSignature -ManifestPublicKeyPath "security/public-keys/quicksetup-manifest-public.xml"
+& $manifestScript -RepoRoot $repoRoot -Check -RequireSignature -ManifestPublicKeyPath "security/quicksetup-manifest-public.xml"
 
 Write-Host "Running Pester tests..."
 $pesterPaths = @()

@@ -1120,7 +1120,8 @@ $script:LifetimeToggleHighWaterLoaded = $false
 $script:IntegrityStatus = "Unknown"
 $script:IntegrityIssues = @()
 $script:IntegrityFailed = $false
-$script:UpdatePublicKeyPath = Resolve-AppAssetPath -PrimaryRelativePath "security\\public-keys\\Teams-Always-Green.updatekey.xml" -FallbackRelativePaths @(
+$script:UpdatePublicKeyPath = Resolve-AppAssetPath -PrimaryRelativePath "security\\Teams-Always-Green.updatekey.xml" -FallbackRelativePaths @(
+    "security\\public-keys\\Teams-Always-Green.updatekey.xml"
     "Meta\\Teams-Always-Green.updatekey.xml"
 ) -ReturnPrimaryWhenMissing
 $script:SettingsVersionRetentionCount = 25

@@ -1615,7 +1615,6 @@ $folders = @(
     "assets",
     "assets\icons",
     "security",
-    "security\public-keys",
     "Script",
     "Script\Core",
     "Script\Features",
@@ -1676,8 +1675,8 @@ $filesToDownload = @(
     @{ Url = "$rawBase/VERSION"; Path = "VERSION" },
     @{ Url = "$rawBase/Teams%20Always%20Green.VBS"; Path = "Teams Always Green.VBS" },
     @{ Url = "$rawBase/Debug/Teams%20Always%20Green%20-%20Debug.VBS"; Path = "Debug\Teams Always Green - Debug.VBS" },
-    @{ Url = "$rawBase/security/public-keys/quicksetup-manifest-public.xml"; Path = "security\public-keys\quicksetup-manifest-public.xml" },
-    @{ Url = "$rawBase/security/public-keys/Teams-Always-Green.updatekey.xml"; Path = "security\public-keys\Teams-Always-Green.updatekey.xml" },
+    @{ Url = "$rawBase/security/quicksetup-manifest-public.xml"; Path = "security\quicksetup-manifest-public.xml" },
+    @{ Url = "$rawBase/security/Teams-Always-Green.updatekey.xml"; Path = "security\Teams-Always-Green.updatekey.xml" },
     @{ Url = "$rawBase/assets/icons/Tray_Icon.ico"; Path = "assets\icons\Tray_Icon.ico" },
     @{ Url = "$rawBase/assets/icons/Settings_Icon.ico"; Path = "assets\icons\Settings_Icon.ico" }
 )
@@ -2681,7 +2680,7 @@ function Show-SetupWizard {
             $targetScript = Join-Path $state.InstallPath "Script\Teams Always Green.ps1"
 
             $folders = @(
-                "Debug","Meta","assets","assets\icons","security","security\public-keys","Script","Script\Core","Script\Features","Script\I18n","Script\Tray","Script\UI","Script\Uninstall"
+                "Debug","Meta","assets","assets\icons","security","Script","Script\Core","Script\Features","Script\I18n","Script\Tray","Script\UI","Script\Uninstall"
             )
             if ($state.PortableMode) {
                 $folders += @("Logs", "Settings")
@@ -2954,8 +2953,8 @@ $script:QuickSetupFiles = @(
     @{ Url = "$script:QuickSetupRawBase/VERSION"; Path = "VERSION" },
     @{ Url = "$script:QuickSetupRawBase/Teams%20Always%20Green.VBS"; Path = "Teams Always Green.VBS" },
     @{ Url = "$script:QuickSetupRawBase/Debug/Teams%20Always%20Green%20-%20Debug.VBS"; Path = "Debug\Teams Always Green - Debug.VBS" },
-    @{ Url = "$script:QuickSetupRawBase/security/public-keys/quicksetup-manifest-public.xml"; Path = "security\public-keys\quicksetup-manifest-public.xml" },
-    @{ Url = "$script:QuickSetupRawBase/security/public-keys/Teams-Always-Green.updatekey.xml"; Path = "security\public-keys\Teams-Always-Green.updatekey.xml" },
+    @{ Url = "$script:QuickSetupRawBase/security/quicksetup-manifest-public.xml"; Path = "security\quicksetup-manifest-public.xml" },
+    @{ Url = "$script:QuickSetupRawBase/security/Teams-Always-Green.updatekey.xml"; Path = "security\Teams-Always-Green.updatekey.xml" },
     @{ Url = "$script:QuickSetupRawBase/assets/icons/Tray_Icon.ico"; Path = "assets\icons\Tray_Icon.ico" },
     @{ Url = "$script:QuickSetupRawBase/assets/icons/Settings_Icon.ico"; Path = "assets\icons\Settings_Icon.ico" }
 )

@@ -53,8 +53,8 @@ function Get-AppPaths {
             SettingsIcon         = Join-Path $AppRoot "assets\\icons\\Settings_Icon.ico"
         }
         Security = [ordered]@{
-            PublicKeysDirectory  = Join-Path $AppRoot "security\\public-keys"
-            UpdatePublicKey      = if ($script:UpdatePublicKeyPath) { [string]$script:UpdatePublicKeyPath } else { Join-Path $AppRoot "security\\public-keys\\Teams-Always-Green.updatekey.xml" }
+            PublicKeysDirectory  = Join-Path $AppRoot "security"
+            UpdatePublicKey      = if ($script:UpdatePublicKeyPath) { [string]$script:UpdatePublicKeyPath } else { Join-Path $AppRoot "security\\Teams-Always-Green.updatekey.xml" }
         }
     }
 

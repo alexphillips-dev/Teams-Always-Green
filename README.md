@@ -153,9 +153,8 @@ Teams Always Green\
       Banner.png
       AI_Assisted_Banner.png
   security\
-    public-keys\
-      quicksetup-manifest-public.xml
-      Teams-Always-Green.updatekey.xml
+    quicksetup-manifest-public.xml
+    Teams-Always-Green.updatekey.xml
   CHANGELOG.md
   Debug\
   Meta\

@@ -8,5 +8,5 @@ paths = [
 ]
 regexes = [
   '''"Meta/Teams-Always-Green\.updatekey\.xml"\s*:\s*"[A-Fa-f0-9]{64}"''',
-  '''"security/public-keys/Teams-Always-Green\.updatekey\.xml"\s*:\s*"[A-Fa-f0-9]{64}"'''
+  '''"security/Teams-Always-Green\.updatekey\.xml"\s*:\s*"[A-Fa-f0-9]{64}"'''
 ]
