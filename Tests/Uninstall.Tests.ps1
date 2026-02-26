@@ -100,6 +100,18 @@ Describe "Uninstall integration" {
             }
             return (-not (Test-Path -LiteralPath $Path))
         }
+
+        function Start-LockFileHolder {
+            param(
+                [string]$FilePath,
+                [int]$HoldSeconds = 20
+            )
+
+            $escapedPath = $FilePath.Replace("'", "''")
+            $command = "`$path='{0}'; `$stream=[System.IO.File]::Open(`$path,[System.IO.FileMode]::OpenOrCreate,[System.IO.FileAccess]::ReadWrite,[System.IO.FileShare]::None); try {{ Start-Sleep -Seconds {1} }} finally {{ `$stream.Dispose() }}" -f $escapedPath, $HoldSeconds
+            $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($command))
+            return Start-Process -FilePath $script:pwshPath -ArgumentList "-NoProfile -ExecutionPolicy RemoteSigned -EncodedCommand $encoded" -PassThru -WindowStyle Hidden
+        }
     }
 
     It "supports dry-run mode without deleting files" {
@@ -141,6 +153,9 @@ Describe "Uninstall integration" {
         $exitCode | Should -Be 0
         $artifacts.Report | Should -Not -BeNullOrEmpty
         [string]$artifacts.Report.Result | Should -Be "Completed"
+        [bool]$artifacts.Report.EntryPointPhaseComplete | Should -BeTrue
+        [string]$artifacts.Report.PhaseMarkerPath | Should -Not -BeNullOrEmpty
+        $artifacts.Report.HealthCheck | Should -Not -BeNullOrEmpty
         (Wait-UntilRemoved -Path $root -TimeoutSeconds 15) | Should -BeTrue
         (Wait-UntilRemoved -Path $appDataRoot -TimeoutSeconds 15) | Should -BeTrue
 
@@ -214,6 +229,42 @@ Describe "Uninstall integration" {
         $artifacts.LogText | Should -Not -Match ([Regex]::Escape("Current working directory: " + $root))
         (Wait-UntilRemoved -Path $root -TimeoutSeconds 15) | Should -BeTrue
 
+        Remove-Item -Path $localAppData -Recurse -Force -ErrorAction SilentlyContinue
+        Remove-Item -Path $runTemp -Recurse -Force -ErrorAction SilentlyContinue
+    }
+
+    It "captures residual lock diagnostics on OneDrive-like locked uninstall path" {
+        $oneDriveBase = Join-Path $env:TEMP (("One" + "Drive - TAG-Uninstall-Lock-") + [Guid]::NewGuid().ToString("N"))
+        $root = Join-Path $oneDriveBase "Teams Always Green"
+        $root = New-UninstallSandbox -WithMarkers $true -RootPath $root
+        $scriptPath = Join-Path $root "Script/Uninstall/Uninstall-Teams-Always-Green.ps1"
+        $localAppData = Join-Path $env:TEMP ("TAG-Uninstall-IT-Local-" + [Guid]::NewGuid().ToString("N"))
+        $runTemp = Join-Path $env:TEMP ("TAG-Uninstall-IT-Run-" + [Guid]::NewGuid().ToString("N"))
+        New-Item -ItemType Directory -Path $localAppData -Force | Out-Null
+        New-Item -ItemType Directory -Path $runTemp -Force | Out-Null
+
+        $lockFile = Join-Path $root "Script/Uninstall/lock.tmp"
+        Set-Content -Path $lockFile -Value "lock" -Encoding ASCII
+        $holder = Start-LockFileHolder -FilePath $lockFile -HoldSeconds 25
+        try {
+            $exitCode = Invoke-UninstallChild -ScriptPath $scriptPath -InstallRoot $root -Arguments "-Silent -AppDataPolicy Keep" -LocalAppDataPath $localAppData -RuntimeTempRoot $runTemp -OneDrivePath $oneDriveBase
+            $artifacts = Get-UninstallArtifacts -RuntimeTempRoot $runTemp
+
+            $exitCode | Should -Be 30
+            $artifacts.Report | Should -Not -BeNullOrEmpty
+            [string]$artifacts.Report.Result | Should -Be "PartialCleanup"
+            [bool]$artifacts.Report.OneDrivePathLike | Should -BeTrue
+            [string]$artifacts.Report.ResidualReason | Should -Be "lock"
+            @($artifacts.Report.ResidualPaths).Count | Should -BeGreaterThan 0
+            $artifacts.LogText | Should -Match "Residual reason classification: lock"
+        } finally {
+            if ($holder -and -not $holder.HasExited) {
+                Stop-Process -Id $holder.Id -Force -ErrorAction SilentlyContinue
+            }
+        }
+
+        Remove-Item -Path $root -Recurse -Force -ErrorAction SilentlyContinue
+        Remove-Item -Path $oneDriveBase -Recurse -Force -ErrorAction SilentlyContinue
         Remove-Item -Path $localAppData -Recurse -Force -ErrorAction SilentlyContinue
         Remove-Item -Path $runTemp -Recurse -Force -ErrorAction SilentlyContinue
     }

@@ -28,6 +28,14 @@ public static class TAGNativeConsole {
     public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
 }
 "@
+Add-Type -TypeDefinition @"
+using System;
+using System.Runtime.InteropServices;
+public static class TAGNativeFileOps {
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    public static extern bool MoveFileEx(string existingFileName, string newFileName, int flags);
+}
+"@
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 $script:ScriptFilePath = if (-not [string]::IsNullOrWhiteSpace($PSCommandPath)) {
@@ -48,6 +56,8 @@ $script:ExitCodes = @{
 $script:AppName = "Teams Always Green"
 $script:AppDataRoot = Join-Path $env:LOCALAPPDATA "TeamsAlwaysGreen"
 $script:IsDryRun = [bool]$WhatIfPreference
+$script:MoveFileDelayUntilReboot = 0x4
+$script:DeleteFailureHints = @{}
 
 $tempRoot = if (-not [string]::IsNullOrWhiteSpace($env:TEMP)) {
     $env:TEMP
@@ -75,13 +85,26 @@ $script:UninstallReport = [ordered]@{
     ProcessCandidates        = @()
     ProcessesStopped         = @()
     ProcessStopFailures      = @()
+    KnownLockerCandidates    = @()
+    KnownLockersStopped      = @()
+    KnownLockerStopFailures  = @()
+    ForceCloseKnownLockers   = $false
     ShortcutsRemoved         = @()
     ShortcutRemoveFailures   = @()
+    EntryPointPhaseComplete  = $false
+    PhaseMarkerPath          = ""
     RemovedInstallRoot       = $false
     RemovedAppDataRoot       = $false
+    RenameFallbackUsed       = $false
+    RenameFallbackPath       = ""
+    DeferredCleanupScheduled = $false
+    DeferredCleanupPath      = ""
     OneDrivePathLike         = $false
     OneDriveSignals          = @()
     LockDiagnostics          = ""
+    ResidualPaths            = @()
+    ResidualReason           = ""
+    HealthCheck              = @{}
     Result                   = "Pending"
     ExitCode                 = -1
     Summary                  = ""
@@ -300,24 +323,58 @@ function Show-UninstallCompletionInUi {
     $ui.Meta.Text = [string]$Summary
     $ui.Progress.Value = 100
     $ui.OptionsPanel.Visible = $false
-    $ui.BackButton.Visible = $false
+    $ui.BackButton.Visible = $true
+    $ui.BackButton.Enabled = $true
+    $ui.BackButton.Text = "Copy diagnostics"
     $ui.CancelButton.Visible = $false
     $ui.NextButton.Visible = $true
     $ui.NextButton.Enabled = $true
     $ui.NextButton.Text = "Finish"
     $ui.Form.AcceptButton = $ui.NextButton
-    $ui.Form.CancelButton = $ui.NextButton
+    $ui.Form.CancelButton = $null
 
     Add-UninstallDetail $ui ("Log: {0}" -f [string]$LogPath)
     Add-UninstallDetail $ui ("Report: {0}" -f [string]$ReportPath)
     [System.Windows.Forms.Application]::DoEvents()
 
     while (-not $ui.State.NextClicked -and -not $ui.State.Cancelled -and -not $ui.Form.IsDisposed) {
+        if ($ui.State.BackClicked) {
+            $ui.State.BackClicked = $false
+            try {
+                $diagText = New-UninstallDiagnosticsText -Title $Title -Summary $Summary -LogPath $LogPath -ReportPath $ReportPath
+                [System.Windows.Forms.Clipboard]::SetText($diagText)
+                Add-UninstallDetail $ui "Diagnostics copied to clipboard."
+            } catch {
+                Add-UninstallDetail $ui ("Failed to copy diagnostics: {0}" -f $_.Exception.Message)
+            }
+        }
         [System.Windows.Forms.Application]::DoEvents()
         Start-Sleep -Milliseconds 60
     }
 
     Close-UninstallProgress $ui
+}
+
+function New-UninstallDiagnosticsText {
+    param(
+        [string]$Title,
+        [string]$Summary,
+        [string]$LogPath,
+        [string]$ReportPath
+    )
+
+    $lines = @(
+        ("Title: {0}" -f [string]$Title),
+        ("Summary: {0}" -f [string]$Summary),
+        ("Result: {0}" -f [string]$script:UninstallReport.Result),
+        ("ExitCode: {0}" -f [string]$script:UninstallReport.ExitCode),
+        ("InstallRoot: {0}" -f [string]$script:UninstallReport.InstallRoot),
+        ("Log: {0}" -f [string]$LogPath),
+        ("Report: {0}" -f [string]$ReportPath),
+        ("StartedAtUtc: {0}" -f [string]$script:UninstallReport.StartedAtUtc),
+        ("CompletedAtUtc: {0}" -f [string]$script:UninstallReport.CompletedAtUtc)
+    )
+    return ($lines -join [Environment]::NewLine)
 }
 
 function Get-PowerShellPath {
@@ -512,7 +569,7 @@ function New-UninstallProgressUi {
 
     $optionsPanel = New-Object System.Windows.Forms.Panel
     $optionsPanel.Width = $contentWidth
-    $optionsPanel.Height = 148
+    $optionsPanel.Height = 172
     $optionsPanel.Location = New-Object System.Drawing.Point($contentLeft, 126)
     $optionsPanel.BorderStyle = [System.Windows.Forms.BorderStyle]::FixedSingle
 
@@ -549,13 +606,18 @@ function New-UninstallProgressUi {
     $dryRunCheck.Location = New-Object System.Drawing.Point(10, 92)
     $dryRunCheck.Text = "Dry run (preview only, no files are deleted)"
 
+    $forceCloseLockersCheck = New-Object System.Windows.Forms.CheckBox
+    $forceCloseLockersCheck.AutoSize = $true
+    $forceCloseLockersCheck.Location = New-Object System.Drawing.Point(10, 112)
+    $forceCloseLockersCheck.Text = "Force close likely locking apps before cleanup (advanced)"
+
     $appDataPathLabel = New-Object System.Windows.Forms.Label
     $appDataPathLabel.AutoSize = $false
     $appDataPathLabel.Width = ($contentWidth - 22)
     $appDataPathLabel.Height = 30
     $appDataPathLabel.Font = New-Object System.Drawing.Font("Segoe UI", 8.25, [System.Drawing.FontStyle]::Regular)
     $appDataPathLabel.ForeColor = [System.Drawing.Color]::FromArgb(85, 85, 85)
-    $appDataPathLabel.Location = New-Object System.Drawing.Point(10, 112)
+    $appDataPathLabel.Location = New-Object System.Drawing.Point(10, 136)
     $appDataPathLabel.Text = ""
 
     $optionsPanel.Controls.Add($optionsPrompt)
@@ -563,6 +625,7 @@ function New-UninstallProgressUi {
     $optionsPanel.Controls.Add($installPathBox)
     $optionsPanel.Controls.Add($removeDataCheck)
     $optionsPanel.Controls.Add($dryRunCheck)
+    $optionsPanel.Controls.Add($forceCloseLockersCheck)
     $optionsPanel.Controls.Add($appDataPathLabel)
 
     $detailsLink = New-Object System.Windows.Forms.LinkLabel
@@ -682,6 +745,7 @@ function New-UninstallProgressUi {
         InstallPathBox = $installPathBox
         RemoveDataCheck = $removeDataCheck
         DryRunCheck = $dryRunCheck
+        ForceCloseLockersCheck = $forceCloseLockersCheck
         AppDataPathLabel = $appDataPathLabel
         DetailsList = $detailsList
         DetailsLink = $detailsLink
@@ -760,7 +824,8 @@ function Prepare-UninstallWizardStep1 {
         $ui,
         [string]$resolvedInstallRoot,
         [string]$effectivePolicy,
-        $dryRunChecked
+        $dryRunChecked,
+        [bool]$forceCloseKnownLockersChecked
     )
 
     if (-not $ui -or -not $ui.Form -or $ui.Form.IsDisposed) { return }
@@ -771,11 +836,13 @@ function Prepare-UninstallWizardStep1 {
     $ui.OptionsPanel.Visible = $true
     $ui.BackButton.Visible = $true
     $ui.BackButton.Enabled = $false
+    $ui.BackButton.Text = "Back"
     $ui.NextButton.Visible = $true
     $ui.NextButton.Enabled = $true
     $ui.NextButton.Text = "Next"
     $ui.CancelButton.Visible = $true
     $ui.CancelButton.Enabled = $true
+    $ui.CancelButton.Text = "Cancel"
     $ui.Form.AcceptButton = $ui.NextButton
     $ui.Form.CancelButton = $ui.CancelButton
 
@@ -801,6 +868,10 @@ function Prepare-UninstallWizardStep1 {
     }
     $ui.DryRunCheck.Checked = $dryRunEnabled
     $ui.DryRunCheck.Enabled = $true
+    if ($ui.ForceCloseLockersCheck) {
+        $ui.ForceCloseLockersCheck.Checked = [bool]$forceCloseKnownLockersChecked
+        $ui.ForceCloseLockersCheck.Enabled = $true
+    }
     if ($effectivePolicy -eq "Keep") {
         $ui.OptionsPrompt.Text = "Local settings and logs will be kept by policy."
     } elseif ($effectivePolicy -eq "Remove") {
@@ -1052,6 +1123,217 @@ function Get-PathLockDiagnostics([string]$installRoot) {
     return ($details -join " || ")
 }
 
+function Get-LockReasonCategory([string]$hint) {
+    if ([string]::IsNullOrWhiteSpace($hint)) { return "unknown" }
+    $text = [string]$hint
+    if ($text -match '(?i)being used by another process|cannot access the file') { return "lock" }
+    if ($text -match '(?i)access is denied|unauthorized') { return "acl" }
+    if ($text -match '(?i)path too long|filename or extension is too long') { return "path" }
+    return "unknown"
+}
+
+function Get-ResidualPathSnapshot([string]$path, [int]$maxItems = 40) {
+    $items = New-Object System.Collections.Generic.List[string]
+    if ([string]::IsNullOrWhiteSpace($path) -or -not (Test-Path -LiteralPath $path)) { return @() }
+
+    try {
+        $items.Add([string]$path)
+        $children = @(Get-ChildItem -LiteralPath $path -Recurse -Force -ErrorAction Stop | Select-Object -ExpandProperty FullName)
+        foreach ($child in @($children | Select-Object -First ([Math]::Max(0, $maxItems - 1)))) {
+            $items.Add([string]$child)
+        }
+    } catch {
+        $items.Add(("snapshot-error: {0}" -f $_.Exception.Message))
+    }
+    return @($items)
+}
+
+function Write-UninstallPhaseMarker([string]$installRoot, [string]$policy, [bool]$removeAppData, $ui) {
+    $markerPath = Join-Path $tempRoot ("TeamsAlwaysGreen-Uninstall-Phase1-{0}.json" -f $runId)
+    try {
+        $payload = [ordered]@{
+            Phase                    = "EntryPointsRemoved"
+            TimestampUtc             = [DateTime]::UtcNow.ToString("o")
+            InstallRoot              = [string]$installRoot
+            AppDataPolicyEffective   = [string]$policy
+            RemoveAppDataResolved    = [bool]$removeAppData
+        } | ConvertTo-Json -Depth 4
+        Set-Content -Path $markerPath -Value $payload -Encoding UTF8 -WhatIf:$false -Confirm:$false
+        $script:UninstallReport.EntryPointPhaseComplete = $true
+        $script:UninstallReport.PhaseMarkerPath = $markerPath
+        Add-UninstallDetail $ui ("Phase 1 complete marker written: {0}" -f $markerPath)
+    } catch {
+        Add-UninstallDetail $ui ("Failed to write phase marker: {0}" -f $_.Exception.Message)
+    }
+}
+
+function Get-KnownLockerProcesses([string]$installRoot, [bool]$oneDriveLike) {
+    $names = @("onedrive.exe", "explorer.exe", "code.exe", "devenv.exe", "powershell.exe", "pwsh.exe", "cmd.exe", "windowsterminal.exe")
+    $parentPid = 0
+    try {
+        $selfProc = Get-CimInstance Win32_Process -Filter ("ProcessId={0}" -f $PID) -ErrorAction Stop
+        $parentPid = [int]$selfProc.ParentProcessId
+    } catch {
+        $parentPid = 0
+    }
+
+    $candidates = New-Object System.Collections.Generic.List[object]
+    $installRootLower = [string]$installRoot.ToLowerInvariant()
+    $procFilter = @($names | ForEach-Object { "Name='{0}'" -f $_ }) -join " OR "
+    try {
+        $all = @(Get-CimInstance Win32_Process -Filter $procFilter -ErrorAction Stop)
+    } catch {
+        return @()
+    }
+
+    foreach ($proc in $all) {
+        $procId = [int]$proc.ProcessId
+        if ($procId -eq $PID -or ($parentPid -gt 0 -and $procId -eq $parentPid)) { continue }
+        $name = [string]$proc.Name
+        $cmd = [string]$proc.CommandLine
+        $isMatch = $false
+        $reason = ""
+        if (-not [string]::IsNullOrWhiteSpace($cmd) -and $cmd.ToLowerInvariant().Contains($installRootLower)) {
+            $isMatch = $true
+            $reason = "CommandLineContainsInstallRoot"
+        } elseif ($oneDriveLike -and ($name -ieq "OneDrive.exe" -or $name -ieq "explorer.exe")) {
+            $isMatch = $true
+            $reason = "OneDriveLikePathLocker"
+        }
+        if ($isMatch) {
+            $candidates.Add([pscustomobject]@{
+                ProcessId = $procId
+                Name = $name
+                CommandLine = $cmd
+                Reason = $reason
+            })
+        }
+    }
+    return @($candidates | Sort-Object ProcessId -Unique)
+}
+
+function Stop-KnownLockerProcesses([object[]]$candidates, $ui) {
+    $result = [ordered]@{
+        Stopped = @()
+        Failed  = @()
+    }
+    foreach ($proc in @($candidates)) {
+        if (-not $proc) { continue }
+        $pid = [int]$proc.ProcessId
+        $name = [string]$proc.Name
+        if ($script:IsDryRun) {
+            Add-UninstallDetail $ui ("WhatIf: would stop locker PID={0} Name={1}" -f $pid, $name)
+            continue
+        }
+        $stopped = $false
+        foreach ($delay in @(120, 300, 600)) {
+            try {
+                Stop-Process -Id $pid -Force -ErrorAction Stop
+                $stopped = $true
+                break
+            } catch {
+                Start-Sleep -Milliseconds $delay
+            }
+        }
+        if ($stopped) {
+            $result.Stopped += ("PID={0}|Name={1}" -f $pid, $name)
+            Add-UninstallDetail $ui ("Stopped likely locker PID={0} Name={1}" -f $pid, $name)
+        } else {
+            $result.Failed += ("PID={0}|Name={1}" -f $pid, $name)
+            Add-UninstallDetail $ui ("Failed to stop likely locker PID={0} Name={1}" -f $pid, $name)
+        }
+    }
+    return [pscustomobject]$result
+}
+
+function Try-RenamePathForCleanup([string]$path, $ui) {
+    if ([string]::IsNullOrWhiteSpace($path) -or -not (Test-Path -LiteralPath $path)) { return "" }
+    try {
+        $parent = Split-Path -Path $path -Parent
+        $leaf = Split-Path -Path $path -Leaf
+        $renamedLeaf = "{0}._removing_{1}" -f $leaf, (Get-Date -Format "yyyyMMddHHmmss")
+        $renamedPath = Join-Path $parent $renamedLeaf
+        Rename-Item -LiteralPath $path -NewName $renamedLeaf -ErrorAction Stop
+        Add-UninstallDetail $ui ("Rename fallback succeeded: {0} -> {1}" -f $path, $renamedPath)
+        $script:UninstallReport.RenameFallbackUsed = $true
+        $script:UninstallReport.RenameFallbackPath = $renamedPath
+        return $renamedPath
+    } catch {
+        Add-UninstallDetail $ui ("Rename fallback failed for {0}: {1}" -f $path, $_.Exception.Message)
+        return ""
+    }
+}
+
+function Schedule-PathRemovalAtReboot([string]$path, $ui) {
+    if ([string]::IsNullOrWhiteSpace($path) -or -not (Test-Path -LiteralPath $path)) { return $false }
+    try {
+        $ok = [TAGNativeFileOps]::MoveFileEx([string]$path, $null, [int]$script:MoveFileDelayUntilReboot)
+        if ($ok) {
+            Add-UninstallDetail $ui ("Deferred cleanup scheduled for reboot: {0}" -f $path)
+            $script:UninstallReport.DeferredCleanupScheduled = $true
+            $script:UninstallReport.DeferredCleanupPath = [string]$path
+            return $true
+        }
+        $winErr = [Runtime.InteropServices.Marshal]::GetLastWin32Error()
+        Add-UninstallDetail $ui ("Deferred cleanup scheduling failed for {0} (Win32={1})" -f $path, $winErr)
+    } catch {
+        Add-UninstallDetail $ui ("Deferred cleanup scheduling failed for {0}: {1}" -f $path, $_.Exception.Message)
+    }
+    return $false
+}
+
+function Invoke-UninstallRetryGuidance($ui, [string]$installRoot, [string]$lockDiagnostics) {
+    if (-not $ui -or -not $ui.Form -or $ui.Form.IsDisposed) { return $false }
+    $ui.State.NextClicked = $false
+    $ui.State.Cancelled = $false
+    $ui.Stepper.Text = "Step 3 of 4 - Removal blocked"
+    $ui.Label.Text = "Cleanup is blocked by file locks."
+    $ui.Meta.Text = "Pause OneDrive sync and close File Explorer/editor terminals that reference this folder, then click Retry."
+    Set-UninstallUiLayout -ui $ui -showProgress:$true
+    Add-UninstallDetail $ui ("Retry guidance lock diagnostics: {0}" -f [string]$lockDiagnostics)
+    $ui.NextButton.Visible = $true
+    $ui.NextButton.Enabled = $true
+    $ui.NextButton.Text = "Retry"
+    $ui.CancelButton.Visible = $true
+    $ui.CancelButton.Enabled = $true
+    $ui.CancelButton.Text = "Skip"
+    $ui.BackButton.Visible = $false
+    $ui.Form.AcceptButton = $ui.NextButton
+    $ui.Form.CancelButton = $ui.CancelButton
+
+    while (-not $ui.Form.IsDisposed) {
+        if ($ui.State.Cancelled) { return $false }
+        if ($ui.State.NextClicked) { return $true }
+        [System.Windows.Forms.Application]::DoEvents()
+        Start-Sleep -Milliseconds 60
+    }
+    return $false
+}
+
+function Invoke-UninstallHealthCheck([string]$installRoot, [hashtable]$shortcutMap) {
+    $status = [ordered]@{
+        InstallRootExists = [bool](Test-Path -LiteralPath $installRoot)
+        MainShortcutExists = [bool](Test-Path -LiteralPath ([string]$shortcutMap.MainShortcut))
+        UninstallShortcutExists = [bool](Test-Path -LiteralPath ([string]$shortcutMap.UninstallShortcut))
+        DesktopShortcutExists = [bool](Test-Path -LiteralPath ([string]$shortcutMap.DesktopShortcut))
+        StartupShortcutExists = [bool](Test-Path -LiteralPath ([string]$shortcutMap.StartupShortcut))
+        ProcessLockCount = 0
+        Healthy = $true
+    }
+    try {
+        $lockers = @(Get-TrackedProcessCandidates -installRoot $installRoot)
+        $status.ProcessLockCount = $lockers.Count
+    } catch {
+        $status.ProcessLockCount = 0
+    }
+    $status.Healthy = (-not $status.MainShortcutExists) -and
+        (-not $status.UninstallShortcutExists) -and
+        (-not $status.DesktopShortcutExists) -and
+        (-not $status.StartupShortcutExists) -and
+        ($status.ProcessLockCount -eq 0)
+    return [pscustomobject]$status
+}
+
 function Remove-PathWithRetry([string]$path, [string]$label, [int]$maxAttempts, $ui, [int]$basePercent) {
     if ([string]::IsNullOrWhiteSpace($path)) { return $false }
     if ($script:IsDryRun) {
@@ -1122,6 +1404,33 @@ function Remove-PathWithRetry([string]$path, [string]$label, [int]$maxAttempts, 
         if (-not [string]::IsNullOrWhiteSpace($earlyExitReason)) {
             Add-UninstallDetail $ui ("Stopped retry loop for {0}: {1}" -f $label, $earlyExitReason)
         }
+
+        if ($isInstallRoot) {
+            $renamedPath = Try-RenamePathForCleanup -path $path -ui $ui
+            if (-not [string]::IsNullOrWhiteSpace($renamedPath)) {
+                try {
+                    Remove-Item -LiteralPath $renamedPath -Recurse -Force -ErrorAction Stop
+                } catch {
+                    $lastErrorMessage = [string]$_.Exception.Message
+                    try {
+                        & cmd.exe /c "rmdir /s /q `"$renamedPath`"" | Out-Null
+                    } catch {
+                        $null = $_
+                    }
+                }
+                if (-not (Test-Path -LiteralPath $renamedPath)) {
+                    Add-UninstallDetail $ui ("Removed {0} after rename fallback: {1}" -f $label, $renamedPath)
+                    return $true
+                }
+                $path = $renamedPath
+            }
+            $null = Schedule-PathRemovalAtReboot -path $path -ui $ui
+        }
+
+        $script:DeleteFailureHints[$label] = [string]$lastErrorMessage
+        $script:UninstallReport.ResidualPaths = @(Get-ResidualPathSnapshot -path $path -maxItems 40)
+        $script:UninstallReport.ResidualReason = Get-LockReasonCategory -hint $lastErrorMessage
+        Add-UninstallDetail $ui ("Residual reason classification: {0}" -f [string]$script:UninstallReport.ResidualReason)
         Add-UninstallDetail $ui ("Failed to remove {0}: {1}" -f $label, $path)
         return $false
     }
@@ -1177,6 +1486,7 @@ try {
     $dryRunFromParameter = [bool]$script:IsDryRun
     $ui = New-UninstallProgressUi
     $wizardDryRunSummary = ""
+    $forceCloseKnownLockers = $false
     while ($true) {
         $effectivePolicy = Get-EffectiveAppDataPolicy -SilentMode:$Silent -RemoveAppDataSwitch:$RemoveAppData -RequestedPolicy $AppDataPolicy
         if ($effectivePolicy -eq "Prompt" -and $Silent) {
@@ -1196,7 +1506,7 @@ try {
         }
 
         if ($ui -and $ui.Form -and -not $ui.Form.IsDisposed) {
-            Prepare-UninstallWizardStep1 -ui $ui -resolvedInstallRoot $resolvedInstallRoot -effectivePolicy $effectivePolicy -dryRunChecked ([bool]$script:IsDryRun)
+            Prepare-UninstallWizardStep1 -ui $ui -resolvedInstallRoot $resolvedInstallRoot -effectivePolicy $effectivePolicy -dryRunChecked ([bool]$script:IsDryRun) -forceCloseKnownLockersChecked:$forceCloseKnownLockers
             if (-not [string]::IsNullOrWhiteSpace($wizardDryRunSummary)) {
                 $ui.OptionsPrompt.Text = "Dry run completed successfully. Review options and click Next to continue."
             }
@@ -1223,6 +1533,13 @@ try {
             } elseif (-not $dryRunFromParameter) {
                 $script:IsDryRun = $false
                 $script:UninstallReport.DryRun = $false
+            }
+            if ($ui.ForceCloseLockersCheck) {
+                $forceCloseKnownLockers = [bool]$ui.ForceCloseLockersCheck.Checked
+                $script:UninstallReport.ForceCloseKnownLockers = $forceCloseKnownLockers
+                if ($forceCloseKnownLockers) {
+                    Add-UninstallDetail $ui "Force-close likely lockers is enabled."
+                }
             }
 
             $ui.OptionsPanel.Visible = $false
@@ -1267,8 +1584,38 @@ try {
         $script:UninstallReport.ProcessesStopped = @($processResult.Stopped)
         $script:UninstallReport.ProcessStopFailures = @($processResult.Failed)
 
+        $knownLockers = @(Get-KnownLockerProcesses -installRoot $resolvedInstallRoot -oneDriveLike:[bool]$oneDrivePathInfo.IsOneDriveLike)
+        $script:UninstallReport.KnownLockerCandidates = @($knownLockers | ForEach-Object { "PID={0}|Name={1}|Reason={2}" -f $_.ProcessId, $_.Name, $_.Reason })
+        if ($knownLockers.Count -gt 0) {
+            Add-UninstallDetail $ui ("Known locker candidates: {0}" -f ($script:UninstallReport.KnownLockerCandidates -join " || "))
+        }
+        if ($forceCloseKnownLockers -and $knownLockers.Count -gt 0) {
+            $lockerStopResult = Stop-KnownLockerProcesses -candidates $knownLockers -ui $ui
+            $script:UninstallReport.KnownLockersStopped = @($lockerStopResult.Stopped)
+            $script:UninstallReport.KnownLockerStopFailures = @($lockerStopResult.Failed)
+        }
+
+        Write-UninstallPhaseMarker -installRoot $resolvedInstallRoot -policy $effectivePolicy -removeAppData:$removeAppDataRequested -ui $ui
+
         Set-UninstallProgress $ui 48 "Step 3 of 4 - Removing files" "Removing app files..." ""
         $removedInstallRoot = Remove-PathWithRetry -path $resolvedInstallRoot -label "install root" -maxAttempts 18 -ui $ui -basePercent 48
+        if (-not $removedInstallRoot -and -not $Silent -and -not $script:IsDryRun) {
+            $lockDiagBeforeRetry = Get-PathLockDiagnostics -installRoot $resolvedInstallRoot
+            $doRetry = Invoke-UninstallRetryGuidance -ui $ui -installRoot $resolvedInstallRoot -lockDiagnostics $lockDiagBeforeRetry
+            if ($doRetry) {
+                if ($forceCloseKnownLockers) {
+                    $retryLockers = @(Get-KnownLockerProcesses -installRoot $resolvedInstallRoot -oneDriveLike:[bool]$oneDrivePathInfo.IsOneDriveLike)
+                    if ($retryLockers.Count -gt 0) {
+                        $retryStopResult = Stop-KnownLockerProcesses -candidates $retryLockers -ui $ui
+                        $script:UninstallReport.KnownLockersStopped += @($retryStopResult.Stopped)
+                        $script:UninstallReport.KnownLockerStopFailures += @($retryStopResult.Failed)
+                    }
+                }
+                $removedInstallRoot = Remove-PathWithRetry -path $resolvedInstallRoot -label "install root" -maxAttempts 6 -ui $ui -basePercent 58
+            } else {
+                Add-UninstallDetail $ui "User skipped retry guidance step."
+            }
+        }
         $script:UninstallReport.RemovedInstallRoot = [bool]$removedInstallRoot
 
         if ($removeAppDataRequested) {
@@ -1284,7 +1631,16 @@ try {
         if (-not $allGood) {
             $script:UninstallReport.LockDiagnostics = Get-PathLockDiagnostics -installRoot $resolvedInstallRoot
             Add-UninstallDetail $ui ("Lock diagnostics: {0}" -f $script:UninstallReport.LockDiagnostics)
+            if ($script:UninstallReport.ResidualPaths.Count -gt 0) {
+                Add-UninstallDetail $ui ("Residual paths detected: {0}" -f [int]$script:UninstallReport.ResidualPaths.Count)
+            }
         }
+
+        Set-UninstallProgress $ui 96 "Step 4 of 4 - Verify" "Running uninstall health checks..." ""
+        $finalShortcutMap = Get-ShortcutMap
+        $health = Invoke-UninstallHealthCheck -installRoot $resolvedInstallRoot -shortcutMap $finalShortcutMap
+        $script:UninstallReport.HealthCheck = $health
+        Add-UninstallDetail $ui ("Health check: InstallRootExists={0}; StartupShortcutExists={1}; ProcessLockCount={2}" -f $health.InstallRootExists, $health.StartupShortcutExists, $health.ProcessLockCount)
 
         Set-UninstallProgress $ui 100 "Step 4 of 4 - Complete" "Finalizing uninstall..." ""
         Start-Sleep -Milliseconds 300
@@ -1301,13 +1657,19 @@ try {
             Complete-Uninstall -ExitCode $script:ExitCodes.Success -Result "DryRun" -Summary ("Dry run complete. Planned uninstall root: {0}. AppData policy: {1}." -f $resolvedInstallRoot, $effectivePolicy) -NotifyUser:(-not $Silent) -Icon ([System.Windows.Forms.MessageBoxIcon]::Information) -Title "Uninstall dry run complete" -Ui $ui
         }
 
-        if ($allGood) {
+        if ($allGood -and [bool]$health.Healthy -and -not [bool]$script:UninstallReport.DeferredCleanupScheduled) {
             Complete-Uninstall -ExitCode $script:ExitCodes.Success -Result "Completed" -Summary "Uninstall completed successfully." -NotifyUser:(-not $Silent) -Icon ([System.Windows.Forms.MessageBoxIcon]::Information) -Title "Uninstall complete" -Ui $ui
         }
 
         $partialSummary = "Uninstall completed with warnings. Some files could not be removed."
         if ([bool]$script:UninstallReport.OneDrivePathLike -or ([string]$script:UninstallReport.LockDiagnostics -match 'OneDrivePathLike=True')) {
             $partialSummary += " OneDrive sync or file-provider locks may be preventing removal."
+        }
+        if ([bool]$script:UninstallReport.DeferredCleanupScheduled -and -not [string]::IsNullOrWhiteSpace([string]$script:UninstallReport.DeferredCleanupPath)) {
+            $partialSummary += (" Deferred cleanup is scheduled at next reboot for: {0}." -f [string]$script:UninstallReport.DeferredCleanupPath)
+        }
+        if (-not [bool]$health.Healthy) {
+            $partialSummary += " Final health checks found remaining entry points or process locks."
         }
         Complete-Uninstall -ExitCode $script:ExitCodes.PartialCleanup -Result "PartialCleanup" -Summary $partialSummary -NotifyUser -Icon ([System.Windows.Forms.MessageBoxIcon]::Warning) -Title "Uninstall completed with warnings" -Ui $ui
     }
