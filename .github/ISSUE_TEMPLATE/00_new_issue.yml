@@ -1,0 +1,105 @@
+name: New issue (start here)
+description: Start here for any new report. Provide complete details so the issue can be reproduced quickly.
+title: "[New Issue]: "
+labels:
+  - triage
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please provide as much detail as possible.
+
+        Good reports include:
+        - exact steps (click-by-click or command-by-command)
+        - expected result vs actual result
+        - full error text
+        - version/channel and environment
+        - relevant log lines and screenshots (with sensitive data removed)
+
+  - type: dropdown
+    id: issue_type
+    attributes:
+      label: Issue type
+      description: Pick the closest type so this can be routed correctly.
+      options:
+        - Bug / broken behavior
+        - Feature request / enhancement
+        - Setup or uninstall support question
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: App version
+      placeholder: "Example: 1.0.2"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: channel
+    attributes:
+      label: Install channel
+      options:
+        - main (stable)
+        - dev (testing)
+        - unknown
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Provide exact, numbered steps.
+      placeholder: |
+        1) Run command...
+        2) Click...
+        3) Observe...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected_actual
+    attributes:
+      label: Expected result vs actual result
+      placeholder: |
+        Expected:
+        Actual:
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment details
+      description: Include OS, PowerShell version, install path, and whether OneDrive-managed path is used.
+      placeholder: |
+        Windows:
+        PowerShell:
+        Install path:
+        OneDrive-managed path?:
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs/screenshots
+      description: Paste key log lines or screenshots. Remove secrets and personal/company-sensitive data first.
+      render: text
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I included enough detail for someone else to reproduce this issue.
+          required: true
+        - label: I searched existing issues first.
+          required: true
+        - label: I removed/redacted sensitive data.
+          required: true
