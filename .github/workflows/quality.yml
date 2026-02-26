@@ -32,12 +32,12 @@ jobs:
       - name: Verify parse gate
         shell: pwsh
         run: |
-          ./Tools/Verify.ps1 -SkipAnalyzer
+          ./Tools/ci/Verify.ps1 -SkipAnalyzer
 
       - name: Run privacy/security scan
         shell: pwsh
         run: |
-          ./Tools/Find-PrivacyLeaks.ps1 -AllTracked
+          ./Tools/ci/Find-PrivacyLeaks.ps1 -AllTracked
 
       - name: Install PowerShell modules
         shell: pwsh
@@ -49,4 +49,4 @@ jobs:
       - name: Run quality checks
         shell: pwsh
         run: |
-          ./Tools/Invoke-QualityChecks.ps1 -Ci -WarningBudgetFile "Tools/PSScriptAnalyzer.warning-budget.json" -CoverageConfigFile "Tools/Pester.coverage.json"
+          ./Tools/ci/Invoke-QualityChecks.ps1 -Ci -WarningBudgetFile "Tools/config/PSScriptAnalyzer.warning-budget.json" -CoverageConfigFile "Tools/config/Pester.coverage.json"

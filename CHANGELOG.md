@@ -8,7 +8,10 @@ The format is based on Keep a Changelog, and this project follows Semantic Versi
 - None yet.
 
 ### Changed
-- None yet.
+- Reorganized repository structure for maintainability:
+  - `Tools` split into `Tools/ci`, `Tools/release`, `Tools/local`, and `Tools/config`.
+  - Test suites grouped under `Tests/Unit`, `Tests/Integration`, `Tests/Smoke`, and `Tests/Quality`.
+  - Updated workflows/docs to use the new paths.
 
 ## [1.0.2] - 2026-02-26
 ### Added

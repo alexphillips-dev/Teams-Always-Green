@@ -14,7 +14,7 @@ Describe 'Smoke' {
             }
         }
 
-        $script:repoRoot = Split-Path -Parent $PSScriptRoot
+        $script:repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
         $script:mainScript = Join-Path $script:repoRoot 'Script/Teams Always Green.ps1'
         $script:settingsDialogScript = Join-Path $script:repoRoot 'Script/UI/SettingsDialog.ps1'
         $script:historyDialogScript = Join-Path $script:repoRoot 'Script/UI/HistoryDialog.ps1'

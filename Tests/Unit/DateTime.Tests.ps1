@@ -2,7 +2,7 @@ Set-StrictMode -Version Latest
 
 Describe "Core: DateTime helpers" {
     BeforeAll {
-        $repoRoot = Split-Path -Parent $PSScriptRoot
+        $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
         . (Join-Path $repoRoot "Script/Core/DateTime.ps1")
     }
 

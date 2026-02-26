@@ -10,15 +10,14 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-$repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
+$repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
 $analyzerSettings = Join-Path $repoRoot "PSScriptAnalyzerSettings.psd1"
-$manifestScript = Join-Path $repoRoot "Tools/Generate-QuickSetupManifest.ps1"
-$privacyScanScript = Join-Path $repoRoot "Tools/Find-PrivacyLeaks.ps1"
-$verifyScript = Join-Path $repoRoot "Tools/Verify.ps1"
-$pesterToolsTests = Join-Path $repoRoot "Tools/Quality.Tests.ps1"
+$manifestScript = Join-Path $repoRoot "Tools/release/Generate-QuickSetupManifest.ps1"
+$privacyScanScript = Join-Path $repoRoot "Tools/ci/Find-PrivacyLeaks.ps1"
+$verifyScript = Join-Path $repoRoot "Tools/ci/Verify.ps1"
 $pesterRepoTests = Join-Path $repoRoot "Tests"
-$defaultWarningBudgetPath = Join-Path $repoRoot "Tools/PSScriptAnalyzer.warning-budget.json"
-$defaultCoverageConfigPath = Join-Path $repoRoot "Tools/Pester.coverage.json"
+$defaultWarningBudgetPath = Join-Path $repoRoot "Tools/config/PSScriptAnalyzer.warning-budget.json"
+$defaultCoverageConfigPath = Join-Path $repoRoot "Tools/config/Pester.coverage.json"
 $versionPath = Join-Path $repoRoot "VERSION"
 $changelogPath = Join-Path $repoRoot "CHANGELOG.md"
 
@@ -131,7 +130,6 @@ Write-Host "Checking QuickSetup manifest freshness..."
 
 Write-Host "Running Pester tests..."
 $pesterPaths = @()
-if (Test-Path -LiteralPath $pesterToolsTests -PathType Leaf) { $pesterPaths += $pesterToolsTests }
 if (Test-Path -LiteralPath $pesterRepoTests -PathType Container) { $pesterPaths += $pesterRepoTests }
 if ($pesterPaths.Count -eq 0) { throw "No Pester test paths found." }
 $effectiveMinCoveragePercent = $MinCoveragePercent
