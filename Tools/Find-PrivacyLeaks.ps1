@@ -76,6 +76,13 @@ $allowedGitEmails = @(
     "41898282+github-actions[bot]@users.noreply.github.com"
 )
 
+$isCiEnvironment = $false
+if (([string]$env:GITHUB_ACTIONS).Trim().ToLowerInvariant() -eq "true") {
+    $isCiEnvironment = $true
+} elseif (([string]$env:CI).Trim().ToLowerInvariant() -eq "true") {
+    $isCiEnvironment = $true
+}
+
 if (-not [string]::IsNullOrWhiteSpace([string]$env:TAG_ALLOWED_GIT_EMAILS)) {
     foreach ($item in @(([string]$env:TAG_ALLOWED_GIT_EMAILS).Split(",", [System.StringSplitOptions]::RemoveEmptyEntries))) {
         $email = $item.Trim().ToLowerInvariant()
@@ -262,16 +269,20 @@ if (-not $MetadataOnly) {
 }
 
 # Metadata scan (always on)
-$configuredEmail = Normalize-Email (Get-GitConfigValue -key "user.email")
-if ([string]::IsNullOrWhiteSpace($configuredEmail)) {
-    Add-Finding -Sink $findings -Rule "META-300" -Description "git config user.email is not set" -File "git-config" -Line 0 -Snippet "user.email=<empty>"
-} elseif ($allowedGitEmails -notcontains $configuredEmail) {
-    Add-Finding -Sink $findings -Rule "META-301" -Description "git config user.email is not on the allowlist" -File "git-config" -Line 0 -Snippet ("user.email={0}" -f $configuredEmail)
-}
+if (-not $isCiEnvironment) {
+    $configuredEmail = Normalize-Email (Get-GitConfigValue -key "user.email")
+    if ([string]::IsNullOrWhiteSpace($configuredEmail)) {
+        Add-Finding -Sink $findings -Rule "META-300" -Description "git config user.email is not set" -File "git-config" -Line 0 -Snippet "user.email=<empty>"
+    } elseif ($allowedGitEmails -notcontains $configuredEmail) {
+        Add-Finding -Sink $findings -Rule "META-301" -Description "git config user.email is not on the allowlist" -File "git-config" -Line 0 -Snippet ("user.email={0}" -f $configuredEmail)
+    }
 
-$useConfigOnly = Normalize-Email (Get-GitConfigValue -key "user.useConfigOnly")
-if ($useConfigOnly -ne "true") {
-    Add-Finding -Sink $findings -Rule "META-302" -Description "git config user.useConfigOnly should be true" -File "git-config" -Line 0 -Snippet ("user.useConfigOnly={0}" -f $useConfigOnly)
+    $useConfigOnly = Normalize-Email (Get-GitConfigValue -key "user.useConfigOnly")
+    if ($useConfigOnly -ne "true") {
+        Add-Finding -Sink $findings -Rule "META-302" -Description "git config user.useConfigOnly should be true" -File "git-config" -Line 0 -Snippet ("user.useConfigOnly={0}" -f $useConfigOnly)
+    }
+} else {
+    Write-Host "[privacy-scan] CI environment detected; skipping local git-config identity checks."
 }
 
 $metadataScope = if ([string]::IsNullOrWhiteSpace($CommitRange)) { "all-history" } else { $CommitRange }
