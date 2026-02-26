@@ -1,0 +1,103 @@
+name: Bug report
+description: Report a reproducible problem with install, uninstall, startup, updates, or tray behavior.
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting this. Please include enough detail to reproduce the issue.
+
+  - type: input
+    id: app_version
+    attributes:
+      label: App version
+      description: Example: 1.0.2 (or "unknown")
+      placeholder: 1.0.2
+    validations:
+      required: true
+
+  - type: dropdown
+    id: channel
+    attributes:
+      label: Install channel
+      options:
+        - main (stable)
+        - dev (testing)
+        - unknown
+    validations:
+      required: true
+
+  - type: dropdown
+    id: install_method
+    attributes:
+      label: Install method
+      options:
+        - QuickSetup one-liner
+        - Existing install (update/self-update)
+        - Manual script launch
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: What happened?
+      description: Include the exact error text if available.
+      placeholder: Describe the observed behavior and error.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect?
+      placeholder: Describe the expected behavior.
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Keep steps short and deterministic.
+      placeholder: |
+        1) Run command...
+        2) Click...
+        3) Observe...
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, PowerShell version, and any relevant path details (OneDrive/local).
+      placeholder: |
+        Windows:
+        PowerShell:
+        Install path:
+        OneDrive-managed path?:
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs and screenshots
+      description: Paste key lines (no secrets). Typical logs are in `%LOCALAPPDATA%\Temp` and `%LOCALAPPDATA%\TeamsAlwaysGreen\Logs`.
+      render: text
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Pre-submit checks
+      options:
+        - label: I searched existing issues first.
+          required: true
+        - label: I removed/redacted sensitive data from logs and screenshots.
+          required: true

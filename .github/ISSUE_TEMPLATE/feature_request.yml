@@ -1,0 +1,52 @@
+name: Feature request
+description: Suggest an improvement to install/uninstall flow, UX, reliability, or security.
+title: "[Feature]: "
+labels:
+  - enhancement
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please describe the user problem first, then propose a solution.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem statement
+      description: What pain point are you solving?
+      placeholder: As a user, I struggle with...
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      placeholder: Describe the desired behavior and UI/flow.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      placeholder: List alternatives and why they are not preferred.
+    validations:
+      required: false
+
+  - type: textarea
+    id: impact
+    attributes:
+      label: Scope and impact
+      description: Which area does this affect?
+      placeholder: QuickSetup / Uninstall / Tray / Core / Docs / Security
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Pre-submit checks
+      options:
+        - label: I searched existing issues first.
+          required: true
