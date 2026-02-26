@@ -137,8 +137,10 @@ function Get-QuickSetupSourceRoot {
 function Get-QuickSetupLocalIconPath {
     $sourceRoot = Get-QuickSetupSourceRoot
     if (-not $sourceRoot) { return $null }
-    $iconPath = Join-Path $sourceRoot "Meta\Icons\Tray_Icon.ico"
-    if (Test-Path $iconPath) { return $iconPath }
+    foreach ($relativePath in @("assets\\icons\\Tray_Icon.ico", "Meta\\Icons\\Tray_Icon.ico")) {
+        $iconPath = Join-Path $sourceRoot $relativePath
+        if (Test-Path -LiteralPath $iconPath -PathType Leaf) { return $iconPath }
+    }
     return $null
 }
 
@@ -1201,9 +1203,7 @@ function Show-Welcome {
     $iconBox.SizeMode = [System.Windows.Forms.PictureBoxSizeMode]::StretchImage
     $iconPath = $null
     $localRoot = Get-QuickSetupSourceRoot
-    if ($localRoot) {
-        $iconPath = Join-Path $localRoot "Meta\Icons\Tray_Icon.ico"
-    }
+    if ($localRoot) { $iconPath = Get-QuickSetupLocalIconPath }
     $welcomeIcon = $null
     if ($iconPath -and (Test-Path $iconPath)) {
         try { $welcomeIcon = New-Object System.Drawing.Icon($iconPath) } catch { $null = $_ }
@@ -1211,7 +1211,7 @@ function Show-Welcome {
     if (-not $welcomeIcon) {
         try {
             try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 } catch { $null = $_ }
-            $remoteIconUrl = ("{0}/Meta/Icons/Tray_Icon.ico" -f (Get-QuickSetupRemoteBase))
+            $remoteIconUrl = ("{0}/assets/icons/Tray_Icon.ico" -f (Get-QuickSetupRemoteBase))
             $remoteIconPath = Join-Path $env:TEMP "TeamsAlwaysGreen-Welcome.ico"
             $wc = New-Object System.Net.WebClient
             $wc.DownloadFile($remoteIconUrl, $remoteIconPath)
@@ -1335,7 +1335,14 @@ function Show-SetupSummary {
     $form.MinimizeBox = $false
     $form.BackColor = [System.Drawing.Color]::White
     $form.ShowIcon = $true
-    $windowIconPath = Join-Path $installPath "Meta\Icons\Tray_Icon.ico"
+    $windowIconPath = $null
+    foreach ($relativePath in @("assets\\icons\\Tray_Icon.ico", "Meta\\Icons\\Tray_Icon.ico")) {
+        $candidateIconPath = Join-Path $installPath $relativePath
+        if (Test-Path -LiteralPath $candidateIconPath -PathType Leaf) {
+            $windowIconPath = $candidateIconPath
+            break
+        }
+    }
     try {
         if (Test-Path $windowIconPath) {
             $form.Icon = New-Object System.Drawing.Icon($windowIconPath, 32, 32)
@@ -1605,8 +1612,10 @@ if (Test-Path $portableMarker) {
 $folders = @(
     "Debug",
     "Meta",
-    "Meta\Icons",
-    "Meta\Keys",
+    "assets",
+    "assets\icons",
+    "security",
+    "security\public-keys",
     "Script",
     "Script\Core",
     "Script\Features",
@@ -1667,10 +1676,10 @@ $filesToDownload = @(
     @{ Url = "$rawBase/VERSION"; Path = "VERSION" },
     @{ Url = "$rawBase/Teams%20Always%20Green.VBS"; Path = "Teams Always Green.VBS" },
     @{ Url = "$rawBase/Debug/Teams%20Always%20Green%20-%20Debug.VBS"; Path = "Debug\Teams Always Green - Debug.VBS" },
-    @{ Url = "$rawBase/Meta/Keys/quicksetup-manifest-public.xml"; Path = "Meta\Keys\quicksetup-manifest-public.xml" },
-    @{ Url = "$rawBase/Meta/Teams-Always-Green.updatekey.xml"; Path = "Meta\Teams-Always-Green.updatekey.xml" },
-    @{ Url = "$rawBase/Meta/Icons/Tray_Icon.ico"; Path = "Meta\Icons\Tray_Icon.ico" },
-    @{ Url = "$rawBase/Meta/Icons/Settings_Icon.ico"; Path = "Meta\Icons\Settings_Icon.ico" }
+    @{ Url = "$rawBase/security/public-keys/quicksetup-manifest-public.xml"; Path = "security\public-keys\quicksetup-manifest-public.xml" },
+    @{ Url = "$rawBase/security/public-keys/Teams-Always-Green.updatekey.xml"; Path = "security\public-keys\Teams-Always-Green.updatekey.xml" },
+    @{ Url = "$rawBase/assets/icons/Tray_Icon.ico"; Path = "assets\icons\Tray_Icon.ico" },
+    @{ Url = "$rawBase/assets/icons/Settings_Icon.ico"; Path = "assets\icons\Settings_Icon.ico" }
 )
 $targetScript = Join-Path $installPath "Script\Teams Always Green.ps1"
 
@@ -1856,7 +1865,14 @@ function New-Shortcut([string]$shortcutPath, [string]$targetScriptPath, [string]
     $shortcut.Arguments = "-NoProfile -ExecutionPolicy RemoteSigned -WindowStyle Hidden -File `"$targetScriptPath`""
     $shortcut.WorkingDirectory = $workingDir
     $shortcut.WindowStyle = 7
-    $iconPath = Join-Path $workingDir "Meta\Icons\Tray_Icon.ico"
+    $iconPath = $null
+    foreach ($relativePath in @("assets\\icons\\Tray_Icon.ico", "Meta\\Icons\\Tray_Icon.ico")) {
+        $candidateIconPath = Join-Path $workingDir $relativePath
+        if (Test-Path -LiteralPath $candidateIconPath -PathType Leaf) {
+            $iconPath = $candidateIconPath
+            break
+        }
+    }
     if (Test-Path $iconPath) {
         $shortcut.IconLocation = "$iconPath,0"
         Write-SetupLog "Shortcut icon set: $iconPath"
@@ -1874,7 +1890,14 @@ function New-VbsShortcut([string]$shortcutPath, [string]$vbsPath, [string]$worki
     $shortcut.Arguments = "`"$vbsPath`""
     $shortcut.WorkingDirectory = $workingDir
     $shortcut.WindowStyle = 1
-    $iconPath = Join-Path $workingDir "Meta\Icons\Tray_Icon.ico"
+    $iconPath = $null
+    foreach ($relativePath in @("assets\\icons\\Tray_Icon.ico", "Meta\\Icons\\Tray_Icon.ico")) {
+        $candidateIconPath = Join-Path $workingDir $relativePath
+        if (Test-Path -LiteralPath $candidateIconPath -PathType Leaf) {
+            $iconPath = $candidateIconPath
+            break
+        }
+    }
     if (Test-Path $iconPath) {
         $shortcut.IconLocation = "$iconPath,0"
         Write-SetupLog "Shortcut icon set: $iconPath"
@@ -2103,14 +2126,14 @@ function Show-SetupWizard {
     $welcomeIcon = $null
     $iconPath = $null
     $localRoot = Get-QuickSetupSourceRoot
-    if ($localRoot) { $iconPath = Join-Path $localRoot "Meta\Icons\Tray_Icon.ico" }
+    if ($localRoot) { $iconPath = Get-QuickSetupLocalIconPath }
     if ($iconPath -and (Test-Path $iconPath)) {
         try { $welcomeIcon = New-Object System.Drawing.Icon($iconPath) } catch { $null = $_ }
     }
     if (-not $welcomeIcon) {
         try {
             try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 } catch { $null = $_ }
-            $remoteIconUrl = ("{0}/Meta/Icons/Tray_Icon.ico" -f (Get-QuickSetupRemoteBase))
+            $remoteIconUrl = ("{0}/assets/icons/Tray_Icon.ico" -f (Get-QuickSetupRemoteBase))
             $remoteIconPath = Join-Path $env:TEMP "TeamsAlwaysGreen-Welcome.ico"
             $wc = New-Object System.Net.WebClient
             $wc.DownloadFile($remoteIconUrl, $remoteIconPath)
@@ -2658,7 +2681,7 @@ function Show-SetupWizard {
             $targetScript = Join-Path $state.InstallPath "Script\Teams Always Green.ps1"
 
             $folders = @(
-                "Debug","Meta","Meta\Icons","Meta\Keys","Script","Script\Core","Script\Features","Script\I18n","Script\Tray","Script\UI","Script\Uninstall"
+                "Debug","Meta","assets","assets\icons","security","security\public-keys","Script","Script\Core","Script\Features","Script\I18n","Script\Tray","Script\UI","Script\Uninstall"
             )
             if ($state.PortableMode) {
                 $folders += @("Logs", "Settings")
@@ -2931,10 +2954,10 @@ $script:QuickSetupFiles = @(
     @{ Url = "$script:QuickSetupRawBase/VERSION"; Path = "VERSION" },
     @{ Url = "$script:QuickSetupRawBase/Teams%20Always%20Green.VBS"; Path = "Teams Always Green.VBS" },
     @{ Url = "$script:QuickSetupRawBase/Debug/Teams%20Always%20Green%20-%20Debug.VBS"; Path = "Debug\Teams Always Green - Debug.VBS" },
-    @{ Url = "$script:QuickSetupRawBase/Meta/Keys/quicksetup-manifest-public.xml"; Path = "Meta\Keys\quicksetup-manifest-public.xml" },
-    @{ Url = "$script:QuickSetupRawBase/Meta/Teams-Always-Green.updatekey.xml"; Path = "Meta\Teams-Always-Green.updatekey.xml" },
-    @{ Url = "$script:QuickSetupRawBase/Meta/Icons/Tray_Icon.ico"; Path = "Meta\Icons\Tray_Icon.ico" },
-    @{ Url = "$script:QuickSetupRawBase/Meta/Icons/Settings_Icon.ico"; Path = "Meta\Icons\Settings_Icon.ico" }
+    @{ Url = "$script:QuickSetupRawBase/security/public-keys/quicksetup-manifest-public.xml"; Path = "security\public-keys\quicksetup-manifest-public.xml" },
+    @{ Url = "$script:QuickSetupRawBase/security/public-keys/Teams-Always-Green.updatekey.xml"; Path = "security\public-keys\Teams-Always-Green.updatekey.xml" },
+    @{ Url = "$script:QuickSetupRawBase/assets/icons/Tray_Icon.ico"; Path = "assets\icons\Tray_Icon.ico" },
+    @{ Url = "$script:QuickSetupRawBase/assets/icons/Settings_Icon.ico"; Path = "assets\icons\Settings_Icon.ico" }
 )
 
 try {

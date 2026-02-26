@@ -1,8 +1,8 @@
 <p align="center">
-  <img src="Meta/Readme/Banner.png" alt="Teams Always Green Banner" width="100%" />
+  <img src="assets/readme/Banner.png" alt="Teams Always Green Banner" width="100%" />
 </p>
 
-# <img src="https://raw.githubusercontent.com/alexphillips-dev/Teams-Always-Green/refs/heads/main/Meta/Icons/Tray_Icon.ico" alt="Teams Always Green" width="28" height="28"> Teams Always Green
+# <img src="https://raw.githubusercontent.com/alexphillips-dev/Teams-Always-Green/refs/heads/main/assets/icons/Tray_Icon.ico" alt="Teams Always Green" width="28" height="28"> Teams Always Green
 
 [![Release](https://img.shields.io/github/v/tag/alexphillips-dev/Teams-Always-Green?label=release&sort=semver&color=6264A7)](https://github.com/alexphillips-dev/Teams-Always-Green/releases/latest)
 [![License](https://img.shields.io/github/license/alexphillips-dev/Teams-Always-Green)](LICENSE)
@@ -83,7 +83,7 @@ Optional: choose **portable mode** to skip shortcuts. Setup logs are saved to `%
 
 1) Create a folder (example: `Documents\Teams Always Green`).  
 2) Copy the entire `Script\` folder from the repo into it.  
-3) Copy `Meta\` and `VERSION` from the repo into the install folder.  
+3) Copy `Meta\`, `assets\`, `security\`, and `VERSION` from the repo into the install folder.  
 4) Run:
 
 ```powershell
@@ -101,8 +101,8 @@ powershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File "Script\Teams Alwa
 
 ## Architecture
 
-- See `docs/architecture.md` for startup flow, module boundaries, and data-path model.
-- See `docs/security-standards.md` for secure coding/release controls and branch protection guidance.
+- See `docs/architecture/overview.md` for startup flow, module boundaries, and data-path model.
+- See `docs/security/standards.md` for secure coding/release controls and branch protection guidance.
 
 ---
 
@@ -111,8 +111,10 @@ powershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File "Script\Teams Alwa
 ```
 Teams Always Green\
   docs\
-    architecture.md
-    security-standards.md
+    architecture\
+      overview.md
+    security\
+      standards.md
   Script\
     Teams Always Green.ps1
     Core\
@@ -143,20 +145,24 @@ Teams Always Green\
     config\
     local\
     release\
+  assets\
+    icons\
+      Tray_Icon.ico
+      Settings_Icon.ico
+    readme\
+      Banner.png
+      AI_Assisted_Banner.png
+  security\
+    public-keys\
+      quicksetup-manifest-public.xml
+      Teams-Always-Green.updatekey.xml
   CHANGELOG.md
   Debug\
   Meta\
-    Icons\
-    Keys\
-      quicksetup-manifest-public.xml
     RepoConfig\
       editorconfig.template
       gitattributes.template
       gitignore.template
-    Teams-Always-Green.updatekey.xml
-    Readme\
-      Banner.png
-      AI_Assisted_Banner.png
 ```
 
 Runtime data (standard install):
@@ -202,7 +208,7 @@ Portable mode stores runtime data in the install folder (`Logs\`, `Settings\`, `
 ---
 
 <p align="center">
-  <img src="Meta/Readme/AI_Assisted_Banner.png" alt="AI-Assisted Development Banner" width="100%" />
+  <img src="assets/readme/AI_Assisted_Banner.png" alt="AI-Assisted Development Banner" width="100%" />
 </p>
 
 ## Development Transparency

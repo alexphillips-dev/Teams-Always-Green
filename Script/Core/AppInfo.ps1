@@ -16,7 +16,7 @@ function Get-AppScopedFileName([string]$suffix) {
 }
 
 $script:AppUserAgent = $script:AppDataFolderName
-$script:AppTrayIconRelativePath = "Meta\\Icons\\Tray_Icon.ico"
+$script:AppTrayIconRelativePath = "assets\\icons\\Tray_Icon.ico"
 
 $script:AppMainLogFileName = Get-AppScopedFileName "log"
 $script:AppFallbackLogFileName = Get-AppScopedFileName "fallback.log"
@@ -78,4 +78,3 @@ function Get-AppRepoUrl([ValidateSet("repo","releases","issues","raw")][string]$
         "raw" { return ("https://raw.githubusercontent.com/{0}/{1}/main" -f $owner, $repo) }
     }
 }
-
