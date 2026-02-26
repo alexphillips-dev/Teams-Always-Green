@@ -60,7 +60,7 @@ Write-Host "Running privacy/security leak scan..."
 & $privacyScanScript -AllTracked
 
 $analyzePaths = @(
-    (Join-Path $repoRoot "Script")
+    (Join-Path $repoRoot "app")
 )
 
 $analyzerParams = @{

@@ -59,7 +59,7 @@ jobs:
       - name: Verify QuickSetup manifest signature
         shell: pwsh
         run: |
-          ./Tools/release/Generate-QuickSetupManifest.ps1 -Check -RequireSignature -ManifestPublicKeyPath "security/public-keys/quicksetup-manifest-public.xml"
+          ./Tools/release/Generate-QuickSetupManifest.ps1 -Check -RequireSignature -ManifestPublicKeyPath "security/quicksetup-manifest-public.xml"
 
       - name: Install PowerShell modules
         shell: pwsh
@@ -93,12 +93,12 @@ jobs:
         run: |
           $sigPath = Join-Path $env:RUNNER_TEMP "Teams Always Green.ps1.sig"
           ./Tools/release/Generate-UpdateSignature.ps1 `
-            -InputFile "Script/Teams Always Green.ps1" `
+            -InputFile "app/runtime/Teams Always Green.ps1" `
             -PrivateKeyPath "${{ steps.keys.outputs.update_private_key }}" `
             -SignaturePath $sigPath `
             -OutputEncoding Hex `
             -Verify `
-            -PublicKeyPath "security/public-keys/Teams-Always-Green.updatekey.xml"
+            -PublicKeyPath "security/Teams-Always-Green.updatekey.xml"
           "update_sig=$sigPath" >> $env:GITHUB_OUTPUT
 
       - name: Build release notes
@@ -171,7 +171,7 @@ jobs:
           generate_release_notes: false
           make_latest: true
           files: |
-            Script/Teams Always Green.ps1
+            app/runtime/Teams Always Green.ps1
             ${{ steps.sign_update.outputs.update_sig }}
-            Script/QuickSetup/QuickSetup.manifest.json
-            Script/QuickSetup/QuickSetup.manifest.sig
+            app/setup/QuickSetup.manifest.json
+            app/setup/QuickSetup.manifest.sig

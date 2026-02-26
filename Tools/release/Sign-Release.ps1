@@ -3,7 +3,7 @@ param(
     [ValidateSet("CurrentUser", "LocalMachine")][string]$StoreLocation = "CurrentUser",
     [string]$StoreName = "My",
     [string]$RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path,
-    [string]$ManifestPath = "Script/QuickSetup/QuickSetup.manifest.json",
+    [string]$ManifestPath = "app/setup/QuickSetup.manifest.json",
     [string]$TimestampServer = "http://timestamp.digicert.com"
 )
 
@@ -65,3 +65,4 @@ if ($failed.Count -gt 0) {
 }
 
 Write-Host "Release signing complete."
+

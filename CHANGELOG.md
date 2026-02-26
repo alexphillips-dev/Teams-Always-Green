@@ -11,6 +11,10 @@ The format is based on Keep a Changelog, and this project follows Semantic Versi
 - Reorganized repository structure for maintainability:
   - `Tools` split into `Tools/ci`, `Tools/release`, `Tools/local`, and `Tools/config`.
   - Test suites grouped under `Tests/Unit`, `Tests/Integration`, `Tests/Smoke`, and `Tests/Quality`.
+  - App scripts moved under `app/`:
+    - `app/runtime` (main runtime and modules)
+    - `app/setup` (QuickSetup installer assets)
+    - `app/uninstall` (uninstall flow assets)
   - Updated workflows/docs to use the new paths.
 - Moved static assets and public trust material into dedicated folders:
   - `assets/icons` and `assets/readme` now host icon/readme image assets.

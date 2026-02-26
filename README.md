@@ -33,18 +33,18 @@ This was not created to avoid work or to encourage misuse. It was created to red
 Stable (`main`):
 
 ```powershell
-$env:TAG_QUICKSETUP_CHANNEL='main'; irm https://raw.githubusercontent.com/alexphillips-dev/Teams-Always-Green/main/Script/QuickSetup/QuickSetup.ps1 | iex
+$env:TAG_QUICKSETUP_CHANNEL='main'; irm https://raw.githubusercontent.com/alexphillips-dev/Teams-Always-Green/main/app/setup/QuickSetup.ps1 | iex
 ```
 
 Testing (`dev`):
 
 ```powershell
-$env:TAG_QUICKSETUP_CHANNEL='dev'; irm https://raw.githubusercontent.com/alexphillips-dev/Teams-Always-Green/dev/Script/QuickSetup/QuickSetup.ps1 | iex
+$env:TAG_QUICKSETUP_CHANNEL='dev'; irm https://raw.githubusercontent.com/alexphillips-dev/Teams-Always-Green/dev/app/setup/QuickSetup.ps1 | iex
 ```
 
 `dev` includes in-progress changes and may be unstable.
 
-1) Download `Script/QuickSetup/QuickSetup.cmd` from the repo (it always pulls the latest installer).  
+1) Download `app/setup/QuickSetup.cmd` from the repo (it always pulls the latest installer).  
 2) Double-click it.  
 3) Choose your install folder (default: `Documents\Teams Always Green`).
 
@@ -82,12 +82,12 @@ Optional: choose **portable mode** to skip shortcuts. Setup logs are saved to `%
 ## Manual Install
 
 1) Create a folder (example: `Documents\Teams Always Green`).  
-2) Copy the entire `Script\` folder from the repo into it.  
-3) Copy `Meta\`, `assets\`, `security\`, and `VERSION` from the repo into the install folder.  
+2) Copy the entire `app\` folder from the repo into it.  
+3) Copy `Meta\`, `assets\`, `security\`, `Teams Always Green.VBS`, and `VERSION` into the install folder.  
 4) Run:
 
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File "Script\Teams Always Green.ps1"
+powershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File "app\runtime\Teams Always Green.ps1"
 ```
 
 ---
@@ -115,25 +115,26 @@ Teams Always Green\
       overview.md
     security\
       standards.md
-  Script\
-    Teams Always Green.ps1
-    Core\
-    Features\
-      Hotkeys.ps1
-      Profiles.ps1
-      Scheduling.ps1
-      UpdateEngine.ps1
-    I18n\
-    Tray\
-    UI\
-  Script\Uninstall\
-    Uninstall-Teams-Always-Green.ps1
-    Uninstall-Teams-Always-Green.vbs
-  Script\QuickSetup\
-    QuickSetup.ps1
-    QuickSetup.cmd
-    QuickSetup.manifest.json
-    QuickSetup.manifest.sig
+  app\
+    runtime\
+      Teams Always Green.ps1
+      Core\
+      Features\
+        Hotkeys.ps1
+        Profiles.ps1
+        Scheduling.ps1
+        UpdateEngine.ps1
+      I18n\
+      Tray\
+      UI\
+    uninstall\
+      Uninstall-Teams-Always-Green.ps1
+      Uninstall-Teams-Always-Green.vbs
+    setup\
+      QuickSetup.ps1
+      QuickSetup.cmd
+      QuickSetup.manifest.json
+      QuickSetup.manifest.sig
   Teams Always Green.VBS
   Tests\
     Unit\
@@ -242,7 +243,7 @@ Versioning discipline:
 8. `.github/workflows/release.yml` automates release-time signing and publishing:
    - Trigger: push tag `v*` (or manual dispatch).
    - Required secret: `UPDATE_SIGNING_PRIVATE_KEY_XML` (private RSA XML key for update asset signing).
-   - Publishes signed release assets: `Script/Teams Always Green.ps1` and `Teams Always Green.ps1.sig`.
+   - Publishes signed release assets: `app/runtime/Teams Always Green.ps1` and `Teams Always Green.ps1.sig`.
 
 ---
 

@@ -1,7 +1,7 @@
 param(
     [string]$RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path,
-    [string]$ManifestPath = "Script/QuickSetup/QuickSetup.manifest.json",
-    [string]$SignaturePath = "Script/QuickSetup/QuickSetup.manifest.sig",
+    [string]$ManifestPath = "app/setup/QuickSetup.manifest.json",
+    [string]$SignaturePath = "app/setup/QuickSetup.manifest.sig",
     [string]$ManifestPrivateKeyPath = "",
     [string]$ManifestPublicKeyPath = "",
     [ValidateSet("LF", "CRLF")][string]$NormalizedLineEndings = "LF",
@@ -157,7 +157,7 @@ function Test-ManifestSignature([string]$canonicalJson, [string]$signatureText, 
 $repoRoot = (Resolve-Path $RepoRoot).Path
 $manifestAbsPath = if ([System.IO.Path]::IsPathRooted($ManifestPath)) { $ManifestPath } else { Join-Path $repoRoot $ManifestPath }
 $signatureAbsPath = if ([System.IO.Path]::IsPathRooted($SignaturePath)) { $SignaturePath } else { Join-Path $repoRoot $SignaturePath }
-$quickSetupPath = Join-Path $repoRoot "Script/QuickSetup/QuickSetup.ps1"
+$quickSetupPath = Join-Path $repoRoot "app/setup/QuickSetup.ps1"
 if (-not (Test-Path $quickSetupPath)) {
     throw "QuickSetup.ps1 was not found at: $quickSetupPath"
 }
@@ -270,3 +270,4 @@ if ($Sign) {
     [System.IO.File]::WriteAllText($signatureAbsPath, ($signatureHex + "`r`n"), $utf8NoBom)
     Write-Host "Updated signature: $signatureAbsPath"
 }
+

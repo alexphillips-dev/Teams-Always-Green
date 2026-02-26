@@ -1,4 +1,3 @@
-﻿
 # Teams Always Green
 # PSScriptAnalyzerSettings -DisableRuleName PSUseApprovedVerbs
 # Main tray app script. Keeps Teams presence active by toggling Scroll Lock.
@@ -13,7 +12,7 @@
 #
 # Launcher/install helpers:
 # - Teams Always Green.VBS
-# - Script\QuickSetup\QuickSetup.cmd / Script\QuickSetup\QuickSetup.ps1
+# - app\setup\QuickSetup.cmd / app\setup\QuickSetup.ps1
 #
 # Run mode:
 # - -SettingsOnly opens Settings without starting the tray loop
@@ -289,14 +288,20 @@ function Test-ProfileExportSignature($payload) {
 # --- Paths, Meta folder, and locator files (resolve root, ensure dirs) ---
 $scriptPath = $MyInvocation.MyCommand.Path
 $scriptDir = Split-Path -Parent $scriptPath
-$appRoot = if ((Split-Path -Leaf $scriptDir) -ieq "Script") { Split-Path -Parent $scriptDir } else { $scriptDir }
+$leafDir = Split-Path -Leaf $scriptDir
+$parentDir = Split-Path -Parent $scriptDir
+$parentLeaf = Split-Path -Leaf $parentDir
+$appRoot =
+    if ($leafDir -ieq "runtime" -and $parentLeaf -ieq "app") { Split-Path -Parent $parentDir }
+    elseif ($leafDir -ieq "Script") { Split-Path -Parent $scriptDir }
+    else { $scriptDir }
 $script:AppRoot = $appRoot
 $script:FolderNames = @{
     Logs = "Logs"
     Settings = "Settings"
     Meta = "Meta"
     Debug = "Debug"
-    Script = "Script"
+    Script = "app\runtime"
 }
 $script:RuntimeModuleAllowList = @(
     "Core\Logging.ps1",
@@ -643,7 +648,9 @@ function Test-RuntimeModulePathAllowed([string]$path, [string]$tag = "Runtime-Mo
     }
     $normalized = $relative -replace '/', '\'
     $normalized = $normalized -replace '\\+', '\'
-    if ($normalized.StartsWith("Script\", [System.StringComparison]::OrdinalIgnoreCase)) {
+    if ($normalized.StartsWith("app\runtime\", [System.StringComparison]::OrdinalIgnoreCase)) {
+        $normalized = $normalized.Substring(12)
+    } elseif ($normalized.StartsWith("Script\", [System.StringComparison]::OrdinalIgnoreCase)) {
         $normalized = $normalized.Substring(7)
     }
     $allowed = $false

@@ -10,8 +10,8 @@ trap {
 
 $script:QuickSetupStateDir = Join-Path $env:LOCALAPPDATA "TeamsAlwaysGreen"
 $script:QuickSetupLastPathFile = Join-Path $script:QuickSetupStateDir "QuickSetup.lastpath.txt"
-$script:QuickSetupManifestRelativePath = "Script\QuickSetup\QuickSetup.manifest.json"
-$script:QuickSetupManifestSignatureRelativePath = "Script\QuickSetup\QuickSetup.manifest.sig"
+$script:QuickSetupManifestRelativePath = "app/setup/QuickSetup.manifest.json"
+$script:QuickSetupManifestSignatureRelativePath = "app/setup/QuickSetup.manifest.sig"
 $script:QuickSetupManifestSignaturePublicKeyXml = @'
 <RSAKeyValue><Modulus>x5tns2fd2g/AZEs6ciZ+nWS2RfG5UN5mq+T2QGBS+UfX5uoTlffG123lTwRvMIZY+iecs20UtpR5gYx/ZYjtZuGqHyuBfsTd2dYWzyPonAYqlksAM9sADNMrSFjxeoXeOl+i/sZeprZl/Vahk1Z8G+sgxxMaiVYjGBAmfSZ9yKfI+M3r4cJQzwvpo+nlMHRZN8T0R7FWRJdrG+dNPgR/BefkXUiO+xmQBW0ej4PPMmuN5jPcUiS0c194CrTHuL8hn+lHA3PyGuUeFPurthv256HZ8H6+KIEQhULQMcSEgQGEKwSIwIYPFY9DuzHU6j6FphZR/DobJIEItQT2NVFM1oaFm7W0ImWhxJ5q80UL7D5Nb83KFXQ/P2hPTDRrm7XbYUR+diUfa/8yRxW2SLzvn8kzPmobMXLy0IN9X9SV0zXOpW/ChcbppcMAO9iQ6ogPmLYpERtBwjIGi2oLSKNSdJ69n4GAmwmMJD+UHWlbbmvH59L3bi82cn3tCHCyqkSZhCWi2uZj6AYfdtq0D8i9wqFWYE8IYsXhQnlpLzhqeDHoQ3ZWZ/heGG9aLdIT3IkHIiTpIfUCbYgqPikMKYbNjAaNDAlhvkruchMVIFo0qnYx7879eKlKpsH2IAUBtadLL96WcmocP5z+qpo4bw9knoqiRcz7icMUsIJxl/9kY4E=</Modulus><Exponent>AQAB</Exponent></RSAKeyValue>
 '@
@@ -126,7 +126,7 @@ function Get-QuickSetupSourceRoot {
             try { $probeFull = [System.IO.Path]::GetFullPath($probe) } catch { $null = $_ }
             if ($seen.ContainsKey($probeFull)) { continue }
             $seen[$probeFull] = $true
-            if (Test-Path (Join-Path $probeFull "Script\Teams Always Green.ps1")) {
+            if (Test-Path (Join-Path $probeFull "app/runtime/Teams Always Green.ps1")) {
                 return $probeFull
             }
         }
@@ -172,8 +172,8 @@ function Resolve-QuickSetupChannelFromCommandText([string]$text) {
     $owner = [regex]::Escape([string]$script:QuickSetupTrustedOwner)
     $repo = [regex]::Escape([string]$script:QuickSetupTrustedRepo)
     $patterns = @(
-        ("(?i)raw\.githubusercontent\.com/{0}/{1}/(?:refs/heads/)?(?<channel>main|dev)/Script/QuickSetup/QuickSetup\.ps1(?:\?[^'""\s\)\|]*)?" -f $owner, $repo),
-        ("(?i)github\.com/{0}/{1}/(?:raw|blob)/(?:refs/heads/)?(?<channel>main|dev)/Script/QuickSetup/QuickSetup\.ps1(?:\?[^'""\s\)\|]*)?" -f $owner, $repo),
+        ("(?i)raw\.githubusercontent\.com/{0}/{1}/(?:refs/heads/)?(?<channel>main|dev)/app/setup/QuickSetup\.ps1(?:\?[^'""\s\)\|]*)?" -f $owner, $repo),
+        ("(?i)github\.com/{0}/{1}/(?:raw|blob)/(?:refs/heads/)?(?<channel>main|dev)/app/setup/QuickSetup\.ps1(?:\?[^'""\s\)\|]*)?" -f $owner, $repo),
         '(?i)\bTAG_QUICKSETUP_CHANNEL\s*=\s*["'']?(?<channel>main|dev)\b'
     )
     foreach ($pattern in $patterns) {
@@ -288,7 +288,7 @@ function Resolve-QuickSetupChannelFromSelfHash([string]$selfHash) {
     $matches = New-Object System.Collections.Generic.List[string]
     foreach ($candidate in @("main", "dev")) {
         $base = Get-QuickSetupRemoteBase -channel $candidate
-        $url = ("{0}/Script/QuickSetup/QuickSetup.ps1?v={1}" -f $base, [Guid]::NewGuid().ToString("N"))
+        $url = ("{0}/app/setup/QuickSetup.ps1?v={1}" -f $base, [Guid]::NewGuid().ToString("N"))
         if (-not (Test-QuickSetupTrustedUrl $url)) { continue }
 
         try {
@@ -1577,7 +1577,7 @@ if ([string]::Equals([System.IO.Path]::GetFileName($selectedBase), $appFolderNam
 if (-not (Test-Path $installPath)) {
     New-Item -ItemType Directory -Path $installPath -Force | Out-Null
 }
-$detectedScript = Join-Path $installPath "Script\Teams Always Green.ps1"
+$detectedScript = Join-Path $installPath "app/runtime/Teams Always Green.ps1"
 if (Test-Path $detectedScript) {
     $choice = Show-SetupPrompt -message "An existing install was detected at:`n$installPath`n`nUpgrade/repair this install?" -title "Existing Install" -buttons ([System.Windows.Forms.MessageBoxButtons]::YesNoCancel) -icon ([System.Windows.Forms.MessageBoxIcon]::Question) -owner $setupOwner
     if ($choice -eq [System.Windows.Forms.DialogResult]::Cancel) {
@@ -1610,18 +1610,7 @@ if (Test-Path $portableMarker) {
     $portableMode = (-not [bool]$welcome.CreateShortcuts)
 }
 $folders = @(
-    "Debug",
-    "Meta",
-    "assets",
-    "assets\icons",
-    "security",
-    "Script",
-    "Script\Core",
-    "Script\Features",
-    "Script\I18n",
-    "Script\Tray",
-    "Script\UI",
-    "Script\Uninstall"
+    "Debug","Meta","assets","assets/icons","security","app","app/runtime","app/runtime/Core","app/runtime/Features","app/runtime/I18n","app/runtime/Tray","app/runtime/UI","app/uninstall"
 )
 if ($portableMode) {
     $folders += @("Logs", "Settings")
@@ -1656,31 +1645,31 @@ foreach ($legacyLocator in @(
 $rawBase = Get-QuickSetupRemoteBase
 $cacheBuster = [Guid]::NewGuid().ToString("N")
 $filesToDownload = @(
-    @{ Url = "$rawBase/Script/Teams%20Always%20Green.ps1"; Path = "Script\Teams Always Green.ps1" },
-    @{ Url = "$rawBase/Script/Core/Logging.ps1"; Path = "Script\Core\Logging.ps1" },
-    @{ Url = "$rawBase/Script/Core/Paths.ps1"; Path = "Script\Core\Paths.ps1" },
-    @{ Url = "$rawBase/Script/Core/Runtime.ps1"; Path = "Script\Core\Runtime.ps1" },
-    @{ Url = "$rawBase/Script/Core/DateTime.ps1"; Path = "Script\Core\DateTime.ps1" },
-    @{ Url = "$rawBase/Script/Core/Settings.ps1"; Path = "Script\Core\Settings.ps1" },
-    @{ Url = "$rawBase/Script/Features/Hotkeys.ps1"; Path = "Script\Features\Hotkeys.ps1" },
-    @{ Url = "$rawBase/Script/Features/Profiles.ps1"; Path = "Script\Features\Profiles.ps1" },
-    @{ Url = "$rawBase/Script/Features/Scheduling.ps1"; Path = "Script\Features\Scheduling.ps1" },
-    @{ Url = "$rawBase/Script/Features/UpdateEngine.ps1"; Path = "Script\Features\UpdateEngine.ps1" },
-    @{ Url = "$rawBase/Script/I18n/UiStrings.ps1"; Path = "Script\I18n\UiStrings.ps1" },
-    @{ Url = "$rawBase/Script/Tray/Menu.ps1"; Path = "Script\Tray\Menu.ps1" },
-    @{ Url = "$rawBase/Script/UI/SettingsDialog.ps1"; Path = "Script\UI\SettingsDialog.ps1" },
-    @{ Url = "$rawBase/Script/UI/HistoryDialog.ps1"; Path = "Script\UI\HistoryDialog.ps1" },
-    @{ Url = "$rawBase/Script/Uninstall/Uninstall-Teams-Always-Green.ps1"; Path = "Script\Uninstall\Uninstall-Teams-Always-Green.ps1" },
-    @{ Url = "$rawBase/Script/Uninstall/Uninstall-Teams-Always-Green.vbs"; Path = "Script\Uninstall\Uninstall-Teams-Always-Green.vbs" },
+    @{ Url = "$rawBase/app/runtime/Teams%20Always%20Green.ps1"; Path = "app/runtime/Teams Always Green.ps1" },
+    @{ Url = "$rawBase/app/runtime/Core/Logging.ps1"; Path = "app/runtime/Core/Logging.ps1" },
+    @{ Url = "$rawBase/app/runtime/Core/Paths.ps1"; Path = "app/runtime/Core/Paths.ps1" },
+    @{ Url = "$rawBase/app/runtime/Core/Runtime.ps1"; Path = "app/runtime/Core/Runtime.ps1" },
+    @{ Url = "$rawBase/app/runtime/Core/DateTime.ps1"; Path = "app/runtime/Core/DateTime.ps1" },
+    @{ Url = "$rawBase/app/runtime/Core/Settings.ps1"; Path = "app/runtime/Core/Settings.ps1" },
+    @{ Url = "$rawBase/app/runtime/Features/Hotkeys.ps1"; Path = "app/runtime/Features/Hotkeys.ps1" },
+    @{ Url = "$rawBase/app/runtime/Features/Profiles.ps1"; Path = "app/runtime/Features/Profiles.ps1" },
+    @{ Url = "$rawBase/app/runtime/Features/Scheduling.ps1"; Path = "app/runtime/Features/Scheduling.ps1" },
+    @{ Url = "$rawBase/app/runtime/Features/UpdateEngine.ps1"; Path = "app/runtime/Features/UpdateEngine.ps1" },
+    @{ Url = "$rawBase/app/runtime/I18n/UiStrings.ps1"; Path = "app/runtime/I18n/UiStrings.ps1" },
+    @{ Url = "$rawBase/app/runtime/Tray/Menu.ps1"; Path = "app/runtime/Tray/Menu.ps1" },
+    @{ Url = "$rawBase/app/runtime/UI/SettingsDialog.ps1"; Path = "app/runtime/UI/SettingsDialog.ps1" },
+    @{ Url = "$rawBase/app/runtime/UI/HistoryDialog.ps1"; Path = "app/runtime/UI/HistoryDialog.ps1" },
+    @{ Url = "$rawBase/app/uninstall/Uninstall-Teams-Always-Green.ps1"; Path = "app/uninstall/Uninstall-Teams-Always-Green.ps1" },
+    @{ Url = "$rawBase/app/uninstall/Uninstall-Teams-Always-Green.vbs"; Path = "app/uninstall/Uninstall-Teams-Always-Green.vbs" },
     @{ Url = "$rawBase/VERSION"; Path = "VERSION" },
     @{ Url = "$rawBase/Teams%20Always%20Green.VBS"; Path = "Teams Always Green.VBS" },
-    @{ Url = "$rawBase/Debug/Teams%20Always%20Green%20-%20Debug.VBS"; Path = "Debug\Teams Always Green - Debug.VBS" },
-    @{ Url = "$rawBase/security/quicksetup-manifest-public.xml"; Path = "security\quicksetup-manifest-public.xml" },
-    @{ Url = "$rawBase/security/Teams-Always-Green.updatekey.xml"; Path = "security\Teams-Always-Green.updatekey.xml" },
-    @{ Url = "$rawBase/assets/icons/Tray_Icon.ico"; Path = "assets\icons\Tray_Icon.ico" },
-    @{ Url = "$rawBase/assets/icons/Settings_Icon.ico"; Path = "assets\icons\Settings_Icon.ico" }
+    @{ Url = "$rawBase/Debug/Teams%20Always%20Green%20-%20Debug.VBS"; Path = "Debug/Teams Always Green - Debug.VBS" },
+    @{ Url = "$rawBase/security/quicksetup-manifest-public.xml"; Path = "security/quicksetup-manifest-public.xml" },
+    @{ Url = "$rawBase/security/Teams-Always-Green.updatekey.xml"; Path = "security/Teams-Always-Green.updatekey.xml" },
+    @{ Url = "$rawBase/assets/icons/Tray_Icon.ico"; Path = "assets/icons/Tray_Icon.ico" },
+    @{ Url = "$rawBase/assets/icons/Settings_Icon.ico"; Path = "assets/icons/Settings_Icon.ico" }
 )
-$targetScript = Join-Path $installPath "Script\Teams Always Green.ps1"
+$targetScript = Join-Path $installPath "app/runtime/Teams Always Green.ps1"
 
 try {
     [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
@@ -1698,7 +1687,7 @@ $localManifestPath = $null
 $useLocal = $false
 if ($localRoot) {
     $localManifestPath = Join-Path $localRoot $script:QuickSetupManifestRelativePath
-    if (Test-Path (Join-Path $localRoot "Script\Teams Always Green.ps1")) {
+    if (Test-Path (Join-Path $localRoot "app/runtime/Teams Always Green.ps1")) {
         $useLocal = (Show-SetupPrompt -message (
             "Local app files were found in this local repository checkout.`nUse local files instead of downloading?",
             "Use Local Files"
@@ -1712,7 +1701,7 @@ if ($useLocal) {
     $manifest = Load-Manifest $localManifestPath
     $manifestSignature = Load-ManifestSignature (Join-Path $localRoot $script:QuickSetupManifestSignatureRelativePath)
 } else {
-    $manifestUrl = "$rawBase/Script/QuickSetup/QuickSetup.manifest.json?v=$cacheBuster"
+    $manifestUrl = "$rawBase/app/setup/QuickSetup.manifest.json?v=$cacheBuster"
     if (-not (Test-QuickSetupTrustedUrl $manifestUrl)) {
         Show-SetupError ("Blocked untrusted manifest URL: {0}" -f $manifestUrl)
         exit 1
@@ -1725,7 +1714,7 @@ if ($useLocal) {
         Show-SetupError "Manifest download failed. Setup cannot continue without integrity validation."
         exit 1
     }
-    $manifestSignatureUrl = "$rawBase/Script/QuickSetup/QuickSetup.manifest.sig?v=$cacheBuster"
+    $manifestSignatureUrl = "$rawBase/app/setup/QuickSetup.manifest.sig?v=$cacheBuster"
     if (-not (Test-QuickSetupTrustedUrl $manifestSignatureUrl)) {
         Show-SetupError ("Blocked untrusted manifest signature URL: {0}" -f $manifestSignatureUrl)
         exit 1
@@ -1913,7 +1902,7 @@ function Install-UninstallAssets {
         [object]$manifest
     )
 
-    $uninstallDir = Join-Path $installPath "Script\Uninstall"
+    $uninstallDir = Join-Path $installPath "app/uninstall"
     $uninstallScriptPath = Join-Path $uninstallDir "Uninstall-Teams-Always-Green.ps1"
     $uninstallVbsPath = Join-Path $uninstallDir "Uninstall-Teams-Always-Green.vbs"
     if (-not (Test-Path -LiteralPath $uninstallDir -PathType Container)) {
@@ -1922,13 +1911,13 @@ function Install-UninstallAssets {
 
     $assets = @(
         @{
-            RelativePath = "Script\Uninstall\Uninstall-Teams-Always-Green.ps1"
-            Url = "$script:QuickSetupRawBase/Script/Uninstall/Uninstall-Teams-Always-Green.ps1"
+            RelativePath = "app/uninstall/Uninstall-Teams-Always-Green.ps1"
+            Url = "$script:QuickSetupRawBase/app/uninstall/Uninstall-Teams-Always-Green.ps1"
             Path = $uninstallScriptPath
         },
         @{
-            RelativePath = "Script\Uninstall\Uninstall-Teams-Always-Green.vbs"
-            Url = "$script:QuickSetupRawBase/Script/Uninstall/Uninstall-Teams-Always-Green.vbs"
+            RelativePath = "app/uninstall/Uninstall-Teams-Always-Green.vbs"
+            Url = "$script:QuickSetupRawBase/app/uninstall/Uninstall-Teams-Always-Green.vbs"
             Path = $uninstallVbsPath
         }
     )
@@ -2677,10 +2666,10 @@ function Show-SetupWizard {
                 }
             }
             & $showStep 2
-            $targetScript = Join-Path $state.InstallPath "Script\Teams Always Green.ps1"
+            $targetScript = Join-Path $state.InstallPath "app/runtime/Teams Always Green.ps1"
 
             $folders = @(
-                "Debug","Meta","assets","assets\icons","security","Script","Script\Core","Script\Features","Script\I18n","Script\Tray","Script\UI","Script\Uninstall"
+                "Debug","Meta","assets","assets/icons","security","app","app/runtime","app/runtime/Core","app/runtime/Features","app/runtime/I18n","app/runtime/Tray","app/runtime/UI","app/uninstall"
             )
             if ($state.PortableMode) {
                 $folders += @("Logs", "Settings")
@@ -2713,7 +2702,7 @@ function Show-SetupWizard {
 
             $localRoot = Get-QuickSetupSourceRoot
             $useLocal = $false
-            if ($localRoot -and (Test-Path (Join-Path $localRoot "Script\Teams Always Green.ps1"))) {
+            if ($localRoot -and (Test-Path (Join-Path $localRoot "app/runtime/Teams Always Green.ps1"))) {
                 $useLocal = $true
                 Write-SetupLog "Using local app files for install."
             }
@@ -2728,7 +2717,7 @@ function Show-SetupWizard {
                 $manifest = Load-Manifest (Join-Path $localRoot $script:QuickSetupManifestRelativePath)
                 $manifestSignature = Load-ManifestSignature (Join-Path $localRoot $script:QuickSetupManifestSignatureRelativePath)
             } else {
-                $manifestUrl = "$script:QuickSetupRawBase/Script/QuickSetup/QuickSetup.manifest.json?v=$script:QuickSetupCacheBuster"
+                $manifestUrl = "$script:QuickSetupRawBase/app/setup/QuickSetup.manifest.json?v=$script:QuickSetupCacheBuster"
                 if (-not (Test-QuickSetupTrustedUrl $manifestUrl)) {
                     Show-SetupError ("Blocked untrusted manifest URL: {0}" -f $manifestUrl)
                     $state.Cancelled = $true
@@ -2745,7 +2734,7 @@ function Show-SetupWizard {
                     $form.Close()
                     return
                 }
-                $manifestSignatureUrl = "$script:QuickSetupRawBase/Script/QuickSetup/QuickSetup.manifest.sig?v=$script:QuickSetupCacheBuster"
+                $manifestSignatureUrl = "$script:QuickSetupRawBase/app/setup/QuickSetup.manifest.sig?v=$script:QuickSetupCacheBuster"
                 if (-not (Test-QuickSetupTrustedUrl $manifestSignatureUrl)) {
                     Show-SetupError ("Blocked untrusted manifest signature URL: {0}" -f $manifestSignatureUrl)
                     $state.Cancelled = $true
@@ -2934,29 +2923,29 @@ $script:QuickSetupChannelSource = [string]$channelResolution.Source
 $script:QuickSetupRawBase = Get-QuickSetupRemoteBase -channel $script:QuickSetupChannel
 $script:QuickSetupCacheBuster = [Guid]::NewGuid().ToString("N")
 $script:QuickSetupFiles = @(
-    @{ Url = "$script:QuickSetupRawBase/Script/Teams%20Always%20Green.ps1"; Path = "Script\Teams Always Green.ps1" },
-    @{ Url = "$script:QuickSetupRawBase/Script/Core/Logging.ps1"; Path = "Script\Core\Logging.ps1" },
-    @{ Url = "$script:QuickSetupRawBase/Script/Core/Paths.ps1"; Path = "Script\Core\Paths.ps1" },
-    @{ Url = "$script:QuickSetupRawBase/Script/Core/Runtime.ps1"; Path = "Script\Core\Runtime.ps1" },
-    @{ Url = "$script:QuickSetupRawBase/Script/Core/DateTime.ps1"; Path = "Script\Core\DateTime.ps1" },
-    @{ Url = "$script:QuickSetupRawBase/Script/Core/Settings.ps1"; Path = "Script\Core\Settings.ps1" },
-    @{ Url = "$script:QuickSetupRawBase/Script/Features/Hotkeys.ps1"; Path = "Script\Features\Hotkeys.ps1" },
-    @{ Url = "$script:QuickSetupRawBase/Script/Features/Profiles.ps1"; Path = "Script\Features\Profiles.ps1" },
-    @{ Url = "$script:QuickSetupRawBase/Script/Features/Scheduling.ps1"; Path = "Script\Features\Scheduling.ps1" },
-    @{ Url = "$script:QuickSetupRawBase/Script/Features/UpdateEngine.ps1"; Path = "Script\Features\UpdateEngine.ps1" },
-    @{ Url = "$script:QuickSetupRawBase/Script/I18n/UiStrings.ps1"; Path = "Script\I18n\UiStrings.ps1" },
-    @{ Url = "$script:QuickSetupRawBase/Script/Tray/Menu.ps1"; Path = "Script\Tray\Menu.ps1" },
-    @{ Url = "$script:QuickSetupRawBase/Script/UI/SettingsDialog.ps1"; Path = "Script\UI\SettingsDialog.ps1" },
-    @{ Url = "$script:QuickSetupRawBase/Script/UI/HistoryDialog.ps1"; Path = "Script\UI\HistoryDialog.ps1" },
-    @{ Url = "$script:QuickSetupRawBase/Script/Uninstall/Uninstall-Teams-Always-Green.ps1"; Path = "Script\Uninstall\Uninstall-Teams-Always-Green.ps1" },
-    @{ Url = "$script:QuickSetupRawBase/Script/Uninstall/Uninstall-Teams-Always-Green.vbs"; Path = "Script\Uninstall\Uninstall-Teams-Always-Green.vbs" },
+    @{ Url = "$script:QuickSetupRawBase/app/runtime/Teams%20Always%20Green.ps1"; Path = "app/runtime/Teams Always Green.ps1" },
+    @{ Url = "$script:QuickSetupRawBase/app/runtime/Core/Logging.ps1"; Path = "app/runtime/Core/Logging.ps1" },
+    @{ Url = "$script:QuickSetupRawBase/app/runtime/Core/Paths.ps1"; Path = "app/runtime/Core/Paths.ps1" },
+    @{ Url = "$script:QuickSetupRawBase/app/runtime/Core/Runtime.ps1"; Path = "app/runtime/Core/Runtime.ps1" },
+    @{ Url = "$script:QuickSetupRawBase/app/runtime/Core/DateTime.ps1"; Path = "app/runtime/Core/DateTime.ps1" },
+    @{ Url = "$script:QuickSetupRawBase/app/runtime/Core/Settings.ps1"; Path = "app/runtime/Core/Settings.ps1" },
+    @{ Url = "$script:QuickSetupRawBase/app/runtime/Features/Hotkeys.ps1"; Path = "app/runtime/Features/Hotkeys.ps1" },
+    @{ Url = "$script:QuickSetupRawBase/app/runtime/Features/Profiles.ps1"; Path = "app/runtime/Features/Profiles.ps1" },
+    @{ Url = "$script:QuickSetupRawBase/app/runtime/Features/Scheduling.ps1"; Path = "app/runtime/Features/Scheduling.ps1" },
+    @{ Url = "$script:QuickSetupRawBase/app/runtime/Features/UpdateEngine.ps1"; Path = "app/runtime/Features/UpdateEngine.ps1" },
+    @{ Url = "$script:QuickSetupRawBase/app/runtime/I18n/UiStrings.ps1"; Path = "app/runtime/I18n/UiStrings.ps1" },
+    @{ Url = "$script:QuickSetupRawBase/app/runtime/Tray/Menu.ps1"; Path = "app/runtime/Tray/Menu.ps1" },
+    @{ Url = "$script:QuickSetupRawBase/app/runtime/UI/SettingsDialog.ps1"; Path = "app/runtime/UI/SettingsDialog.ps1" },
+    @{ Url = "$script:QuickSetupRawBase/app/runtime/UI/HistoryDialog.ps1"; Path = "app/runtime/UI/HistoryDialog.ps1" },
+    @{ Url = "$script:QuickSetupRawBase/app/uninstall/Uninstall-Teams-Always-Green.ps1"; Path = "app/uninstall/Uninstall-Teams-Always-Green.ps1" },
+    @{ Url = "$script:QuickSetupRawBase/app/uninstall/Uninstall-Teams-Always-Green.vbs"; Path = "app/uninstall/Uninstall-Teams-Always-Green.vbs" },
     @{ Url = "$script:QuickSetupRawBase/VERSION"; Path = "VERSION" },
     @{ Url = "$script:QuickSetupRawBase/Teams%20Always%20Green.VBS"; Path = "Teams Always Green.VBS" },
-    @{ Url = "$script:QuickSetupRawBase/Debug/Teams%20Always%20Green%20-%20Debug.VBS"; Path = "Debug\Teams Always Green - Debug.VBS" },
-    @{ Url = "$script:QuickSetupRawBase/security/quicksetup-manifest-public.xml"; Path = "security\quicksetup-manifest-public.xml" },
-    @{ Url = "$script:QuickSetupRawBase/security/Teams-Always-Green.updatekey.xml"; Path = "security\Teams-Always-Green.updatekey.xml" },
-    @{ Url = "$script:QuickSetupRawBase/assets/icons/Tray_Icon.ico"; Path = "assets\icons\Tray_Icon.ico" },
-    @{ Url = "$script:QuickSetupRawBase/assets/icons/Settings_Icon.ico"; Path = "assets\icons\Settings_Icon.ico" }
+    @{ Url = "$script:QuickSetupRawBase/Debug/Teams%20Always%20Green%20-%20Debug.VBS"; Path = "Debug/Teams Always Green - Debug.VBS" },
+    @{ Url = "$script:QuickSetupRawBase/security/quicksetup-manifest-public.xml"; Path = "security/quicksetup-manifest-public.xml" },
+    @{ Url = "$script:QuickSetupRawBase/security/Teams-Always-Green.updatekey.xml"; Path = "security/Teams-Always-Green.updatekey.xml" },
+    @{ Url = "$script:QuickSetupRawBase/assets/icons/Tray_Icon.ico"; Path = "assets/icons/Tray_Icon.ico" },
+    @{ Url = "$script:QuickSetupRawBase/assets/icons/Settings_Icon.ico"; Path = "assets/icons/Settings_Icon.ico" }
 )
 
 try {
@@ -2988,7 +2977,7 @@ if ([string]::IsNullOrWhiteSpace($installPath)) {
     exit 1
 }
 
-$targetScript = Join-Path $installPath "Script\Teams Always Green.ps1"
+$targetScript = Join-Path $installPath "app/runtime/Teams Always Green.ps1"
 Write-SetupLog ("Summary action selected: {0}" -f $wizard.Action)
 
 if ($wizard.Action -eq "Launch") {
