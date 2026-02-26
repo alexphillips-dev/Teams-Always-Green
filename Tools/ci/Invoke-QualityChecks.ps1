@@ -11,7 +11,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
-$analyzerSettings = Join-Path $repoRoot "PSScriptAnalyzerSettings.psd1"
+$analyzerSettings = Join-Path $repoRoot "Tools/config/PSScriptAnalyzerSettings.psd1"
 $manifestScript = Join-Path $repoRoot "Tools/release/Generate-QuickSetupManifest.ps1"
 $privacyScanScript = Join-Path $repoRoot "Tools/ci/Find-PrivacyLeaks.ps1"
 $verifyScript = Join-Path $repoRoot "Tools/ci/Verify.ps1"

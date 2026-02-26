@@ -49,7 +49,7 @@ try {
     if ($SkipAnalyzer) {
         Write-Host "  SKIP  Analyzer step disabled."
     } elseif (Get-Command Invoke-ScriptAnalyzer -ErrorAction SilentlyContinue) {
-        $settingsPath = Join-Path $repoRoot "PSScriptAnalyzerSettings.psd1"
+        $settingsPath = Join-Path $repoRoot "Tools/config/PSScriptAnalyzerSettings.psd1"
         $result = Invoke-ScriptAnalyzer -Path (Join-Path $repoRoot "Script") -Recurse -Settings $settingsPath -Severity Warning,Error
         if ($result -and $result.Count -gt 0) {
             $top = $result | Select-Object -First 25 | ForEach-Object { "  {0}:{1} {2} ({3})" -f $_.ScriptName, $_.Line, $_.Message, $_.RuleName }
