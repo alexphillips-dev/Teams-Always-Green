@@ -1584,7 +1584,7 @@ try {
         $script:UninstallReport.ProcessesStopped = @($processResult.Stopped)
         $script:UninstallReport.ProcessStopFailures = @($processResult.Failed)
 
-        $knownLockers = @(Get-KnownLockerProcesses -installRoot $resolvedInstallRoot -oneDriveLike:[bool]$oneDrivePathInfo.IsOneDriveLike)
+        $knownLockers = @(Get-KnownLockerProcesses -installRoot $resolvedInstallRoot -oneDriveLike ([bool]$oneDrivePathInfo.IsOneDriveLike))
         $script:UninstallReport.KnownLockerCandidates = @($knownLockers | ForEach-Object { "PID={0}|Name={1}|Reason={2}" -f $_.ProcessId, $_.Name, $_.Reason })
         if ($knownLockers.Count -gt 0) {
             Add-UninstallDetail $ui ("Known locker candidates: {0}" -f ($script:UninstallReport.KnownLockerCandidates -join " || "))
@@ -1604,7 +1604,7 @@ try {
             $doRetry = Invoke-UninstallRetryGuidance -ui $ui -installRoot $resolvedInstallRoot -lockDiagnostics $lockDiagBeforeRetry
             if ($doRetry) {
                 if ($forceCloseKnownLockers) {
-                    $retryLockers = @(Get-KnownLockerProcesses -installRoot $resolvedInstallRoot -oneDriveLike:[bool]$oneDrivePathInfo.IsOneDriveLike)
+                    $retryLockers = @(Get-KnownLockerProcesses -installRoot $resolvedInstallRoot -oneDriveLike ([bool]$oneDrivePathInfo.IsOneDriveLike))
                     if ($retryLockers.Count -gt 0) {
                         $retryStopResult = Stop-KnownLockerProcesses -candidates $retryLockers -ui $ui
                         $script:UninstallReport.KnownLockersStopped += @($retryStopResult.Stopped)
