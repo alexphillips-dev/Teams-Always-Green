@@ -9,6 +9,11 @@ body:
       value: |
         Please describe the user problem first, then propose a solution.
 
+        If the request is based on a current bug or reliability issue, include supporting logs from:
+        - `%LOCALAPPDATA%\TeamsAlwaysGreen\Logs\Teams-Always-Green.log`
+        - `%LOCALAPPDATA%\Temp\TeamsAlwaysGreen-QuickSetup.log`
+        - `%LOCALAPPDATA%\Temp\TeamsAlwaysGreen-Uninstall-*.log`
+
   - type: textarea
     id: problem
     attributes:
@@ -42,6 +47,15 @@ body:
       placeholder: QuickSetup / Uninstall / Tray / Core / Docs / Security
     validations:
       required: true
+
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Supporting evidence (optional)
+      description: If applicable, paste error text/log excerpts showing why this change is needed.
+      render: text
+    validations:
+      required: false
 
   - type: checkboxes
     id: checks

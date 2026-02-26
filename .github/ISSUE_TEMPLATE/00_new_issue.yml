@@ -16,6 +16,27 @@ body:
         - version/channel and environment
         - relevant log lines and screenshots (with sensitive data removed)
 
+        Log locations:
+        - `%LOCALAPPDATA%\TeamsAlwaysGreen\Logs\Teams-Always-Green.log`
+        - `%LOCALAPPDATA%\Temp\TeamsAlwaysGreen-QuickSetup.log`
+        - `%LOCALAPPDATA%\Temp\TeamsAlwaysGreen-Uninstall-*.log`
+        - `%LOCALAPPDATA%\Temp\TeamsAlwaysGreen-UninstallLauncher.log`
+
+        Quick PowerShell command to list recent logs:
+        ```powershell
+        $logRoot = Join-Path $env:LOCALAPPDATA 'TeamsAlwaysGreen\Logs'
+        $tempRoot = Join-Path $env:LOCALAPPDATA 'Temp'
+        Get-ChildItem -Path $logRoot,$tempRoot -File -ErrorAction SilentlyContinue |
+          Where-Object {
+            $_.Name -eq 'Teams-Always-Green.log' -or
+            $_.Name -eq 'TeamsAlwaysGreen-QuickSetup.log' -or
+            $_.Name -like 'TeamsAlwaysGreen-Uninstall*.log' -or
+            $_.Name -like 'Setup Log*.txt'
+          } |
+          Sort-Object LastWriteTime -Descending |
+          Select-Object -First 20 FullName,LastWriteTime
+        ```
+
   - type: dropdown
     id: issue_type
     attributes:
@@ -87,7 +108,7 @@ body:
     id: logs
     attributes:
       label: Logs/screenshots
-      description: Paste key log lines or screenshots. Remove secrets and personal/company-sensitive data first.
+      description: Attach or paste key log lines from the locations above. Remove secrets and personal/company-sensitive data first.
       render: text
     validations:
       required: false

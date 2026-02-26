@@ -9,6 +9,27 @@ body:
       value: |
         Use this form for usage help and troubleshooting requests.
 
+        If this is setup/uninstall/runtime troubleshooting, include logs from:
+        - `%LOCALAPPDATA%\TeamsAlwaysGreen\Logs\Teams-Always-Green.log`
+        - `%LOCALAPPDATA%\Temp\TeamsAlwaysGreen-QuickSetup.log`
+        - `%LOCALAPPDATA%\Temp\TeamsAlwaysGreen-Uninstall-*.log`
+        - `%LOCALAPPDATA%\Temp\TeamsAlwaysGreen-UninstallLauncher.log`
+
+        Quick PowerShell command to list recent logs:
+        ```powershell
+        $logRoot = Join-Path $env:LOCALAPPDATA 'TeamsAlwaysGreen\Logs'
+        $tempRoot = Join-Path $env:LOCALAPPDATA 'Temp'
+        Get-ChildItem -Path $logRoot,$tempRoot -File -ErrorAction SilentlyContinue |
+          Where-Object {
+            $_.Name -eq 'Teams-Always-Green.log' -or
+            $_.Name -eq 'TeamsAlwaysGreen-QuickSetup.log' -or
+            $_.Name -like 'TeamsAlwaysGreen-Uninstall*.log' -or
+            $_.Name -like 'Setup Log*.txt'
+          } |
+          Sort-Object LastWriteTime -Descending |
+          Select-Object -First 20 FullName,LastWriteTime
+        ```
+
   - type: dropdown
     id: area
     attributes:
@@ -34,8 +55,8 @@ body:
   - type: textarea
     id: context
     attributes:
-      label: Context
-      description: Include version/channel, command used, and any error message.
+      label: Context and logs
+      description: Include version/channel, command used, error message, and key log lines.
       render: text
     validations:
       required: false

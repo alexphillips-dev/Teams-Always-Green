@@ -9,6 +9,27 @@ body:
       value: |
         Thanks for reporting this. Please include enough detail to reproduce the issue.
 
+        Log locations:
+        - `%LOCALAPPDATA%\TeamsAlwaysGreen\Logs\Teams-Always-Green.log`
+        - `%LOCALAPPDATA%\Temp\TeamsAlwaysGreen-QuickSetup.log`
+        - `%LOCALAPPDATA%\Temp\TeamsAlwaysGreen-Uninstall-*.log`
+        - `%LOCALAPPDATA%\Temp\TeamsAlwaysGreen-UninstallLauncher.log`
+
+        Quick PowerShell command to list recent logs:
+        ```powershell
+        $logRoot = Join-Path $env:LOCALAPPDATA 'TeamsAlwaysGreen\Logs'
+        $tempRoot = Join-Path $env:LOCALAPPDATA 'Temp'
+        Get-ChildItem -Path $logRoot,$tempRoot -File -ErrorAction SilentlyContinue |
+          Where-Object {
+            $_.Name -eq 'Teams-Always-Green.log' -or
+            $_.Name -eq 'TeamsAlwaysGreen-QuickSetup.log' -or
+            $_.Name -like 'TeamsAlwaysGreen-Uninstall*.log' -or
+            $_.Name -like 'Setup Log*.txt'
+          } |
+          Sort-Object LastWriteTime -Descending |
+          Select-Object -First 20 FullName,LastWriteTime
+        ```
+
   - type: input
     id: app_version
     attributes:
@@ -87,7 +108,7 @@ body:
     id: logs
     attributes:
       label: Logs and screenshots
-      description: Paste key lines (no secrets). Typical logs are in `%LOCALAPPDATA%\Temp` and `%LOCALAPPDATA%\TeamsAlwaysGreen\Logs`.
+      description: Attach or paste key lines from the log locations above (no secrets).
       render: text
     validations:
       required: false
