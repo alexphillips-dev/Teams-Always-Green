@@ -9,7 +9,7 @@
 # - Logs\      App/bootstrap/audit logs
 # - Settings\  Settings/state JSON + backups
 # - Meta\      Crash/status markers, cache, and metadata
-# - Meta\Icons\ Tray/UI icons
+# - assets\icons\ Tray/UI icons
 #
 # Launcher/install helpers:
 # - Teams Always Green.VBS
@@ -513,6 +513,37 @@ function Get-PathRelativeToRoot([string]$path, [string]$root) {
             return $full.Substring($rootFull.Length).TrimStart('\')
         }
     } catch { Write-IgnoredCatch $_ }
+    return ""
+}
+
+function Resolve-AppAssetPath {
+    param(
+        [string]$PrimaryRelativePath,
+        [string[]]$FallbackRelativePaths = @(),
+        [switch]$ReturnPrimaryWhenMissing
+    )
+
+    $candidates = New-Object System.Collections.Generic.List[string]
+    if (-not [string]::IsNullOrWhiteSpace($PrimaryRelativePath)) {
+        [void]$candidates.Add($PrimaryRelativePath)
+    }
+    foreach ($fallback in @($FallbackRelativePaths)) {
+        if ([string]::IsNullOrWhiteSpace([string]$fallback)) { continue }
+        if ($candidates -notcontains [string]$fallback) {
+            [void]$candidates.Add([string]$fallback)
+        }
+    }
+
+    foreach ($relativePath in $candidates) {
+        $candidatePath = Join-Path $script:AppRoot $relativePath
+        if (Test-Path -LiteralPath $candidatePath -PathType Leaf) {
+            return $candidatePath
+        }
+    }
+
+    if ($ReturnPrimaryWhenMissing -and -not [string]::IsNullOrWhiteSpace($PrimaryRelativePath)) {
+        return (Join-Path $script:AppRoot $PrimaryRelativePath)
+    }
     return ""
 }
 
@@ -1089,7 +1120,9 @@ $script:LifetimeToggleHighWaterLoaded = $false
 $script:IntegrityStatus = "Unknown"
 $script:IntegrityIssues = @()
 $script:IntegrityFailed = $false
-$script:UpdatePublicKeyPath = Join-Path $script:MetaDir "Teams-Always-Green.updatekey.xml"
+$script:UpdatePublicKeyPath = Resolve-AppAssetPath -PrimaryRelativePath "security\\public-keys\\Teams-Always-Green.updatekey.xml" -FallbackRelativePaths @(
+    "Meta\\Teams-Always-Green.updatekey.xml"
+) -ReturnPrimaryWhenMissing
 $script:SettingsVersionRetentionCount = 25
 $script:ProfileVersionRetentionCount = 20
 $script:StartupLoadingIndicator = $false
@@ -1807,9 +1840,9 @@ function Validate-RequiredFiles {
         Write-LogThrottled "Missing-Version" "VERSION file missing; version display may be inaccurate." "WARN" 300
     }
     $iconFiles = @(
-        (Join-Path $script:AppRoot "Meta\\Icons\\Tray_Icon.ico"),
-        (Join-Path $script:AppRoot "Meta\\Icons\\Settings_Icon.ico")
-    )
+        (Resolve-AppAssetPath -PrimaryRelativePath "assets\\icons\\Tray_Icon.ico" -FallbackRelativePaths @("Meta\\Icons\\Tray_Icon.ico") -ReturnPrimaryWhenMissing),
+        (Resolve-AppAssetPath -PrimaryRelativePath "assets\\icons\\Settings_Icon.ico" -FallbackRelativePaths @("Meta\\Icons\\Settings_Icon.ico") -ReturnPrimaryWhenMissing)
+    ) | Select-Object -Unique
     foreach ($icon in $iconFiles) {
         if (-not (Test-Path $icon)) {
             Write-LogThrottled ("MissingIcon-" + (Split-Path -Leaf $icon)) ("Icon missing: {0}. Using fallback icon." -f $icon) "WARN" 300
@@ -2724,7 +2757,9 @@ if (-not $script:HasMutex) {
 
 # --- Log/settings paths and logging defaults (resolve + create) ---
 # Resolve paths (same folder as script)
-$iconPath  = Join-Path $script:AppRoot "Meta\\Icons\\Tray_Icon.ico"
+$iconPath  = Resolve-AppAssetPath -PrimaryRelativePath "assets\\icons\\Tray_Icon.ico" -FallbackRelativePaths @(
+    "Meta\\Icons\\Tray_Icon.ico"
+) -ReturnPrimaryWhenMissing
 $script:logPath   = Join-Path $script:LogDirectory "Teams-Always-Green.log"
 $script:AuditLogPath = Join-Path $script:LogDirectory "Teams-Always-Green.audit.log"
 $script:SecurityAuditLogPath = Join-Path $script:LogDirectory "Teams-Always-Green.security.log"

@@ -12,6 +12,10 @@ The format is based on Keep a Changelog, and this project follows Semantic Versi
   - `Tools` split into `Tools/ci`, `Tools/release`, `Tools/local`, and `Tools/config`.
   - Test suites grouped under `Tests/Unit`, `Tests/Integration`, `Tests/Smoke`, and `Tests/Quality`.
   - Updated workflows/docs to use the new paths.
+- Moved static assets and public trust material into dedicated folders:
+  - `assets/icons` and `assets/readme` now host icon/readme image assets.
+  - `security/public-keys` now hosts QuickSetup and update verification public keys.
+  - Runtime/installer paths were updated with compatibility fallbacks for prior installs.
 
 ## [1.0.2] - 2026-02-26
 ### Added

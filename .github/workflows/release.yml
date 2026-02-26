@@ -59,7 +59,7 @@ jobs:
       - name: Verify QuickSetup manifest signature
         shell: pwsh
         run: |
-          ./Tools/release/Generate-QuickSetupManifest.ps1 -Check -RequireSignature -ManifestPublicKeyPath "Meta/Keys/quicksetup-manifest-public.xml"
+          ./Tools/release/Generate-QuickSetupManifest.ps1 -Check -RequireSignature -ManifestPublicKeyPath "security/public-keys/quicksetup-manifest-public.xml"
 
       - name: Install PowerShell modules
         shell: pwsh
@@ -98,7 +98,7 @@ jobs:
             -SignaturePath $sigPath `
             -OutputEncoding Hex `
             -Verify `
-            -PublicKeyPath "Meta/Teams-Always-Green.updatekey.xml"
+            -PublicKeyPath "security/public-keys/Teams-Always-Green.updatekey.xml"
           "update_sig=$sigPath" >> $env:GITHUB_OUTPUT
 
       - name: Build release notes

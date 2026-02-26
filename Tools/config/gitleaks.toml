@@ -1,11 +1,12 @@
 [extend]
 useDefault = true
 
-[[allowlists]]
-description = "Allow QuickSetup manifest SHA256 entry for public update key file"
+[allowlist]
+description = "Allow QuickSetup manifest SHA256 entries for public update key files"
 paths = [
   '''Script/QuickSetup/QuickSetup\.manifest\.json'''
 ]
 regexes = [
-  '''"Meta/Teams-Always-Green\.updatekey\.xml"\s*:\s*"[A-Fa-f0-9]{64}"'''
+  '''"Meta/Teams-Always-Green\.updatekey\.xml"\s*:\s*"[A-Fa-f0-9]{64}"''',
+  '''"security/public-keys/Teams-Always-Green\.updatekey\.xml"\s*:\s*"[A-Fa-f0-9]{64}"'''
 ]

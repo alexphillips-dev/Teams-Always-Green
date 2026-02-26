@@ -42,10 +42,19 @@ function Get-AppPaths {
             MinimalModeState     = if ($MetaDir) { Join-Path $MetaDir $script:AppMinimalModeStateFileName } else { $null }
             RestartRequest       = if ($MetaDir) { Join-Path $MetaDir $script:AppRestartRequestFileName } else { $null }
             LifetimeStats        = if ($MetaDir) { Join-Path $MetaDir $script:AppLifetimeStatsFileName } else { $null }
-            UpdatePublicKey      = if ($MetaDir) { Join-Path $MetaDir $script:AppUpdatePublicKeyFileName } else { $null }
+            UpdatePublicKey      = if ($script:UpdatePublicKeyPath) { [string]$script:UpdatePublicKeyPath } elseif ($MetaDir) { Join-Path $MetaDir $script:AppUpdatePublicKeyFileName } else { $null }
             ShutdownState        = if ($MetaDir) { Join-Path $MetaDir $script:AppShutdownStateFileName } else { $null }
             AuditChain           = if ($MetaDir) { Join-Path $MetaDir $script:AppAuditChainFileName } else { $null }
             SecurityAuditChain   = if ($MetaDir) { Join-Path $MetaDir $script:AppSecurityAuditChainFileName } else { $null }
+        }
+        Assets   = [ordered]@{
+            IconsDirectory       = Join-Path $AppRoot "assets\\icons"
+            TrayIcon             = Join-Path $AppRoot "assets\\icons\\Tray_Icon.ico"
+            SettingsIcon         = Join-Path $AppRoot "assets\\icons\\Settings_Icon.ico"
+        }
+        Security = [ordered]@{
+            PublicKeysDirectory  = Join-Path $AppRoot "security\\public-keys"
+            UpdatePublicKey      = if ($script:UpdatePublicKeyPath) { [string]$script:UpdatePublicKeyPath } else { Join-Path $AppRoot "security\\public-keys\\Teams-Always-Green.updatekey.xml" }
         }
     }
 
@@ -58,4 +67,3 @@ function Sync-AppPaths {
     $script:Paths = Get-AppPaths
     return $script:Paths
 }
-
