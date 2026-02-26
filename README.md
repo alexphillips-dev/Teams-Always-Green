@@ -110,7 +110,6 @@ powershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File "Script\Teams Alwa
 
 ```
 Teams Always Green\
-  .editorconfig
   docs\
     architecture.md
     security-standards.md
@@ -150,6 +149,10 @@ Teams Always Green\
     Icons\
     Keys\
       quicksetup-manifest-public.xml
+    RepoConfig\
+      editorconfig.template
+      gitattributes.template
+      gitignore.template
     Teams-Always-Green.updatekey.xml
     Readme\
       Banner.png

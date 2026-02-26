@@ -1,0 +1,13 @@
+*.status.json
+*.shutdown.state.txt
+*.log.path.txt
+*.settings.path.txt
+*.crash.json
+*.integrity.json
+*.startup.json
+*.state.lastgood.json
+PortableMode.txt
+QuickSetup.manifest.json
+*.settings.lastgood.json
+SettingsApp/
+SettingsHost.cs
