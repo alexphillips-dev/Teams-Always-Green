@@ -10,6 +10,22 @@ The format is based on Keep a Changelog, and this project follows Semantic Versi
 ### Changed
 - None yet.
 
+## [1.0.2] - 2026-02-26
+### Added
+- Branch-aware QuickSetup UX with persistent `Channel: main/dev` labeling, explicit channel chooser fallback, and dev-channel warning flow.
+- OneDrive-aware install/uninstall safeguards and diagnostics to reduce business-user sync/lock issues.
+- Full uninstall wizard flow with in-window progress, details pane, and dry-run validation mode.
+- Uninstall lock handling safeguards: likely-locker process detection, optional force-close path, retry/backoff, and lock diagnostics.
+- Expanded uninstall integration and quality tests for dry-run behavior, launcher flow, working-directory edge cases, and locked-path cleanup.
+
+### Changed
+- QuickSetup channel detection now prioritizes explicit runtime signals (`TAG_QUICKSETUP_CHANNEL`, command context, invocation text, history) before hash/git fallback for deterministic main/dev installs.
+- QuickSetup integrity flow was hardened for XML line-ending hash normalization and signed manifest freshness verification.
+- QuickSetup launcher/readme install commands were standardized for deterministic channel selection.
+- Uninstall VBS/PowerShell relaunch behavior was hardened for reliable interactive startup with improved telemetry.
+- Uninstall UI was refined to keep users in one continuous flow with clearer guidance and completion states.
+- Uninstall retry behavior for OneDrive-like locks was tuned to reduce total wait time while preserving diagnostics.
+
 ## [1.0.1] - 2026-02-24
 ### Added
 - Required QuickSetup manifest signature verification with a pinned RSA public key.
