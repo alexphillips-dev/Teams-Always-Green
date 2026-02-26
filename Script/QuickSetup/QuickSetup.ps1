@@ -324,18 +324,11 @@ function Resolve-QuickSetupChannel {
 }
 
 function Resolve-QuickSetupChannelFallback {
-    $msg = @(
-        "Quick Setup could not auto-detect the install channel in this PowerShell session.",
-        "",
-        "Yes = install Stable (main)",
-        "No = install Testing (dev)",
-        "Cancel = exit setup"
-    ) -join "`n"
-    $choice = Show-SetupPrompt -message $msg -title "Choose Install Channel" -buttons ([System.Windows.Forms.MessageBoxButtons]::YesNoCancel) -icon ([System.Windows.Forms.MessageBoxIcon]::Question) -owner $null
-    if ($choice -eq [System.Windows.Forms.DialogResult]::Yes) {
+    $choice = Show-ChannelSelectionDialog -owner $null
+    if ($choice -eq "main") {
         return [pscustomobject]@{ Channel = "main"; Source = "manual-fallback" ; Cancelled = $false }
     }
-    if ($choice -eq [System.Windows.Forms.DialogResult]::No) {
+    if ($choice -eq "dev") {
         return [pscustomobject]@{ Channel = "dev"; Source = "manual-fallback" ; Cancelled = $false }
     }
     return [pscustomobject]@{ Channel = "main"; Source = "manual-fallback-cancelled" ; Cancelled = $true }
@@ -626,6 +619,88 @@ function Show-SetupPrompt {
     $result = [System.Windows.Forms.MessageBox]::Show($localOwner, $message, $title, $buttons, $icon)
     if (-not $owner -and $localOwner) { $localOwner.Close() }
     return $result
+}
+
+function Show-ChannelSelectionDialog {
+    param(
+        [System.Windows.Forms.Form]$owner
+    )
+
+    $form = New-Object System.Windows.Forms.Form
+    $form.Text = "Choose Install Channel"
+    $form.Width = 560
+    $form.Height = 280
+    $form.StartPosition = "CenterScreen"
+    $form.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::FixedDialog
+    $form.MaximizeBox = $false
+    $form.MinimizeBox = $false
+    $form.TopMost = $true
+    $form.Tag = "cancelled"
+
+    $title = New-Object System.Windows.Forms.Label
+    $title.AutoSize = $true
+    $title.Font = New-Object System.Drawing.Font("Segoe UI", 10.5, [System.Drawing.FontStyle]::Bold)
+    $title.Location = New-Object System.Drawing.Point(18, 18)
+    $title.Text = "Select install channel"
+
+    $body = New-Object System.Windows.Forms.Label
+    $body.AutoSize = $false
+    $body.Width = 510
+    $body.Height = 122
+    $body.Location = New-Object System.Drawing.Point(18, 46)
+    $body.Font = New-Object System.Drawing.Font("Segoe UI", 9, [System.Drawing.FontStyle]::Regular)
+    $body.Text = @(
+        "Quick Setup could not auto-detect the channel in this PowerShell session.",
+        "",
+        "Main: stable release channel (recommended).",
+        "Dev: testing channel with in-progress changes.",
+        "Cancel: exit setup without installing."
+    ) -join "`r`n"
+
+    $btnMain = New-Object System.Windows.Forms.Button
+    $btnMain.Text = "Main"
+    $btnMain.Width = 90
+    $btnMain.Height = 30
+    $btnMain.Location = New-Object System.Drawing.Point(244, 194)
+    $btnMain.Add_Click({
+        $form.Tag = "main"
+        $form.Close()
+    })
+
+    $btnDev = New-Object System.Windows.Forms.Button
+    $btnDev.Text = "Dev"
+    $btnDev.Width = 90
+    $btnDev.Height = 30
+    $btnDev.Location = New-Object System.Drawing.Point(342, 194)
+    $btnDev.Add_Click({
+        $form.Tag = "dev"
+        $form.Close()
+    })
+
+    $btnCancel = New-Object System.Windows.Forms.Button
+    $btnCancel.Text = "Cancel"
+    $btnCancel.Width = 90
+    $btnCancel.Height = 30
+    $btnCancel.Location = New-Object System.Drawing.Point(440, 194)
+    $btnCancel.Add_Click({
+        $form.Tag = "cancelled"
+        $form.Close()
+    })
+
+    $form.AcceptButton = $btnMain
+    $form.CancelButton = $btnCancel
+    $form.Controls.Add($title)
+    $form.Controls.Add($body)
+    $form.Controls.Add($btnMain)
+    $form.Controls.Add($btnDev)
+    $form.Controls.Add($btnCancel)
+
+    if ($owner) {
+        [void]$form.ShowDialog($owner)
+    } else {
+        [void]$form.ShowDialog()
+    }
+    return [string]$form.Tag
 }
 
 function New-SetupOwner {
