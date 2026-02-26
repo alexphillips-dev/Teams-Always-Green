@@ -1,0 +1,31 @@
+# Runtime outputs
+Logs/
+Debug/*.log
+Meta/*.status.json
+Meta/*.shutdown.state.txt
+Meta/*.log.path.txt
+Meta/*.settings.path.txt
+Meta/*.crash.json
+Meta/*.integrity.json
+Meta/*.startup.json
+Meta/*.state.lastgood.json
+Meta/PortableMode.txt
+Meta/QuickSetup.manifest.json
+Meta/*.settings.lastgood.json
+Settings/
+Testing/
+
+# Local editor/workspace files
+.vscode/
+/Teams Always Green.code-workspace
+coverage.xml
+
+# Secrets
+secrets/
+
+# Local-only dev helpers
+.githooks/
+
+# OS junk
+.DS_Store
+Thumbs.db

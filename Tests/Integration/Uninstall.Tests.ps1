@@ -3,7 +3,7 @@ Set-StrictMode -Version Latest
 Describe "Uninstall integration" {
     BeforeAll {
         $script:repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
-        $script:uninstallSource = Join-Path $script:repoRoot "Script/Uninstall/Uninstall-Teams-Always-Green.ps1"
+        $script:uninstallSource = Join-Path $script:repoRoot "app/uninstall/Uninstall-Teams-Always-Green.ps1"
         $script:pwshPath = Join-Path $env:WINDIR "System32/WindowsPowerShell/v1.0/powershell.exe"
 
         function New-UninstallSandbox {
@@ -17,14 +17,14 @@ Describe "Uninstall integration" {
             } else {
                 [string]$RootPath
             }
-            $uninstallDir = Join-Path $root "Script/Uninstall"
+            $uninstallDir = Join-Path $root "app/uninstall"
             New-Item -ItemType Directory -Path $uninstallDir -Force | Out-Null
             Copy-Item -Path $script:uninstallSource -Destination (Join-Path $uninstallDir "Uninstall-Teams-Always-Green.ps1") -Force
 
             if ($WithMarkers) {
-                New-Item -ItemType Directory -Path (Join-Path $root "Script") -Force | Out-Null
+                New-Item -ItemType Directory -Path (Join-Path $root "app/runtime") -Force | Out-Null
                 New-Item -ItemType Directory -Path (Join-Path $root "Meta") -Force | Out-Null
-                Set-Content -Path (Join-Path $root "Script/Teams Always Green.ps1") -Value "# marker" -Encoding UTF8
+                Set-Content -Path (Join-Path $root "app/runtime/Teams Always Green.ps1") -Value "# marker" -Encoding UTF8
                 Set-Content -Path (Join-Path $root "Teams Always Green.VBS") -Value "' marker" -Encoding ASCII
                 Set-Content -Path (Join-Path $uninstallDir "Uninstall-Teams-Always-Green.vbs") -Value "' marker" -Encoding ASCII
             }
@@ -116,7 +116,7 @@ Describe "Uninstall integration" {
 
     It "supports dry-run mode without deleting files" {
         $root = New-UninstallSandbox -WithMarkers $true
-        $scriptPath = Join-Path $root "Script/Uninstall/Uninstall-Teams-Always-Green.ps1"
+        $scriptPath = Join-Path $root "app/uninstall/Uninstall-Teams-Always-Green.ps1"
         $localAppData = Join-Path $env:TEMP ("TAG-Uninstall-IT-Local-" + [Guid]::NewGuid().ToString("N"))
         $runTemp = Join-Path $env:TEMP ("TAG-Uninstall-IT-Run-" + [Guid]::NewGuid().ToString("N"))
         New-Item -ItemType Directory -Path $localAppData -Force | Out-Null
@@ -138,7 +138,7 @@ Describe "Uninstall integration" {
 
     It "removes install root and app data when policy is Remove" {
         $root = New-UninstallSandbox -WithMarkers $true
-        $scriptPath = Join-Path $root "Script/Uninstall/Uninstall-Teams-Always-Green.ps1"
+        $scriptPath = Join-Path $root "app/uninstall/Uninstall-Teams-Always-Green.ps1"
 
         $localBase = Join-Path $env:TEMP ("TAG-Uninstall-IT-Local-" + [Guid]::NewGuid().ToString("N"))
         $appDataRoot = Join-Path $localBase "TeamsAlwaysGreen"
@@ -165,7 +165,7 @@ Describe "Uninstall integration" {
 
     It "blocks uninstall when install signature markers are missing" {
         $root = New-UninstallSandbox -WithMarkers $false
-        $scriptPath = Join-Path $root "Script/Uninstall/Uninstall-Teams-Always-Green.ps1"
+        $scriptPath = Join-Path $root "app/uninstall/Uninstall-Teams-Always-Green.ps1"
         $localAppData = Join-Path $env:TEMP ("TAG-Uninstall-IT-Local-" + [Guid]::NewGuid().ToString("N"))
         $runTemp = Join-Path $env:TEMP ("TAG-Uninstall-IT-Run-" + [Guid]::NewGuid().ToString("N"))
         New-Item -ItemType Directory -Path $localAppData -Force | Out-Null
@@ -189,7 +189,7 @@ Describe "Uninstall integration" {
         $oneDriveBase = Join-Path $env:TEMP (("One" + "Drive - TAG-Uninstall-IT-") + [Guid]::NewGuid().ToString("N"))
         $root = Join-Path $oneDriveBase "Teams Always Green"
         $root = New-UninstallSandbox -WithMarkers $false -RootPath $root
-        $scriptPath = Join-Path $root "Script/Uninstall/Uninstall-Teams-Always-Green.ps1"
+        $scriptPath = Join-Path $root "app/uninstall/Uninstall-Teams-Always-Green.ps1"
         $localAppData = Join-Path $env:TEMP ("TAG-Uninstall-IT-Local-" + [Guid]::NewGuid().ToString("N"))
         $runTemp = Join-Path $env:TEMP ("TAG-Uninstall-IT-Run-" + [Guid]::NewGuid().ToString("N"))
         New-Item -ItemType Directory -Path $localAppData -Force | Out-Null
@@ -213,7 +213,7 @@ Describe "Uninstall integration" {
 
     It "removes install root even when launched with install-root working directory" {
         $root = New-UninstallSandbox -WithMarkers $true
-        $scriptPath = Join-Path $root "Script/Uninstall/Uninstall-Teams-Always-Green.ps1"
+        $scriptPath = Join-Path $root "app/uninstall/Uninstall-Teams-Always-Green.ps1"
         $localAppData = Join-Path $env:TEMP ("TAG-Uninstall-IT-Local-" + [Guid]::NewGuid().ToString("N"))
         $runTemp = Join-Path $env:TEMP ("TAG-Uninstall-IT-Run-" + [Guid]::NewGuid().ToString("N"))
         New-Item -ItemType Directory -Path $localAppData -Force | Out-Null
@@ -237,13 +237,13 @@ Describe "Uninstall integration" {
         $oneDriveBase = Join-Path $env:TEMP (("One" + "Drive - TAG-Uninstall-Lock-") + [Guid]::NewGuid().ToString("N"))
         $root = Join-Path $oneDriveBase "Teams Always Green"
         $root = New-UninstallSandbox -WithMarkers $true -RootPath $root
-        $scriptPath = Join-Path $root "Script/Uninstall/Uninstall-Teams-Always-Green.ps1"
+        $scriptPath = Join-Path $root "app/uninstall/Uninstall-Teams-Always-Green.ps1"
         $localAppData = Join-Path $env:TEMP ("TAG-Uninstall-IT-Local-" + [Guid]::NewGuid().ToString("N"))
         $runTemp = Join-Path $env:TEMP ("TAG-Uninstall-IT-Run-" + [Guid]::NewGuid().ToString("N"))
         New-Item -ItemType Directory -Path $localAppData -Force | Out-Null
         New-Item -ItemType Directory -Path $runTemp -Force | Out-Null
 
-        $lockFile = Join-Path $root "Script/Uninstall/lock.tmp"
+        $lockFile = Join-Path $root "app/uninstall/lock.tmp"
         Set-Content -Path $lockFile -Value "lock" -Encoding ASCII
         $holder = Start-LockFileHolder -FilePath $lockFile -HoldSeconds 25
         try {
@@ -269,3 +269,4 @@ Describe "Uninstall integration" {
         Remove-Item -Path $runTemp -Recurse -Force -ErrorAction SilentlyContinue
     }
 }
+

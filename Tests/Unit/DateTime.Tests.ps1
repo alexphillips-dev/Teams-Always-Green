@@ -3,7 +3,7 @@ Set-StrictMode -Version Latest
 Describe "Core: DateTime helpers" {
     BeforeAll {
         $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
-        . (Join-Path $repoRoot "Script/Core/DateTime.ps1")
+        . (Join-Path $repoRoot "app/runtime/Core/DateTime.ps1")
     }
 
     It "Normalize-DateTimeFormat falls back to default on empty input" {
@@ -32,3 +32,4 @@ Describe "Core: DateTime helpers" {
         [string]::IsNullOrWhiteSpace($text) | Should -BeFalse
     }
 }
+

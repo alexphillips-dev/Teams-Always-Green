@@ -2,23 +2,23 @@
 
 ## Runtime Model
 
-`Script/Teams Always Green.ps1` is the app entry point. It initializes runtime state, loads feature modules, creates the tray UI, and runs the toggle loop.
+`app/runtime/Teams Always Green.ps1` is the app entry point. It initializes runtime state, loads feature modules, creates the tray UI, and runs the toggle loop.
 
 ## Module Boundaries
 
-- `Script/Core/*`
+- `app/runtime/Core/*`
   - Shared app metadata, paths, settings migration/validation, runtime helpers, and logging primitives.
-- `Script/Features/UpdateEngine.ps1`
+- `app/runtime/Features/UpdateEngine.ps1`
   - Update discovery, trust validation, hash/signature verification, and update apply flow.
-- `Script/Features/Hotkeys.ps1`
+- `app/runtime/Features/Hotkeys.ps1`
   - Hotkey parsing and registration lifecycle.
-- `Script/Features/Scheduling.ps1`
+- `app/runtime/Features/Scheduling.ps1`
   - Schedule parsing and runtime schedule-block decisions.
-- `Script/Features/Profiles.ps1`
+- `app/runtime/Features/Profiles.ps1`
   - Profile runtime helpers (usage split summaries).
-- `Script/Tray/Menu.ps1`
+- `app/runtime/Tray/Menu.ps1`
   - Tray menu construction/actions and labels.
-- `Script/UI/*.ps1`
+- `app/runtime/UI/*.ps1`
   - Settings and History dialogs.
 
 All runtime feature/UI modules are loaded via trusted-path runtime import helpers and contract checks.
@@ -46,3 +46,4 @@ All runtime feature/UI modules are loaded via trusted-path runtime import helper
   - `Logs\`, `Settings\`, `Meta\`
 - Portable mode data root: install directory
   - `Logs\`, `Settings\`, `Meta\`
+

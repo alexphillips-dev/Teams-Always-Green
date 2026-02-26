@@ -1,6 +1,6 @@
 param(
     [string]$RepoRoot = "",
-    [string]$InputFile = "Script/Teams Always Green.ps1",
+    [string]$InputFile = "app/runtime/Teams Always Green.ps1",
     [Parameter(Mandatory = $true)][string]$PrivateKeyPath,
     [string]$SignaturePath = "",
     [ValidateSet("Hex", "Base64")][string]$OutputEncoding = "Hex",
@@ -123,3 +123,4 @@ if ($verifyRequested) {
     }
     Write-Host "Signature verification succeeded."
 }
+

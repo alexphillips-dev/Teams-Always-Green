@@ -429,6 +429,7 @@ function Test-UninstallTargetPath([string]$path) {
     }
 
     $markers = @(
+        (Join-Path $resolved "app\runtime\Teams Always Green.ps1"),
         (Join-Path $resolved "Script\Teams Always Green.ps1"),
         (Join-Path $resolved "Teams Always Green.VBS"),
         (Join-Path $resolved "Meta")
@@ -1047,7 +1048,8 @@ function Get-TrackedProcessCandidates([string]$installRoot) {
 
     $tokens = @(
         $installRoot,
-        (Join-Path $installRoot "Script\Teams Always Green.ps1"),
+        (Join-Path $installRoot "app\runtime\Teams Always Green.ps1"),
+        (Join-Path $installRoot "app\uninstall"),
         (Join-Path $installRoot "Teams Always Green.VBS"),
         (Join-Path $installRoot "Script\Uninstall")
     ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | ForEach-Object { $_.ToLowerInvariant() }

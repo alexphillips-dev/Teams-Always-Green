@@ -19,4 +19,4 @@ jobs:
       - name: Verify QuickSetup manifest freshness
         shell: pwsh
         run: |
-          ./Tools/release/Generate-QuickSetupManifest.ps1 -Check -RequireSignature -ManifestPublicKeyPath "security/public-keys/quicksetup-manifest-public.xml"
+          ./Tools/release/Generate-QuickSetupManifest.ps1 -Check -RequireSignature -ManifestPublicKeyPath "security/quicksetup-manifest-public.xml"

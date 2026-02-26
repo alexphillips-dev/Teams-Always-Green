@@ -1,22 +1,24 @@
-﻿
 # Teams Always Green
 # PSScriptAnalyzerSettings -DisableRuleName PSUseApprovedVerbs
-# Main tray app script. Keeps Teams presence active by toggling Scroll Lock.
+# Main runtime tray app. Keeps Teams presence active by toggling Scroll Lock.
 # Includes profiles, schedule/pause controls, hotkeys, Settings/History UI,
-# startup prompts, recovery/self-heal, logging, and restart/exit handling.
+# startup safety prompts, recovery/self-heal, logging, and restart handling.
 #
-# Runtime data root (default): %LocalAppData%\TeamsAlwaysGreen
+# Install layout:
+# - app\runtime\   Main app + modules
+# - app\setup\     QuickSetup installer
+# - app\uninstall\ Uninstall wizard
+# - assets\icons\  Tray/UI icons
+# - security\      Public verification keys
+#
+# Runtime data root (standard install): %LocalAppData%\TeamsAlwaysGreen
 # - Logs\      App/bootstrap/audit logs
 # - Settings\  Settings/state JSON + backups
-# - Meta\      Crash/status markers, cache, and metadata
-# - assets\icons\ Tray/UI icons
-#
-# Launcher/install helpers:
-# - Teams Always Green.VBS
-# - Script\QuickSetup\QuickSetup.cmd / Script\QuickSetup\QuickSetup.ps1
+# - Meta\      Crash/status markers and runtime metadata
 #
 # Run mode:
 # - -SettingsOnly opens Settings without starting the tray loop
+# - -RelaunchedFromRestart marks controlled restart launch path
 
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseApprovedVerbs', '', Scope='Function', Target='*', Justification='Legacy function names are intentionally retained for compatibility.')]
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseSingularNouns', '', Scope='Function', Target='*', Justification='Legacy function names are intentionally retained for compatibility.')]
@@ -289,14 +291,20 @@ function Test-ProfileExportSignature($payload) {
 # --- Paths, Meta folder, and locator files (resolve root, ensure dirs) ---
 $scriptPath = $MyInvocation.MyCommand.Path
 $scriptDir = Split-Path -Parent $scriptPath
-$appRoot = if ((Split-Path -Leaf $scriptDir) -ieq "Script") { Split-Path -Parent $scriptDir } else { $scriptDir }
+$leafDir = Split-Path -Leaf $scriptDir
+$parentDir = Split-Path -Parent $scriptDir
+$parentLeaf = Split-Path -Leaf $parentDir
+$appRoot =
+    if ($leafDir -ieq "runtime" -and $parentLeaf -ieq "app") { Split-Path -Parent $parentDir }
+    elseif ($leafDir -ieq "Script") { Split-Path -Parent $scriptDir }
+    else { $scriptDir }
 $script:AppRoot = $appRoot
 $script:FolderNames = @{
     Logs = "Logs"
     Settings = "Settings"
     Meta = "Meta"
     Debug = "Debug"
-    Script = "Script"
+    Script = "app\runtime"
 }
 $script:RuntimeModuleAllowList = @(
     "Core\Logging.ps1",
@@ -643,7 +651,9 @@ function Test-RuntimeModulePathAllowed([string]$path, [string]$tag = "Runtime-Mo
     }
     $normalized = $relative -replace '/', '\'
     $normalized = $normalized -replace '\\+', '\'
-    if ($normalized.StartsWith("Script\", [System.StringComparison]::OrdinalIgnoreCase)) {
+    if ($normalized.StartsWith("app\runtime\", [System.StringComparison]::OrdinalIgnoreCase)) {
+        $normalized = $normalized.Substring(12)
+    } elseif ($normalized.StartsWith("Script\", [System.StringComparison]::OrdinalIgnoreCase)) {
         $normalized = $normalized.Substring(7)
     }
     $allowed = $false
@@ -1120,7 +1130,8 @@ $script:LifetimeToggleHighWaterLoaded = $false
 $script:IntegrityStatus = "Unknown"
 $script:IntegrityIssues = @()
 $script:IntegrityFailed = $false
-$script:UpdatePublicKeyPath = Resolve-AppAssetPath -PrimaryRelativePath "security\\public-keys\\Teams-Always-Green.updatekey.xml" -FallbackRelativePaths @(
+$script:UpdatePublicKeyPath = Resolve-AppAssetPath -PrimaryRelativePath "security\\Teams-Always-Green.updatekey.xml" -FallbackRelativePaths @(
+    "security\\public-keys\\Teams-Always-Green.updatekey.xml"
     "Meta\\Teams-Always-Green.updatekey.xml"
 ) -ReturnPrimaryWhenMissing
 $script:SettingsVersionRetentionCount = 25

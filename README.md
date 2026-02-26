@@ -16,7 +16,7 @@ Keep your Microsoft Teams status active without babysitting your keyboard. Teams
 - **Smart scheduling:** Work hours, pauses, and quick overrides.
 - **Profiles:** Switch configurations in seconds.
 - **Helpful logging:** Debug detail when you need it.
-- **Language support:** English, Spanish, French, German (auto-detect + manual).
+- **Language support:** English, Spanish, French, German, Italian, Portuguese, Dutch, Polish (auto-detect + manual).
 
 ## Why This Project Exists
 
@@ -33,18 +33,19 @@ This was not created to avoid work or to encourage misuse. It was created to red
 Stable (`main`):
 
 ```powershell
-$env:TAG_QUICKSETUP_CHANNEL='main'; irm https://raw.githubusercontent.com/alexphillips-dev/Teams-Always-Green/main/Script/QuickSetup/QuickSetup.ps1 | iex
+$env:TAG_QUICKSETUP_CHANNEL='main'; irm https://raw.githubusercontent.com/alexphillips-dev/Teams-Always-Green/main/app/setup/QuickSetup.ps1 | iex
 ```
 
 Testing (`dev`):
 
 ```powershell
-$env:TAG_QUICKSETUP_CHANNEL='dev'; irm https://raw.githubusercontent.com/alexphillips-dev/Teams-Always-Green/dev/Script/QuickSetup/QuickSetup.ps1 | iex
+$env:TAG_QUICKSETUP_CHANNEL='dev'; irm https://raw.githubusercontent.com/alexphillips-dev/Teams-Always-Green/dev/app/setup/QuickSetup.ps1 | iex
 ```
 
 `dev` includes in-progress changes and may be unstable.
+Quick Setup shows an always-visible `Channel: main` or `Channel: dev` label in the wizard header.
 
-1) Download `Script/QuickSetup/QuickSetup.cmd` from the repo (it always pulls the latest installer).  
+1) Download `app/setup/QuickSetup.cmd` from the repo (it always pulls the latest installer).  
 2) Double-click it.  
 3) Choose your install folder (default: `Documents\Teams Always Green`).
 
@@ -82,12 +83,12 @@ Optional: choose **portable mode** to skip shortcuts. Setup logs are saved to `%
 ## Manual Install
 
 1) Create a folder (example: `Documents\Teams Always Green`).  
-2) Copy the entire `Script\` folder from the repo into it.  
-3) Copy `Meta\`, `assets\`, `security\`, and `VERSION` from the repo into the install folder.  
+2) Copy the entire `app\` folder from the repo into it.  
+3) Copy `assets\`, `security\`, `Teams Always Green.VBS`, and `VERSION` into the install folder.  
 4) Run:
 
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File "Script\Teams Always Green.ps1"
+powershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File "app\runtime\Teams Always Green.ps1"
 ```
 
 ---
@@ -96,6 +97,12 @@ powershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File "Script\Teams Alwa
 
 - Right-click the tray icon for Start/Stop, Settings, History, Restart, and more.
 - Use **Settings** for profiles, scheduling, hotkeys, appearance, and logging.
+
+### UI Languages
+
+- Auto-detect from system locale is supported.
+- You can set language manually in **Settings -> General -> Language**.
+- Current built-in options: English, Spanish, French, German, Italian, Portuguese, Dutch, Polish.
 
 ---
 
@@ -115,25 +122,26 @@ Teams Always Green\
       overview.md
     security\
       standards.md
-  Script\
-    Teams Always Green.ps1
-    Core\
-    Features\
-      Hotkeys.ps1
-      Profiles.ps1
-      Scheduling.ps1
-      UpdateEngine.ps1
-    I18n\
-    Tray\
-    UI\
-  Script\Uninstall\
-    Uninstall-Teams-Always-Green.ps1
-    Uninstall-Teams-Always-Green.vbs
-  Script\QuickSetup\
-    QuickSetup.ps1
-    QuickSetup.cmd
-    QuickSetup.manifest.json
-    QuickSetup.manifest.sig
+  app\
+    runtime\
+      Teams Always Green.ps1
+      Core\
+      Features\
+        Hotkeys.ps1
+        Profiles.ps1
+        Scheduling.ps1
+        UpdateEngine.ps1
+      I18n\
+      Tray\
+      UI\
+    uninstall\
+      Uninstall-Teams-Always-Green.ps1
+      Uninstall-Teams-Always-Green.vbs
+    setup\
+      QuickSetup.ps1
+      QuickSetup.cmd
+      QuickSetup.manifest.json
+      QuickSetup.manifest.sig
   Teams Always Green.VBS
   Tests\
     Unit\
@@ -153,9 +161,8 @@ Teams Always Green\
       Banner.png
       AI_Assisted_Banner.png
   security\
-    public-keys\
-      quicksetup-manifest-public.xml
-      Teams-Always-Green.updatekey.xml
+    quicksetup-manifest-public.xml
+    Teams-Always-Green.updatekey.xml
   CHANGELOG.md
   Debug\
   Meta\
@@ -243,7 +250,7 @@ Versioning discipline:
 8. `.github/workflows/release.yml` automates release-time signing and publishing:
    - Trigger: push tag `v*` (or manual dispatch).
    - Required secret: `UPDATE_SIGNING_PRIVATE_KEY_XML` (private RSA XML key for update asset signing).
-   - Publishes signed release assets: `Script/Teams Always Green.ps1` and `Teams Always Green.ps1.sig`.
+   - Publishes signed release assets: `app/runtime/Teams Always Green.ps1` and `Teams Always Green.ps1.sig`.
 
 ---
 
@@ -251,6 +258,20 @@ Versioning discipline:
 
 **Standard install (recommended):** Use the Start Menu shortcut  
 `Teams Always Green` -> **Uninstall Teams Always Green**
+
+The uninstall runs as a 4-step wizard in one window (verify, uninstall, cleanup, complete).
+
+Options in step 1:
+- **Also remove local settings and logs**
+- **Dry run (preview only, no files are deleted)**
+- **Force close likely locking apps before cleanup (advanced)**
+
+When **Dry run** completes, the wizard returns to step 1 with validation results so you can run the real uninstall.
+
+Uninstall logs and report:
+- Launcher log: `%TEMP%\TeamsAlwaysGreen-UninstallLauncher.log`
+- Session log: `%TEMP%\TeamsAlwaysGreen-Uninstall-*.log`
+- JSON report: `%TEMP%\TeamsAlwaysGreen-Uninstall-*.json`
 
 **Manual/portable uninstall:**
 1) Exit the app from the tray.  

@@ -2,18 +2,18 @@ Set-StrictMode -Version Latest
 
 BeforeAll {
     $script:repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
-    $script:mainScript = Join-Path $script:repoRoot "Script/Teams Always Green.ps1"
-    $script:settingsDialogScript = Join-Path $script:repoRoot "Script/UI/SettingsDialog.ps1"
-    $script:historyDialogScript = Join-Path $script:repoRoot "Script/UI/HistoryDialog.ps1"
-    $script:trayMenuScript = Join-Path $script:repoRoot "Script/Tray/Menu.ps1"
-    $script:updateEngineScript = Join-Path $script:repoRoot "Script/Features/UpdateEngine.ps1"
-    $script:hotkeysFeatureScript = Join-Path $script:repoRoot "Script/Features/Hotkeys.ps1"
-    $script:schedulingFeatureScript = Join-Path $script:repoRoot "Script/Features/Scheduling.ps1"
-    $script:profilesFeatureScript = Join-Path $script:repoRoot "Script/Features/Profiles.ps1"
-    $script:quickSetupScript = Join-Path $script:repoRoot "Script/QuickSetup/QuickSetup.ps1"
-    $script:uninstallScript = Join-Path $script:repoRoot "Script/Uninstall/Uninstall-Teams-Always-Green.ps1"
-    $script:coreRuntimeScript = Join-Path $script:repoRoot "Script/Core/Runtime.ps1"
-    $script:uiStringsScript = Join-Path $script:repoRoot "Script/I18n/UiStrings.ps1"
+    $script:mainScript = Join-Path $script:repoRoot "app/runtime/Teams Always Green.ps1"
+    $script:settingsDialogScript = Join-Path $script:repoRoot "app/runtime/UI/SettingsDialog.ps1"
+    $script:historyDialogScript = Join-Path $script:repoRoot "app/runtime/UI/HistoryDialog.ps1"
+    $script:trayMenuScript = Join-Path $script:repoRoot "app/runtime/Tray/Menu.ps1"
+    $script:updateEngineScript = Join-Path $script:repoRoot "app/runtime/Features/UpdateEngine.ps1"
+    $script:hotkeysFeatureScript = Join-Path $script:repoRoot "app/runtime/Features/Hotkeys.ps1"
+    $script:schedulingFeatureScript = Join-Path $script:repoRoot "app/runtime/Features/Scheduling.ps1"
+    $script:profilesFeatureScript = Join-Path $script:repoRoot "app/runtime/Features/Profiles.ps1"
+    $script:quickSetupScript = Join-Path $script:repoRoot "app/setup/QuickSetup.ps1"
+    $script:uninstallScript = Join-Path $script:repoRoot "app/uninstall/Uninstall-Teams-Always-Green.ps1"
+    $script:coreRuntimeScript = Join-Path $script:repoRoot "app/runtime/Core/Runtime.ps1"
+    $script:uiStringsScript = Join-Path $script:repoRoot "app/runtime/I18n/UiStrings.ps1"
     $script:versionPath = Join-Path $script:repoRoot "VERSION"
     $script:changelogPath = Join-Path $script:repoRoot "CHANGELOG.md"
     $script:mainText = Get-Content -Raw -Path $script:mainScript
@@ -371,7 +371,7 @@ Describe "Quality: QuickSetup Wizard Flow" {
 
     It "avoids execution policy bypass in setup launchers" {
         $script:quickSetupText | Should -Not -Match 'ExecutionPolicy\s+Bypass'
-        (Get-Content -Raw -Path (Join-Path $script:repoRoot "Script/QuickSetup/QuickSetup.cmd")) | Should -Not -Match 'ExecutionPolicy\s+Bypass'
+        (Get-Content -Raw -Path (Join-Path $script:repoRoot "app/setup/QuickSetup.cmd")) | Should -Not -Match 'ExecutionPolicy\s+Bypass'
     }
 
     It "warns when install path appears OneDrive-managed and recommends a local path" {
@@ -436,13 +436,13 @@ Describe "Quality: Uninstall Flow" {
         $script:quickSetupText | Should -Match 'function\s+Get-ManifestExpectedHash'
         $script:quickSetupText | Should -Match 'function\s+Test-AssetHashMatchesManifest'
         $script:quickSetupText | Should -Match 'Get-AuthenticodeSignature'
-        $script:quickSetupText | Should -Match '\$script:QuickSetupRawBase/Script/Uninstall/Uninstall-Teams-Always-Green\.ps1'
+        $script:quickSetupText | Should -Match '\$script:QuickSetupRawBase/app/uninstall/Uninstall-Teams-Always-Green\.ps1'
         $script:quickSetupText | Should -Match 'Blocked untrusted uninstall asset URL'
         $script:quickSetupText | Should -Match 'Uninstall assets copied from local repository and verified\.'
         $script:quickSetupText | Should -Match 'Uninstall assets downloaded from trusted source and verified\.'
         $script:quickSetupText | Should -Match 'Install-UninstallAssets -installPath \$installPath -manifest \$manifest'
         $script:quickSetupText | Should -Match 'Finalize-Install -installPath \$state.InstallPath.*-manifest \$state.Manifest'
-        $script:quickSetupText | Should -Match 'Path = \"Script\\Uninstall\\Uninstall-Teams-Always-Green\.ps1\"'
+        $script:quickSetupText | Should -Match 'Path = \"app/uninstall/Uninstall-Teams-Always-Green\.ps1\"'
         $script:quickSetupText | Should -Not -Match '\$uninstallScript = @'''
     }
 }
@@ -800,3 +800,4 @@ Describe "Quality: Version and Changelog" {
         $changelog | Should -Match ("(?im)^##\s*\[?{0}\]?" -f [regex]::Escape($version))
     }
 }
+
