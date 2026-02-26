@@ -113,6 +113,7 @@ Teams Always Green\
   .editorconfig
   docs\
     architecture.md
+    security-standards.md
   Script\
     Teams Always Green.ps1
     Core\
@@ -133,6 +134,16 @@ Teams Always Green\
     QuickSetup.manifest.json
     QuickSetup.manifest.sig
   Teams Always Green.VBS
+  Tests\
+    Unit\
+    Integration\
+    Smoke\
+    Quality\
+  Tools\
+    ci\
+    config\
+    local\
+    release\
   CHANGELOG.md
   Debug\
   Meta\
@@ -213,11 +224,11 @@ Versioning discipline:
 - `VERSION` must be `major.minor.patch` (SemVer).
 - `CHANGELOG.md` must include both `## [Unreleased]` and a section for the current `VERSION`.
 
-1. Run local quality checks: `powershell -NoProfile -ExecutionPolicy RemoteSigned -File .\Tools\Invoke-QualityChecks.ps1`
-2. Enable local pre-commit guardrails once per clone: `powershell -NoProfile -ExecutionPolicy RemoteSigned -File .\Tools\Enable-GitHooks.ps1`
-3. Refresh installer manifest: `powershell -NoProfile -ExecutionPolicy RemoteSigned -File .\Tools\Generate-QuickSetupManifest.ps1`
-4. Optional: create detached manifest signature (private key XML required): `powershell -NoProfile -ExecutionPolicy RemoteSigned -File .\Tools\Generate-QuickSetupManifest.ps1 -Sign -ManifestPrivateKeyPath <PRIVATE_KEY_XML_PATH>`
-5. Sign release scripts (certificate in cert store required): `powershell -NoProfile -ExecutionPolicy RemoteSigned -File .\Tools\Sign-Release.ps1 -CertificateThumbprint <THUMBPRINT>`
+1. Run local quality checks: `powershell -NoProfile -ExecutionPolicy RemoteSigned -File .\Tools\ci\Invoke-QualityChecks.ps1`
+2. Enable local pre-commit guardrails once per clone: `powershell -NoProfile -ExecutionPolicy RemoteSigned -File .\Tools\local\Enable-GitHooks.ps1`
+3. Refresh installer manifest: `powershell -NoProfile -ExecutionPolicy RemoteSigned -File .\Tools\release\Generate-QuickSetupManifest.ps1`
+4. Optional: create detached manifest signature (private key XML required): `powershell -NoProfile -ExecutionPolicy RemoteSigned -File .\Tools\release\Generate-QuickSetupManifest.ps1 -Sign -ManifestPrivateKeyPath <PRIVATE_KEY_XML_PATH>`
+5. Sign release scripts (certificate in cert store required): `powershell -NoProfile -ExecutionPolicy RemoteSigned -File .\Tools\release\Sign-Release.ps1 -CertificateThumbprint <THUMBPRINT>`
 6. `.github/workflows/quality.yml` runs privacy/security scanning + analyzer warning budget + Pester coverage gate + manifest freshness checks.
 7. `.github/workflows/release-prep.yml` verifies `QuickSetup.manifest.json` freshness and signature validity before release (no direct auto-commit to `main`).
 8. `.github/workflows/release.yml` automates release-time signing and publishing:

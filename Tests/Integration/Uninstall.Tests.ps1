@@ -2,7 +2,7 @@ Set-StrictMode -Version Latest
 
 Describe "Uninstall integration" {
     BeforeAll {
-        $script:repoRoot = Split-Path -Parent $PSScriptRoot
+        $script:repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
         $script:uninstallSource = Join-Path $script:repoRoot "Script/Uninstall/Uninstall-Teams-Always-Green.ps1"
         $script:pwshPath = Join-Path $env:WINDIR "System32/WindowsPowerShell/v1.0/powershell.exe"
 

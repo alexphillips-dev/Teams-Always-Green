@@ -8,14 +8,14 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-$repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
+$repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
 
 if (-not $Staged -and -not $AllTracked -and -not $MetadataOnly) {
     $AllTracked = $true
 }
 
 $excludeRelativePaths = @(
-    "Tools/Find-PrivacyLeaks.ps1"
+    "Tools/ci/Find-PrivacyLeaks.ps1"
 )
 
 $skipExtensions = @(

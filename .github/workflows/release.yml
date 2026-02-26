@@ -59,7 +59,7 @@ jobs:
       - name: Verify QuickSetup manifest signature
         shell: pwsh
         run: |
-          ./Tools/Generate-QuickSetupManifest.ps1 -Check -RequireSignature -ManifestPublicKeyPath "Meta/Keys/quicksetup-manifest-public.xml"
+          ./Tools/release/Generate-QuickSetupManifest.ps1 -Check -RequireSignature -ManifestPublicKeyPath "Meta/Keys/quicksetup-manifest-public.xml"
 
       - name: Install PowerShell modules
         shell: pwsh
@@ -71,7 +71,7 @@ jobs:
       - name: Run quality checks
         shell: pwsh
         run: |
-          ./Tools/Invoke-QualityChecks.ps1 -Ci -WarningBudgetFile "Tools/PSScriptAnalyzer.warning-budget.json" -CoverageConfigFile "Tools/Pester.coverage.json"
+          ./Tools/ci/Invoke-QualityChecks.ps1 -Ci -WarningBudgetFile "Tools/config/PSScriptAnalyzer.warning-budget.json" -CoverageConfigFile "Tools/config/Pester.coverage.json"
 
       - name: Materialize update signing key
         id: keys
@@ -92,7 +92,7 @@ jobs:
         shell: pwsh
         run: |
           $sigPath = Join-Path $env:RUNNER_TEMP "Teams Always Green.ps1.sig"
-          ./Tools/Generate-UpdateSignature.ps1 `
+          ./Tools/release/Generate-UpdateSignature.ps1 `
             -InputFile "Script/Teams Always Green.ps1" `
             -PrivateKeyPath "${{ steps.keys.outputs.update_private_key }}" `
             -SignaturePath $sigPath `

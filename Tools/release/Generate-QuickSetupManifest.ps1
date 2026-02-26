@@ -1,5 +1,5 @@
 param(
-    [string]$RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path,
+    [string]$RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path,
     [string]$ManifestPath = "Script/QuickSetup/QuickSetup.manifest.json",
     [string]$SignaturePath = "Script/QuickSetup/QuickSetup.manifest.sig",
     [string]$ManifestPrivateKeyPath = "",

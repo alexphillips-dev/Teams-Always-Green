@@ -1,7 +1,7 @@
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-$repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
+$repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
 $hookPath = Join-Path $repoRoot ".githooks"
 
 if (-not (Test-Path -LiteralPath $hookPath -PathType Container)) {

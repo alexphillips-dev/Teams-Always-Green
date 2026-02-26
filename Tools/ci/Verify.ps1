@@ -21,7 +21,7 @@ function Test-ParseFile([string]$path) {
 }
 
 Write-Step "Parse check"
-$repoRoot = Split-Path -Parent $PSScriptRoot
+$repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
 $targets = @(
     "Script\\Teams Always Green.ps1",
     "Script\\UI\\SettingsDialog.ps1",

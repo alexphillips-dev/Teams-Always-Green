@@ -49,7 +49,7 @@ if ([string]::IsNullOrWhiteSpace($RepoRoot)) {
     if ([string]::IsNullOrWhiteSpace($scriptDir)) {
         $scriptDir = (Get-Location).Path
     }
-    $RepoRoot = Join-Path $scriptDir ".."
+    $RepoRoot = Join-Path $scriptDir "..\.."
 }
 $repoRootAbs = (Resolve-Path $RepoRoot).Path
 $inputAbs = Resolve-PathUnderRepo -repoRootPath $repoRootAbs -candidate $InputFile
