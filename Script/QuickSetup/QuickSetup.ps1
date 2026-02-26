@@ -334,6 +334,11 @@ function Resolve-QuickSetupChannel {
     }
 
     $selfText = Get-QuickSetupSelfText
+    $selfTextChannel = Resolve-QuickSetupChannelFromCommandText -text $selfText
+    if (-not [string]::IsNullOrWhiteSpace($selfTextChannel) -and ($selfTextChannel -in $allowed)) {
+        return [pscustomobject]@{ Channel = [string]$selfTextChannel; Source = "self-invocation-text" }
+    }
+
     $selfHash = Get-QuickSetupTextHash -text $selfText
     $hashMatchedChannel = Resolve-QuickSetupChannelFromSelfHash -selfHash $selfHash
     if (-not [string]::IsNullOrWhiteSpace($hashMatchedChannel) -and ($hashMatchedChannel -in $allowed)) {

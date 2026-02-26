@@ -325,6 +325,7 @@ Describe "Quality: QuickSetup Wizard Flow" {
         $script:quickSetupText | Should -Match 'TAG_QUICKSETUP_CHANNEL'
         $script:quickSetupText | Should -Match 'callstack-invocation'
         $script:quickSetupText | Should -Match 'session-history'
+        $script:quickSetupText | Should -Match 'self-invocation-text'
         $script:quickSetupText | Should -Match 'self-hash-match'
         $script:quickSetupText | Should -Match 'process-commandline'
         $script:quickSetupText | Should -Match 'manual-fallback'
@@ -337,15 +338,18 @@ Describe "Quality: QuickSetup Wizard Flow" {
         $processChannelIndex = $script:quickSetupText.IndexOf('process-commandline')
         $callStackChannelIndex = $script:quickSetupText.IndexOf('callstack-invocation')
         $historyChannelIndex = $script:quickSetupText.IndexOf('session-history')
+        $selfTextChannelIndex = $script:quickSetupText.IndexOf('self-invocation-text')
         $localBranchIndex = $script:quickSetupText.IndexOf('local-git-branch')
         $selfHashIndex | Should -BeGreaterThan -1
         $processChannelIndex | Should -BeGreaterThan -1
         $callStackChannelIndex | Should -BeGreaterThan -1
         $historyChannelIndex | Should -BeGreaterThan -1
+        $selfTextChannelIndex | Should -BeGreaterThan -1
         $localBranchIndex | Should -BeGreaterThan -1
         $processChannelIndex | Should -BeLessThan $callStackChannelIndex
         $callStackChannelIndex | Should -BeLessThan $historyChannelIndex
-        $historyChannelIndex | Should -BeLessThan $selfHashIndex
+        $historyChannelIndex | Should -BeLessThan $selfTextChannelIndex
+        $selfTextChannelIndex | Should -BeLessThan $selfHashIndex
         $selfHashIndex | Should -BeLessThan $localBranchIndex
     }
 
