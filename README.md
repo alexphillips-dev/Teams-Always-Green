@@ -4,7 +4,7 @@
 
 # <img src="https://raw.githubusercontent.com/alexphillips-dev/Teams-Always-Green/refs/heads/main/Meta/Icons/Tray_Icon.ico" alt="Teams Always Green" width="28" height="28"> Teams Always Green
 
-[![Release](https://img.shields.io/github/v/release/alexphillips-dev/Teams-Always-Green?label=release&sort=semver)](https://github.com/alexphillips-dev/Teams-Always-Green/releases/latest)
+[![Release](https://img.shields.io/github/v/tag/alexphillips-dev/Teams-Always-Green?label=release&sort=semver&color=6264A7)](https://github.com/alexphillips-dev/Teams-Always-Green/releases/latest)
 [![License](https://img.shields.io/github/license/alexphillips-dev/Teams-Always-Green)](LICENSE)
 [![Platform](https://img.shields.io/badge/Platform-Windows-blue)](README.md#requirements)
 [![PowerShell](https://img.shields.io/badge/PowerShell-5.1%20%7C%207.x-blue)](README.md#requirements)
