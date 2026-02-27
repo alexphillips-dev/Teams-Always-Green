@@ -33,13 +33,23 @@ This was not created to avoid work or to encourage misuse. It was created to red
 Stable (`main`):
 
 ```powershell
-$env:TAG_QUICKSETUP_CHANNEL='main'; irm https://raw.githubusercontent.com/alexphillips-dev/Teams-Always-Green/main/app/setup/QuickSetup.ps1 | iex
+$env:TAG_QUICKSETUP_CHANNEL='main'
+$u='https://raw.githubusercontent.com/alexphillips-dev/Teams-Always-Green/refs/heads/main/app/setup/QuickSetup.ps1'
+$p=Join-Path $env:TEMP 'TeamsAlwaysGreen-QuickSetup.ps1'
+Invoke-WebRequest -UseBasicParsing -Uri $u -OutFile $p
+Unblock-File -Path $p -ErrorAction SilentlyContinue
+powershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File $p
 ```
 
 Testing (`dev`):
 
 ```powershell
-$env:TAG_QUICKSETUP_CHANNEL='dev'; irm https://raw.githubusercontent.com/alexphillips-dev/Teams-Always-Green/dev/app/setup/QuickSetup.ps1 | iex
+$env:TAG_QUICKSETUP_CHANNEL='dev'
+$u='https://raw.githubusercontent.com/alexphillips-dev/Teams-Always-Green/refs/heads/dev/app/setup/QuickSetup.ps1'
+$p=Join-Path $env:TEMP 'TeamsAlwaysGreen-QuickSetup.ps1'
+Invoke-WebRequest -UseBasicParsing -Uri $u -OutFile $p
+Unblock-File -Path $p -ErrorAction SilentlyContinue
+powershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File $p
 ```
 
 `dev` includes in-progress changes and may be unstable.
@@ -199,6 +209,7 @@ Portable mode stores runtime data in the install folder (`Logs\`, `Settings\`, `
 - **Weird behavior after updates:** Use **Restart** from the tray.
 - **Quick Setup stops at Step 2:** Check `%TEMP%\TeamsAlwaysGreen-QuickSetup.log` for trusted URL or integrity validation failures.
 - **Need a full recovery flow:** Follow `docs/operations/recovery-playbook.md`.
+- **AV flags one-line install as suspicious:** avoid `irm|iex`; use the download-and-run command above or run `app/setup/QuickSetup.cmd`.
 
 ## Known Limitations
 
