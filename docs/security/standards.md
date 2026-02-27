@@ -23,10 +23,14 @@ This project is built with secure-by-default behavior and explicit release gates
 
 - Parse verification (`Tools/ci/Verify.ps1`)
 - Privacy/security leak scanning (`Tools/ci/Find-PrivacyLeaks.ps1`)
+- Install/uninstall smoke validation (`Tools/ci/Invoke-InstallUninstallSmoke.ps1`)
 - PSScriptAnalyzer warnings bounded by `Tools/config/PSScriptAnalyzer.warning-budget.json`
 - Pester tests with coverage gate from `Tools/config/Pester.coverage.json`
 - QuickSetup manifest freshness + signature check (`Tools/release/Generate-QuickSetupManifest.ps1 -Check -RequireSignature`)
 - Automated tag-based release signing and publishing (`.github/workflows/release.yml`)
+  - Authenticode signing + policy verification for shipped script assets
+  - Detached update signature generation/verification
+  - Release checksums, SBOM, and provenance generation/publishing
 
 ## Branch Protection Baseline (GitHub)
 

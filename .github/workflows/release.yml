@@ -87,19 +87,109 @@ jobs:
           [System.IO.File]::WriteAllText($privatePath, $env:UPDATE_SIGNING_PRIVATE_KEY_XML, $utf8NoBom)
           "update_private_key=$privatePath" >> $env:GITHUB_OUTPUT
 
+      - name: Materialize Authenticode signing certificate
+        id: codesign
+        shell: pwsh
+        env:
+          AUTHENTICODE_CERT_PFX_BASE64: ${{ secrets.AUTHENTICODE_CERT_PFX_BASE64 }}
+          AUTHENTICODE_CERT_PASSWORD: ${{ secrets.AUTHENTICODE_CERT_PASSWORD }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:AUTHENTICODE_CERT_PFX_BASE64)) {
+            throw "Missing GitHub secret: AUTHENTICODE_CERT_PFX_BASE64"
+          }
+          if ([string]::IsNullOrWhiteSpace($env:AUTHENTICODE_CERT_PASSWORD)) {
+            throw "Missing GitHub secret: AUTHENTICODE_CERT_PASSWORD"
+          }
+          $pfxPath = Join-Path $env:RUNNER_TEMP "release-codesign.pfx"
+          [System.IO.File]::WriteAllBytes($pfxPath, [Convert]::FromBase64String($env:AUTHENTICODE_CERT_PFX_BASE64))
+          $securePassword = ConvertTo-SecureString -String $env:AUTHENTICODE_CERT_PASSWORD -AsPlainText -Force
+          $imported = Import-PfxCertificate -FilePath $pfxPath -CertStoreLocation "Cert:\CurrentUser\My" -Password $securePassword -Exportable
+          if (-not $imported) {
+            throw "Authenticode certificate import failed."
+          }
+          $thumbprint = [string]($imported | Select-Object -First 1 -ExpandProperty Thumbprint)
+          if ([string]::IsNullOrWhiteSpace($thumbprint)) {
+            throw "Imported certificate thumbprint could not be resolved."
+          }
+          "codesign_thumbprint=$thumbprint" >> $env:GITHUB_OUTPUT
+
+      - name: Sign release script (Authenticode)
+        id: sign_auth
+        shell: pwsh
+        run: |
+          $source = "app/runtime/Teams Always Green.ps1"
+          $signed = Join-Path $env:RUNNER_TEMP "Teams Always Green.ps1"
+          Copy-Item -LiteralPath $source -Destination $signed -Force
+          $cert = Get-Item -Path ("Cert:\CurrentUser\My\{0}" -f "${{ steps.codesign.outputs.codesign_thumbprint }}") -ErrorAction Stop
+          $result = Set-AuthenticodeSignature -FilePath $signed -Certificate $cert -TimestampServer "http://timestamp.digicert.com"
+          if ($result.Status -notin @("Valid", "NotTrusted")) {
+            throw ("Authenticode signing failed with status: {0}" -f [string]$result.Status)
+          }
+          "signed_script=$signed" >> $env:GITHUB_OUTPUT
+
+      - name: Verify Authenticode policy
+        shell: pwsh
+        run: |
+          ./Tools/release/Verify-AuthenticodePolicy.ps1 `
+            -InputFiles "${{ steps.sign_auth.outputs.signed_script }}" `
+            -ExpectedThumbprint "${{ steps.codesign.outputs.codesign_thumbprint }}"
+
       - name: Generate update asset signature
         id: sign_update
         shell: pwsh
         run: |
           $sigPath = Join-Path $env:RUNNER_TEMP "Teams Always Green.ps1.sig"
           ./Tools/release/Generate-UpdateSignature.ps1 `
-            -InputFile "app/runtime/Teams Always Green.ps1" `
+            -InputFile "${{ steps.sign_auth.outputs.signed_script }}" `
             -PrivateKeyPath "${{ steps.keys.outputs.update_private_key }}" `
             -SignaturePath $sigPath `
             -OutputEncoding Hex `
             -Verify `
             -PublicKeyPath "security/Teams-Always-Green.updatekey.xml"
           "update_sig=$sigPath" >> $env:GITHUB_OUTPUT
+
+      - name: Generate SBOM
+        id: sbom
+        shell: pwsh
+        run: |
+          $sbomPath = Join-Path $env:RUNNER_TEMP "Teams-Always-Green.sbom.cdx.json"
+          ./Tools/release/Generate-Sbom.ps1 -OutputPath $sbomPath
+          "sbom_path=$sbomPath" >> $env:GITHUB_OUTPUT
+
+      - name: Generate provenance
+        id: provenance
+        shell: pwsh
+        run: |
+          $provenancePath = Join-Path $env:RUNNER_TEMP "Teams-Always-Green.provenance.json"
+          ./Tools/release/Generate-Provenance.ps1 `
+            -Tag "${{ steps.meta.outputs.tag }}" `
+            -Version "${{ steps.meta.outputs.version }}" `
+            -SubjectFiles @(
+              "${{ steps.sign_auth.outputs.signed_script }}",
+              "${{ steps.sign_update.outputs.update_sig }}",
+              "app/setup/QuickSetup.manifest.json",
+              "app/setup/QuickSetup.manifest.sig",
+              "${{ steps.sbom.outputs.sbom_path }}"
+            ) `
+            -OutputPath $provenancePath
+          "provenance_path=$provenancePath" >> $env:GITHUB_OUTPUT
+
+      - name: Generate release checksums
+        id: checksums
+        shell: pwsh
+        run: |
+          $checksumsPath = Join-Path $env:RUNNER_TEMP "Teams-Always-Green.release.sha256"
+          ./Tools/release/Generate-ReleaseChecksums.ps1 `
+            -InputFiles @(
+              "${{ steps.sign_auth.outputs.signed_script }}",
+              "${{ steps.sign_update.outputs.update_sig }}",
+              "app/setup/QuickSetup.manifest.json",
+              "app/setup/QuickSetup.manifest.sig",
+              "${{ steps.sbom.outputs.sbom_path }}",
+              "${{ steps.provenance.outputs.provenance_path }}"
+            ) `
+            -OutputPath $checksumsPath
+          "checksums_path=$checksumsPath" >> $env:GITHUB_OUTPUT
 
       - name: Build release notes
         id: notes
@@ -171,7 +261,10 @@ jobs:
           generate_release_notes: false
           make_latest: true
           files: |
-            app/runtime/Teams Always Green.ps1
+            ${{ steps.sign_auth.outputs.signed_script }}
             ${{ steps.sign_update.outputs.update_sig }}
             app/setup/QuickSetup.manifest.json
             app/setup/QuickSetup.manifest.sig
+            ${{ steps.sbom.outputs.sbom_path }}
+            ${{ steps.provenance.outputs.provenance_path }}
+            ${{ steps.checksums.outputs.checksums_path }}
