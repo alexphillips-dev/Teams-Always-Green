@@ -69,6 +69,13 @@ Optional: choose **portable mode** to skip shortcuts. Setup logs are saved to `%
 - Windows 10/11
 - PowerShell 5.1 or 7.x
 
+## Support Matrix
+
+- OS: Windows 10, Windows 11
+- PowerShell: Windows PowerShell 5.1 and PowerShell 7.x
+- Install channels: `main` (stable), `dev` (in-progress/testing)
+- Install location: standard local paths recommended; OneDrive-managed paths are supported but can introduce lock/sync delays during update/uninstall
+
 ---
 
 ## Common Setups
@@ -110,6 +117,7 @@ powershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File "app\runtime\Teams
 
 - See `docs/architecture/overview.md` for startup flow, module boundaries, and data-path model.
 - See `docs/security/standards.md` for secure coding/release controls and branch protection guidance.
+- See `docs/operations/recovery-playbook.md` for failure triage and recovery steps.
 
 ---
 
@@ -120,6 +128,8 @@ Teams Always Green\
   docs\
     architecture\
       overview.md
+    operations\
+      recovery-playbook.md
     security\
       standards.md
   app\
@@ -188,6 +198,13 @@ Portable mode stores runtime data in the install folder (`Logs\`, `Settings\`, `
 - **Settings not saving:** Ensure `%LOCALAPPDATA%\TeamsAlwaysGreen\Settings` is writable.  
 - **Weird behavior after updates:** Use **Restart** from the tray.
 - **Quick Setup stops at Step 2:** Check `%TEMP%\TeamsAlwaysGreen-QuickSetup.log` for trusted URL or integrity validation failures.
+- **Need a full recovery flow:** Follow `docs/operations/recovery-playbook.md`.
+
+## Known Limitations
+
+- OneDrive/sync-provider managed install paths can hold transient locks during uninstall cleanup.
+- Authenticode trust status can vary by endpoint trust stores and enterprise certificate policy.
+- `dev` channel can contain incomplete changes by design.
 
 ---
 
@@ -226,7 +243,7 @@ AI tooling is used to accelerate drafting, refactoring, testing, and documentati
 
 To keep quality and trust high:
 - Every meaningful change is reviewed before merge.
-- Automated quality gates run before release (`parse` checks, analyzer, privacy scan, Pester tests, and QuickSetup manifest freshness).
+- Automated quality gates run before release (`parse` checks, analyzer, privacy scan, Pester tests, install/uninstall smoke, and QuickSetup manifest freshness).
 - Security-sensitive paths (installer/update integrity and trust checks) are validated in code and covered by tests.
 - If a change does not pass checks, it does not ship.
 
@@ -249,8 +266,16 @@ Versioning discipline:
 7. `.github/workflows/release-prep.yml` verifies `QuickSetup.manifest.json` freshness and signature validity before release (no direct auto-commit to `main`).
 8. `.github/workflows/release.yml` automates release-time signing and publishing:
    - Trigger: push tag `v*` (or manual dispatch).
-   - Required secret: `UPDATE_SIGNING_PRIVATE_KEY_XML` (private RSA XML key for update asset signing).
-   - Publishes signed release assets: `app/runtime/Teams Always Green.ps1` and `Teams Always Green.ps1.sig`.
+   - Required secrets:
+     - `UPDATE_SIGNING_PRIVATE_KEY_XML` (private RSA XML key for detached update signature).
+     - `AUTHENTICODE_CERT_PFX_BASE64` and `AUTHENTICODE_CERT_PASSWORD` (release-time Authenticode signing cert).
+   - Publishes signed release assets + attestable metadata:
+     - Authenticode-signed `Teams Always Green.ps1`
+     - Detached update signature `Teams Always Green.ps1.sig`
+     - `QuickSetup.manifest.json` and `QuickSetup.manifest.sig`
+     - release checksums (`*.sha256`)
+     - SBOM (`*.sbom.cdx.json`)
+     - build provenance (`*.provenance.json`)
 
 ---
 

@@ -15,6 +15,7 @@ $analyzerSettings = Join-Path $repoRoot "Tools/config/PSScriptAnalyzerSettings.p
 $manifestScript = Join-Path $repoRoot "Tools/release/Generate-QuickSetupManifest.ps1"
 $privacyScanScript = Join-Path $repoRoot "Tools/ci/Find-PrivacyLeaks.ps1"
 $verifyScript = Join-Path $repoRoot "Tools/ci/Verify.ps1"
+$smokeInstallUninstallScript = Join-Path $repoRoot "Tools/ci/Invoke-InstallUninstallSmoke.ps1"
 $pesterRepoTests = Join-Path $repoRoot "Tests"
 $defaultWarningBudgetPath = Join-Path $repoRoot "Tools/config/PSScriptAnalyzer.warning-budget.json"
 $defaultCoverageConfigPath = Join-Path $repoRoot "Tools/config/Pester.coverage.json"
@@ -196,6 +197,11 @@ if ($effectiveMinCoveragePercent -ge 0) {
     if ($coveragePercent -lt $effectiveMinCoveragePercent) {
         throw ("Pester coverage gate failed: {0:N2}% < {1:N2}%" -f $coveragePercent, $effectiveMinCoveragePercent)
     }
+}
+
+if ($Ci -and (Test-Path -LiteralPath $smokeInstallUninstallScript -PathType Leaf)) {
+    Write-Host "Running install/uninstall smoke test..."
+    & $smokeInstallUninstallScript -RepoRoot $repoRoot
 }
 
 Write-Host "== Quality checks passed =="

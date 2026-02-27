@@ -5,7 +5,13 @@ The format is based on Keep a Changelog, and this project follows Semantic Versi
 
 ## [Unreleased]
 ### Added
-- None yet.
+- CI install/uninstall smoke gate (`Tools/ci/Invoke-InstallUninstallSmoke.ps1`) integrated into quality checks.
+- Release-time supply-chain artifacts:
+  - CycloneDX SBOM generation (`Tools/release/Generate-Sbom.ps1`)
+  - Build provenance generation (`Tools/release/Generate-Provenance.ps1`)
+  - Release checksum generation (`Tools/release/Generate-ReleaseChecksums.ps1`)
+- Authenticode signature policy verifier (`Tools/release/Verify-AuthenticodePolicy.ps1`) for release assets.
+- Operations recovery runbook (`docs/operations/recovery-playbook.md`) for install/update/runtime/uninstall triage.
 
 ### Changed
 - Reorganized repository structure for maintainability:
@@ -20,6 +26,8 @@ The format is based on Keep a Changelog, and this project follows Semantic Versi
   - `assets/icons` and `assets/readme` now host icon/readme image assets.
   - `security` now hosts QuickSetup and update verification public keys.
   - Runtime/installer paths were updated with compatibility fallbacks for prior installs.
+- Release workflow now enforces release-time Authenticode signing for the shipped runtime script and publishes SBOM/provenance/checksum assets.
+- README expanded with support matrix, known limitations, and recovery playbook references.
 
 ## [1.0.2] - 2026-02-26
 ### Added
