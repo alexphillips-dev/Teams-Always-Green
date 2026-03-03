@@ -351,12 +351,15 @@ function Show-UninstallCompletionInUi {
     $ui.BackButton.Visible = $true
     $ui.BackButton.Enabled = $true
     $ui.BackButton.Text = "Copy diagnostics"
+    $ui.BackButton.Width = 124
     $ui.CancelButton.Visible = $false
     $ui.NextButton.Visible = $true
     $ui.NextButton.Enabled = $true
     $ui.NextButton.Text = "Finish"
+    $ui.NextButton.Width = 102
     $ui.Form.AcceptButton = $ui.NextButton
     $ui.Form.CancelButton = $null
+    Set-UninstallUiLayout -ui $ui -showProgress:$true
 
     Add-UninstallDetail $ui ("Log: {0}" -f [string]$LogPath)
     Add-UninstallDetail $ui ("Report: {0}" -f [string]$ReportPath)
@@ -657,7 +660,7 @@ function New-UninstallProgressUi {
     $detailsLink = New-Object System.Windows.Forms.LinkLabel
     $detailsLink.Text = "Show details"
     $detailsLink.AutoSize = $true
-    $detailsLink.Location = New-Object System.Drawing.Point(630, 256)
+    $detailsLink.Location = New-Object System.Drawing.Point(16, 256)
 
     $detailsList = New-Object System.Windows.Forms.ListBox
     $detailsList.Width = $contentWidth
@@ -665,27 +668,27 @@ function New-UninstallProgressUi {
     $detailsList.Location = New-Object System.Drawing.Point($contentLeft, 278)
     $detailsList.Visible = $false
 
-    $cancelButtonX = $contentLeft + $contentWidth - 90
-    $nextButtonX = $cancelButtonX - 98
-    $backButtonX = $nextButtonX - 98
+    $cancelButtonX = $contentLeft + $contentWidth - 102
+    $nextButtonX = $cancelButtonX - 112
+    $backButtonX = $nextButtonX - 112
     $backButton = New-Object System.Windows.Forms.Button
     $backButton.Text = "Back"
-    $backButton.Width = 90
-    $backButton.Height = 30
+    $backButton.Width = 102
+    $backButton.Height = 32
     $backButton.Location = New-Object System.Drawing.Point($backButtonX, 320)
     $backButton.Enabled = $false
 
     $nextButton = New-Object System.Windows.Forms.Button
     $nextButton.Text = "Next"
-    $nextButton.Width = 90
-    $nextButton.Height = 30
+    $nextButton.Width = 102
+    $nextButton.Height = 32
     $nextButton.Location = New-Object System.Drawing.Point($nextButtonX, 320)
     $nextButton.Enabled = $true
 
     $cancelButton = New-Object System.Windows.Forms.Button
     $cancelButton.Text = "Cancel"
-    $cancelButton.Width = 90
-    $cancelButton.Height = 30
+    $cancelButton.Width = 102
+    $cancelButton.Height = 32
     $cancelButton.Location = New-Object System.Drawing.Point($cancelButtonX, 320)
     $cancelButton.Enabled = $true
 
@@ -728,6 +731,7 @@ function New-UninstallProgressUi {
     $baseHeight = 410
     $expandedHeight = 560
     $detailsLink.Add_LinkClicked({
+        param($sender, $eventArgs)
         $detailsList.Visible = -not $detailsList.Visible
         if ($detailsList.Visible) {
             $detailsLink.Text = "Hide details"
@@ -736,15 +740,7 @@ function New-UninstallProgressUi {
             $detailsLink.Text = "Show details"
             $form.Height = $baseHeight
         }
-        $buttonY = [Math]::Max(0, $form.ClientSize.Height - $nextButton.Height - 12)
-        $backButton.Location = New-Object System.Drawing.Point($backButtonX, $buttonY)
-        $nextButton.Location = New-Object System.Drawing.Point($nextButtonX, $buttonY)
-        $cancelButton.Location = New-Object System.Drawing.Point($cancelButtonX, $buttonY)
-        if ($detailsList.Visible) {
-            $detailsTop = $detailsList.Location.Y
-            $maxDetailsHeight = [Math]::Max(60, $buttonY - $detailsTop - 8)
-            $detailsList.Height = $maxDetailsHeight
-        }
+        Set-UninstallUiLayout -ui $sender.Tag -showProgress:$progress.Visible
     }.GetNewClosure())
 
     $form.AcceptButton = $nextButton
@@ -760,10 +756,7 @@ function New-UninstallProgressUi {
     $form.Controls.Add($backButton)
     $form.Controls.Add($nextButton)
     $form.Controls.Add($cancelButton)
-    $form.Show()
-    [System.Windows.Forms.Application]::DoEvents()
-
-    return @{
+    $uiObject = @{
         Form = $form
         Stepper = $stepper
         Label = $label
@@ -783,6 +776,12 @@ function New-UninstallProgressUi {
         CancelButton = $cancelButton
         State = $state
     }
+    $detailsLink.Tag = $uiObject
+    $form.Show()
+    [System.Windows.Forms.Application]::DoEvents()
+
+    Set-UninstallUiLayout -ui $uiObject -showProgress:$false
+    return $uiObject
 }
 
 function Wait-UninstallWizardAction($ui) {
@@ -819,29 +818,51 @@ function Set-UninstallUiLayout($ui, [bool]$showProgress) {
     $metaHeight = [Math]::Max(20, [int]$ui.Meta.PreferredHeight)
     $optionsTop = $metaTop + $metaHeight + 8
     $detailsTop = $optionsTop + $ui.OptionsPanel.Height + 8
-
-    $detailsX = [Math]::Max(16, $ui.Progress.Right - [int]$ui.DetailsLink.PreferredWidth)
     if ($showProgress) {
         $ui.Progress.Visible = $true
         $ui.OptionsPanel.Location = New-Object System.Drawing.Point(16, $optionsTop)
-        $ui.DetailsLink.Location = New-Object System.Drawing.Point($detailsX, $detailsTop)
         $ui.DetailsList.Location = New-Object System.Drawing.Point(16, ($detailsTop + 22))
     } else {
         $ui.Progress.Visible = $false
         $ui.OptionsPanel.Location = New-Object System.Drawing.Point(16, $optionsTop)
-        $ui.DetailsLink.Location = New-Object System.Drawing.Point($detailsX, $detailsTop)
         $ui.DetailsList.Location = New-Object System.Drawing.Point(16, ($detailsTop + 22))
     }
 
     $buttonBottomMargin = 12
-    $buttonY = [Math]::Max(0, $ui.Form.ClientSize.Height - $ui.NextButton.Height - $buttonBottomMargin)
-    $ui.BackButton.Location = New-Object System.Drawing.Point($ui.BackButton.Location.X, $buttonY)
-    $ui.NextButton.Location = New-Object System.Drawing.Point($ui.NextButton.Location.X, $buttonY)
-    $ui.CancelButton.Location = New-Object System.Drawing.Point($ui.CancelButton.Location.X, $buttonY)
+    $buttonGap = 8
+    $rightMargin = 16
+    $buttonHeightRef = $ui.NextButton.Height
+    $buttonY = [Math]::Max(0, $ui.Form.ClientSize.Height - $buttonHeightRef - $buttonBottomMargin)
+
+    $cursorRight = $ui.Form.ClientSize.Width - $rightMargin
+    if ($ui.CancelButton.Visible) {
+        $cursorRight -= $ui.CancelButton.Width
+        $ui.CancelButton.Location = New-Object System.Drawing.Point($cursorRight, $buttonY)
+        $cursorRight -= $buttonGap
+    }
+    if ($ui.NextButton.Visible) {
+        $cursorRight -= $ui.NextButton.Width
+        $ui.NextButton.Location = New-Object System.Drawing.Point($cursorRight, $buttonY)
+        $cursorRight -= $buttonGap
+    }
+    if ($ui.BackButton.Visible) {
+        $cursorRight -= $ui.BackButton.Width
+        $ui.BackButton.Location = New-Object System.Drawing.Point($cursorRight, $buttonY)
+    }
+
+    $firstVisibleButtonX = $ui.Form.ClientSize.Width - $rightMargin
+    foreach ($btn in @($ui.BackButton, $ui.NextButton, $ui.CancelButton)) {
+        if ($btn.Visible) {
+            $firstVisibleButtonX = [Math]::Min($firstVisibleButtonX, $btn.Left)
+        }
+    }
+    $detailsX = [Math]::Max(16, $firstVisibleButtonX - [int]$ui.DetailsLink.PreferredWidth - 12)
+    $detailsY = [Math]::Max(0, $buttonY + [int][Math]::Floor(($buttonHeightRef - $ui.DetailsLink.PreferredHeight) / 2))
+    $ui.DetailsLink.Location = New-Object System.Drawing.Point($detailsX, $detailsY)
 
     if ($ui.DetailsList.Visible) {
         $detailsTopDynamic = $ui.DetailsList.Location.Y
-        $availableHeight = [Math]::Max(60, $buttonY - $detailsTopDynamic - 8)
+        $availableHeight = [Math]::Max(60, $buttonY - $detailsTopDynamic - 10)
         $ui.DetailsList.Height = $availableHeight
     }
 }
@@ -877,12 +898,15 @@ function Prepare-UninstallWizardStep1 {
     $ui.BackButton.Visible = $true
     $ui.BackButton.Enabled = $false
     $ui.BackButton.Text = "Back"
+    $ui.BackButton.Width = 102
     $ui.NextButton.Visible = $true
     $ui.NextButton.Enabled = $true
     $ui.NextButton.Text = "Next"
+    $ui.NextButton.Width = 102
     $ui.CancelButton.Visible = $true
     $ui.CancelButton.Enabled = $true
     $ui.CancelButton.Text = "Cancel"
+    $ui.CancelButton.Width = 102
     $ui.Form.AcceptButton = $ui.NextButton
     $ui.Form.CancelButton = $ui.CancelButton
 
@@ -917,6 +941,7 @@ function Prepare-UninstallWizardStep1 {
     } elseif ($effectivePolicy -eq "Remove") {
         $ui.OptionsPrompt.Text = "Local settings and logs will be removed by policy."
     }
+    Set-UninstallUiLayout -ui $ui -showProgress:$false
 }
 
 function Add-UninstallDetail($ui, [string]$message) {
@@ -1058,7 +1083,23 @@ function Test-SafeShortcutPath([string]$shortcutPath) {
         return [pscustomobject]@{ IsSafe = $false; Reason = ("Shortcut parent outside known shell folders: {0}" -f $parent) }
     }
     if (Test-ReparsePointPath -path $parent) {
-        return [pscustomobject]@{ IsSafe = $false; Reason = ("Shortcut parent is a reparse point: {0}" -f $parent) }
+        $trustedReparseRoots = @(
+            [Environment]::GetFolderPath("Desktop"),
+            [Environment]::GetFolderPath("Startup"),
+            [Environment]::GetFolderPath("CommonDesktopDirectory")
+        ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+
+        $allowTrustedReparse = $false
+        foreach ($root in $trustedReparseRoots) {
+            if (Test-PathUnderRoot -path $parent -root $root) {
+                $allowTrustedReparse = $true
+                break
+            }
+        }
+        if (-not $allowTrustedReparse) {
+            return [pscustomobject]@{ IsSafe = $false; Reason = ("Shortcut parent is a reparse point: {0}" -f $parent) }
+        }
+        Write-UninstallLog ("Shortcut parent is trusted shell reparse path; allowing removal: {0}" -f $parent)
     }
 
     return [pscustomobject]@{ IsSafe = $true; Reason = "" }
@@ -1074,7 +1115,9 @@ function Get-ShortcutMap {
         MainShortcut      = (Join-Path $menuFolder "Teams Always Green.lnk")
         UninstallShortcut = (Join-Path $menuFolder "Uninstall Teams Always Green.lnk")
         DesktopShortcut   = (Join-Path ([Environment]::GetFolderPath("Desktop")) "Teams Always Green.lnk")
+        DesktopLegacyShortcut = (Join-Path ([Environment]::GetFolderPath("Desktop")) "Teams-Always-Green.lnk")
         PublicDesktopShortcut = if ([string]::IsNullOrWhiteSpace($commonDesktopDir)) { "" } else { (Join-Path $commonDesktopDir "Teams Always Green.lnk") }
+        PublicDesktopLegacyShortcut = if ([string]::IsNullOrWhiteSpace($commonDesktopDir)) { "" } else { (Join-Path $commonDesktopDir "Teams-Always-Green.lnk") }
         StartupShortcut   = (Join-Path $startupDir "Teams Always Green.lnk")
         StartupLegacyShortcut = (Join-Path $startupDir "Teams-Always-Green.lnk")
     }
@@ -1091,7 +1134,9 @@ function Remove-AppShortcuts([hashtable]$shortcutMap, $ui) {
         [string]$shortcutMap.MainShortcut,
         [string]$shortcutMap.UninstallShortcut,
         [string]$shortcutMap.DesktopShortcut,
+        [string]$shortcutMap.DesktopLegacyShortcut,
         [string]$shortcutMap.PublicDesktopShortcut,
+        [string]$shortcutMap.PublicDesktopLegacyShortcut,
         [string]$shortcutMap.StartupShortcut,
         [string]$shortcutMap.StartupLegacyShortcut
     )) {
@@ -1444,12 +1489,15 @@ function Invoke-UninstallRetryGuidance($ui, [string]$installRoot, [string]$lockD
     $ui.NextButton.Visible = $true
     $ui.NextButton.Enabled = $true
     $ui.NextButton.Text = "Retry"
+    $ui.NextButton.Width = 102
     $ui.CancelButton.Visible = $true
     $ui.CancelButton.Enabled = $true
     $ui.CancelButton.Text = "Skip"
+    $ui.CancelButton.Width = 102
     $ui.BackButton.Visible = $false
     $ui.Form.AcceptButton = $ui.NextButton
     $ui.Form.CancelButton = $ui.CancelButton
+    Set-UninstallUiLayout -ui $ui -showProgress:$true
 
     while (-not $ui.Form.IsDisposed) {
         if ($ui.State.Cancelled) { return $false }

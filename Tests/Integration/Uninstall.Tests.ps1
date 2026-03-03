@@ -310,5 +310,58 @@ Describe "Uninstall integration" {
         Remove-Item -Path $localAppData -Recurse -Force -ErrorAction SilentlyContinue
         Remove-Item -Path $runTemp -Recurse -Force -ErrorAction SilentlyContinue
     }
+
+    It "removes desktop shortcut variants during uninstall" {
+        $root = New-UninstallSandbox -WithMarkers $true
+        $scriptPath = Join-Path $root "app/uninstall/Uninstall-Teams-Always-Green.ps1"
+        $localAppData = Join-Path $env:TEMP ("TAG-Uninstall-IT-Local-" + [Guid]::NewGuid().ToString("N"))
+        $runTemp = Join-Path $env:TEMP ("TAG-Uninstall-IT-Run-" + [Guid]::NewGuid().ToString("N"))
+        New-Item -ItemType Directory -Path $localAppData -Force | Out-Null
+        New-Item -ItemType Directory -Path $runTemp -Force | Out-Null
+
+        $desktopDir = [Environment]::GetFolderPath("Desktop")
+        $desktopCurrent = Join-Path $desktopDir "Teams Always Green.lnk"
+        $desktopLegacy = Join-Path $desktopDir "Teams-Always-Green.lnk"
+        $backupCurrent = ""
+        $backupLegacy = ""
+        if (Test-Path -LiteralPath $desktopCurrent -PathType Leaf) {
+            $backupCurrent = Join-Path $desktopDir ("Teams Always Green.bak." + [Guid]::NewGuid().ToString("N") + ".lnk")
+            Move-Item -LiteralPath $desktopCurrent -Destination $backupCurrent -Force
+        }
+        if (Test-Path -LiteralPath $desktopLegacy -PathType Leaf) {
+            $backupLegacy = Join-Path $desktopDir ("Teams-Always-Green.bak." + [Guid]::NewGuid().ToString("N") + ".lnk")
+            Move-Item -LiteralPath $desktopLegacy -Destination $backupLegacy -Force
+        }
+
+        try {
+            Set-Content -Path $desktopCurrent -Value "desktop-shortcut-current" -Encoding ASCII
+            Set-Content -Path $desktopLegacy -Value "desktop-shortcut-legacy" -Encoding ASCII
+
+            $exitCode = Invoke-UninstallChild -ScriptPath $scriptPath -InstallRoot $root -Arguments "-Silent -AppDataPolicy Keep" -LocalAppDataPath $localAppData -RuntimeTempRoot $runTemp
+            $artifacts = Get-UninstallArtifacts -RuntimeTempRoot $runTemp
+
+            $exitCode | Should -Be 0
+            $artifacts.Report | Should -Not -BeNullOrEmpty
+            [string]$artifacts.Report.Result | Should -Be "Completed"
+            (Test-Path -LiteralPath $desktopCurrent -PathType Leaf) | Should -BeFalse
+            (Test-Path -LiteralPath $desktopLegacy -PathType Leaf) | Should -BeFalse
+        } finally {
+            foreach ($path in @($desktopCurrent, $desktopLegacy)) {
+                if (Test-Path -LiteralPath $path -PathType Leaf) {
+                    Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
+                }
+            }
+            if (-not [string]::IsNullOrWhiteSpace($backupCurrent) -and (Test-Path -LiteralPath $backupCurrent -PathType Leaf)) {
+                Move-Item -LiteralPath $backupCurrent -Destination $desktopCurrent -Force
+            }
+            if (-not [string]::IsNullOrWhiteSpace($backupLegacy) -and (Test-Path -LiteralPath $backupLegacy -PathType Leaf)) {
+                Move-Item -LiteralPath $backupLegacy -Destination $desktopLegacy -Force
+            }
+        }
+
+        Remove-Item -Path $root -Recurse -Force -ErrorAction SilentlyContinue
+        Remove-Item -Path $localAppData -Recurse -Force -ErrorAction SilentlyContinue
+        Remove-Item -Path $runTemp -Recurse -Force -ErrorAction SilentlyContinue
+    }
 }
 
