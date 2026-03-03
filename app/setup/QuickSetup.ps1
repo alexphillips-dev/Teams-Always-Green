@@ -1912,7 +1912,25 @@ function Test-ShortcutParentSafe([string]$shortcutPath) {
         New-Item -ItemType Directory -Path $parent -Force | Out-Null
     }
     if (Test-ReparsePointPath -path $parent) {
-        throw ("Shortcut parent is a reparse point and is blocked for safety: {0}" -f $parent)
+        $trustedReparseRoots = @(
+            [Environment]::GetFolderPath("Desktop"),
+            [Environment]::GetFolderPath("Startup"),
+            [Environment]::GetFolderPath("CommonDesktopDirectory")
+        ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+
+        $allowTrustedReparse = $false
+        foreach ($root in $trustedReparseRoots) {
+            if (Test-PathUnderRoot -path $parent -root $root) {
+                $allowTrustedReparse = $true
+                break
+            }
+        }
+
+        if ($allowTrustedReparse) {
+            Write-SetupLog ("Shortcut parent is a trusted shell reparse path; allowing create: {0}" -f $parent)
+        } else {
+            throw ("Shortcut parent is a reparse point and is blocked for safety: {0}" -f $parent)
+        }
     }
 }
 
@@ -2138,22 +2156,39 @@ function Set-InstallShortcutsCore {
     if (-not $useVbsLauncher) {
         Write-SetupLog "Launch VBS not found; falling back to direct PowerShell shortcuts."
     }
+    $launcherVbsArg = if ($useVbsLauncher) { $launchVbsPath } else { "" }
 
     $shortcutsCreated = @()
-    if ($useVbsLauncher) {
-        New-VbsShortcut -shortcutPath ([string]$layout.MenuShortcut) -vbsPath $launchVbsPath -workingDir $installPath
-    } else {
-        New-Shortcut -shortcutPath ([string]$layout.MenuShortcut) -targetScriptPath $targetScript -workingDir $installPath
+    function Invoke-CreateShortcutSafe {
+        param(
+            [string]$label,
+            [string]$shortcutPath,
+            [string]$vbsPath,
+            [string]$targetPs1Path,
+            [string]$workDir
+        )
+        try {
+            if (-not [string]::IsNullOrWhiteSpace($vbsPath)) {
+                New-VbsShortcut -shortcutPath $shortcutPath -vbsPath $vbsPath -workingDir $workDir
+            } else {
+                New-Shortcut -shortcutPath $shortcutPath -targetScriptPath $targetPs1Path -workingDir $workDir
+            }
+            $script:__LastShortcutCreateSucceeded = $true
+            Write-SetupLog ("Created shortcut: {0} -> {1}" -f $label, $shortcutPath)
+        } catch {
+            $script:__LastShortcutCreateSucceeded = $false
+            Write-SetupLog ("Failed to create shortcut ({0}): {1}" -f $label, $_.Exception.Message)
+        }
     }
-    $shortcutsCreated += "Start Menu"
+
+    $script:__LastShortcutCreateSucceeded = $false
+    Invoke-CreateShortcutSafe -label "Start Menu" -shortcutPath ([string]$layout.MenuShortcut) -vbsPath $launcherVbsArg -targetPs1Path $targetScript -workDir $installPath
+    if ([bool]$script:__LastShortcutCreateSucceeded) { $shortcutsCreated += "Start Menu" }
 
     if ($enableStartup) {
-        if ($useVbsLauncher) {
-            New-VbsShortcut -shortcutPath ([string]$layout.StartupShortcut) -vbsPath $launchVbsPath -workingDir $installPath
-        } else {
-            New-Shortcut -shortcutPath ([string]$layout.StartupShortcut) -targetScriptPath $targetScript -workingDir $installPath
-        }
-        $shortcutsCreated += "Startup"
+        $script:__LastShortcutCreateSucceeded = $false
+        Invoke-CreateShortcutSafe -label "Startup" -shortcutPath ([string]$layout.StartupShortcut) -vbsPath $launcherVbsArg -targetPs1Path $targetScript -workDir $installPath
+        if ([bool]$script:__LastShortcutCreateSucceeded) { $shortcutsCreated += "Startup" }
     }
     $legacyStartup = [string]$layout.StartupLegacyShortcut
     if (-not [string]::IsNullOrWhiteSpace($legacyStartup) -and (Test-Path -LiteralPath $legacyStartup -PathType Leaf)) {
@@ -2165,17 +2200,15 @@ function Set-InstallShortcutsCore {
         }
     }
 
-    if ($useVbsLauncher) {
-        New-VbsShortcut -shortcutPath ([string]$layout.DesktopShortcut) -vbsPath $launchVbsPath -workingDir $installPath
-    } else {
-        New-Shortcut -shortcutPath ([string]$layout.DesktopShortcut) -targetScriptPath $targetScript -workingDir $installPath
-    }
-    $shortcutsCreated += "Desktop"
+    $script:__LastShortcutCreateSucceeded = $false
+    Invoke-CreateShortcutSafe -label "Desktop" -shortcutPath ([string]$layout.DesktopShortcut) -vbsPath $launcherVbsArg -targetPs1Path $targetScript -workDir $installPath
+    if ([bool]$script:__LastShortcutCreateSucceeded) { $shortcutsCreated += "Desktop" }
 
     $effectiveUninstallVbsPath = if ([string]::IsNullOrWhiteSpace($uninstallVbsPath)) { [string]$layout.UninstallVbsPath } else { [string]$uninstallVbsPath }
     if (Test-Path -LiteralPath $effectiveUninstallVbsPath -PathType Leaf) {
-        New-VbsShortcut -shortcutPath ([string]$layout.UninstallShortcut) -vbsPath $effectiveUninstallVbsPath -workingDir $installPath
-        $shortcutsCreated += "Uninstall"
+        $script:__LastShortcutCreateSucceeded = $false
+        Invoke-CreateShortcutSafe -label "Uninstall" -shortcutPath ([string]$layout.UninstallShortcut) -vbsPath $effectiveUninstallVbsPath -targetPs1Path "" -workDir $installPath
+        if ([bool]$script:__LastShortcutCreateSucceeded) { $shortcutsCreated += "Uninstall" }
     }
 
     return $shortcutsCreated
