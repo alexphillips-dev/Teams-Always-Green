@@ -91,6 +91,7 @@ $script:UninstallReport = [ordered]@{
     ForceCloseKnownLockers   = $false
     ShortcutsRemoved         = @()
     ShortcutRemoveFailures   = @()
+    ShortcutSkippedUnsafe    = @()
     EntryPointPhaseComplete  = $false
     PhaseMarkerPath          = ""
     RemovedInstallRoot       = $false
@@ -106,6 +107,7 @@ $script:UninstallReport = [ordered]@{
     ResidualReason           = ""
     HealthCheck              = @{}
     Result                   = "Pending"
+    ResultNormalized         = "Pending"
     ExitCode                 = -1
     Summary                  = ""
     CompletedAtUtc           = ""
@@ -271,6 +273,27 @@ function Show-UninstallMessage {
     [void]$form.ShowDialog()
 }
 
+function Get-NormalizedUninstallResult([string]$result) {
+    $value = if ([string]::IsNullOrWhiteSpace($result)) { "" } else { [string]$result.Trim() }
+    switch ($value) {
+        "Completed" {
+            if ([bool]$script:UninstallReport.DeferredCleanupScheduled) { return "PartialCleanup-RebootPending" }
+            return "Completed-Clean"
+        }
+        "DryRun" { return "DryRun-Validated" }
+        "PartialCleanup" {
+            if ([bool]$script:UninstallReport.DeferredCleanupScheduled) { return "PartialCleanup-RebootPending" }
+            if ([bool]$script:UninstallReport.OneDrivePathLike) { return "PartialCleanup-OneDriveLock" }
+            return "PartialCleanup-Locked"
+        }
+        "Cancelled" { return "Cancelled-User" }
+        "SafetyBlocked" { return "Blocked-SafetyPolicy" }
+        "RelaunchFailed" { return "Failed-Relaunch" }
+        "UnhandledError" { return "Failed-Unhandled" }
+        default { return "Unknown" }
+    }
+}
+
 function Complete-Uninstall {
     param(
         [int]$ExitCode,
@@ -286,8 +309,10 @@ function Complete-Uninstall {
         Write-UninstallLog $Summary
     }
     $script:UninstallReport.Result = [string]$Result
+    $script:UninstallReport.ResultNormalized = Get-NormalizedUninstallResult -result $Result
     $script:UninstallReport.ExitCode = [int]$ExitCode
     $script:UninstallReport.Summary = [string]$Summary
+    Write-UninstallLog ("Normalized result: {0}" -f [string]$script:UninstallReport.ResultNormalized)
     Save-UninstallReport
 
     if ($NotifyUser) {
@@ -976,15 +1001,82 @@ function Ensure-SafeWorkingDirectory([string]$installRoot) {
     }
 }
 
+function Resolve-ComparablePath([string]$path) {
+    if ([string]::IsNullOrWhiteSpace($path)) { return "" }
+    try {
+        return [System.IO.Path]::GetFullPath([string]$path).TrimEnd("\")
+    } catch {
+        return [string]$path.TrimEnd("\")
+    }
+}
+
+function Test-PathUnderRoot([string]$path, [string]$root) {
+    if ([string]::IsNullOrWhiteSpace($path) -or [string]::IsNullOrWhiteSpace($root)) { return $false }
+    $fullPath = Resolve-ComparablePath $path
+    $fullRoot = Resolve-ComparablePath $root
+    if ([string]::IsNullOrWhiteSpace($fullPath) -or [string]::IsNullOrWhiteSpace($fullRoot)) { return $false }
+    return $fullPath.Equals($fullRoot, [System.StringComparison]::OrdinalIgnoreCase) -or
+        $fullPath.StartsWith(($fullRoot + "\"), [System.StringComparison]::OrdinalIgnoreCase)
+}
+
+function Test-ReparsePointPath([string]$path) {
+    if ([string]::IsNullOrWhiteSpace($path)) { return $false }
+    try {
+        if (-not (Test-Path -LiteralPath $path -PathType Container)) { return $false }
+        $item = Get-Item -LiteralPath $path -Force -ErrorAction Stop
+        return [bool]($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint)
+    } catch {
+        return $false
+    }
+}
+
+function Test-SafeShortcutPath([string]$shortcutPath) {
+    if ([string]::IsNullOrWhiteSpace($shortcutPath)) {
+        return [pscustomobject]@{ IsSafe = $false; Reason = "Shortcut path is empty." }
+    }
+
+    $parent = Split-Path -Path $shortcutPath -Parent
+    if ([string]::IsNullOrWhiteSpace($parent)) {
+        return [pscustomobject]@{ IsSafe = $false; Reason = "Shortcut parent path is empty." }
+    }
+
+    $allowedRoots = @(
+        [Environment]::GetFolderPath("Programs"),
+        [Environment]::GetFolderPath("Desktop"),
+        [Environment]::GetFolderPath("Startup"),
+        [Environment]::GetFolderPath("CommonDesktopDirectory")
+    ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+
+    $underAllowed = $false
+    foreach ($root in $allowedRoots) {
+        if (Test-PathUnderRoot -path $parent -root $root) {
+            $underAllowed = $true
+            break
+        }
+    }
+    if (-not $underAllowed) {
+        return [pscustomobject]@{ IsSafe = $false; Reason = ("Shortcut parent outside known shell folders: {0}" -f $parent) }
+    }
+    if (Test-ReparsePointPath -path $parent) {
+        return [pscustomobject]@{ IsSafe = $false; Reason = ("Shortcut parent is a reparse point: {0}" -f $parent) }
+    }
+
+    return [pscustomobject]@{ IsSafe = $true; Reason = "" }
+}
+
 function Get-ShortcutMap {
     $programsDir = [Environment]::GetFolderPath("Programs")
     $menuFolder = Join-Path $programsDir $script:AppName
+    $commonDesktopDir = [Environment]::GetFolderPath("CommonDesktopDirectory")
+    $startupDir = [Environment]::GetFolderPath("Startup")
     return @{
         MenuFolder        = $menuFolder
         MainShortcut      = (Join-Path $menuFolder "Teams Always Green.lnk")
         UninstallShortcut = (Join-Path $menuFolder "Uninstall Teams Always Green.lnk")
         DesktopShortcut   = (Join-Path ([Environment]::GetFolderPath("Desktop")) "Teams Always Green.lnk")
-        StartupShortcut   = (Join-Path ([Environment]::GetFolderPath("Startup")) "Teams Always Green.lnk")
+        PublicDesktopShortcut = if ([string]::IsNullOrWhiteSpace($commonDesktopDir)) { "" } else { (Join-Path $commonDesktopDir "Teams Always Green.lnk") }
+        StartupShortcut   = (Join-Path $startupDir "Teams Always Green.lnk")
+        StartupLegacyShortcut = (Join-Path $startupDir "Teams-Always-Green.lnk")
     }
 }
 
@@ -992,17 +1084,27 @@ function Remove-AppShortcuts([hashtable]$shortcutMap, $ui) {
     $result = [ordered]@{
         Removed = @()
         Failed  = @()
+        SkippedUnsafe = @()
     }
 
     foreach ($shortcut in @(
         [string]$shortcutMap.MainShortcut,
         [string]$shortcutMap.UninstallShortcut,
         [string]$shortcutMap.DesktopShortcut,
-        [string]$shortcutMap.StartupShortcut
+        [string]$shortcutMap.PublicDesktopShortcut,
+        [string]$shortcutMap.StartupShortcut,
+        [string]$shortcutMap.StartupLegacyShortcut
     )) {
         if ([string]::IsNullOrWhiteSpace($shortcut)) { continue }
         try {
             if (-not (Test-Path -LiteralPath $shortcut)) { continue }
+            $safeCheck = Test-SafeShortcutPath -shortcutPath $shortcut
+            if (-not [bool]$safeCheck.IsSafe) {
+                $reason = ("{0} | {1}" -f $shortcut, [string]$safeCheck.Reason)
+                $result.SkippedUnsafe += $reason
+                Add-UninstallDetail $ui ("Skipped unsafe shortcut path: {0}" -f $reason)
+                continue
+            }
             if ($script:IsDryRun) {
                 Add-UninstallDetail $ui ("WhatIf: would remove shortcut: {0}" -f $shortcut)
                 continue
@@ -1014,17 +1116,29 @@ function Remove-AppShortcuts([hashtable]$shortcutMap, $ui) {
             $failure = ("{0} | {1}" -f $shortcut, $_.Exception.Message)
             $result.Failed += $failure
             Add-UninstallDetail $ui ("Failed to remove shortcut: {0}" -f $failure)
+            if (-not $script:IsDryRun) {
+                $null = Schedule-PathRemovalAtReboot -path $shortcut -ui $ui
+            }
         }
     }
 
     try {
         $menuFolder = [string]$shortcutMap.MenuFolder
         if (-not [string]::IsNullOrWhiteSpace($menuFolder) -and (Test-Path -LiteralPath $menuFolder -PathType Container)) {
+            $menuSafety = Test-SafeShortcutPath -shortcutPath (Join-Path $menuFolder "Teams Always Green.lnk")
+            if (-not [bool]$menuSafety.IsSafe) {
+                Add-UninstallDetail $ui ("Skipped Start Menu folder cleanup (unsafe path): {0}" -f [string]$menuSafety.Reason)
+                return [pscustomobject]$result
+            }
             $childCount = (Get-ChildItem -Path $menuFolder -Force | Measure-Object).Count
             if ($childCount -eq 0) {
                 if ($script:IsDryRun) {
                     Add-UninstallDetail $ui ("WhatIf: would remove empty Start Menu folder: {0}" -f $menuFolder)
                 } else {
+                    if (Test-ReparsePointPath -path $menuFolder) {
+                        Add-UninstallDetail $ui ("Skipped Start Menu folder remove (reparse point): {0}" -f $menuFolder)
+                        return [pscustomobject]$result
+                    }
                     Remove-Item -LiteralPath $menuFolder -Force -ErrorAction Stop
                     Add-UninstallDetail $ui ("Removed empty Start Menu folder: {0}" -f $menuFolder)
                 }
@@ -1046,13 +1160,24 @@ function Get-TrackedProcessCandidates([string]$installRoot) {
         return @()
     }
 
-    $tokens = @(
-        $installRoot,
+    $rootToken = ""
+    try { $rootToken = [string]$installRoot.ToLowerInvariant() } catch { $rootToken = "" }
+    $strictTokens = @(
         (Join-Path $installRoot "app\runtime\Teams Always Green.ps1"),
-        (Join-Path $installRoot "app\uninstall"),
+        (Join-Path $installRoot "app\uninstall\Uninstall-Teams-Always-Green.ps1"),
+        (Join-Path $installRoot "app\uninstall\Uninstall-Teams-Always-Green.vbs"),
         (Join-Path $installRoot "Teams Always Green.VBS"),
-        (Join-Path $installRoot "Script\Uninstall")
+        (Join-Path $installRoot "Script\Teams Always Green.ps1"),
+        (Join-Path $installRoot "Script\Uninstall\Uninstall-Teams-Always-Green.ps1"),
+        (Join-Path $installRoot "Script\Uninstall\Uninstall-Teams-Always-Green.vbs")
     ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | ForEach-Object { $_.ToLowerInvariant() }
+
+    $identityTokens = @(
+        "teams always green.vbs",
+        "teams always green.ps1",
+        "uninstall-teams-always-green.ps1",
+        "uninstall-teams-always-green.vbs"
+    )
 
     $selected = New-Object System.Collections.Generic.List[object]
     foreach ($proc in $all) {
@@ -1061,15 +1186,24 @@ function Get-TrackedProcessCandidates([string]$installRoot) {
         $cmd = [string]$proc.CommandLine
         if ([string]::IsNullOrWhiteSpace($cmd)) { continue }
         $cmdLower = $cmd.ToLowerInvariant()
-        foreach ($token in $tokens) {
-            if ($cmdLower.Contains($token)) {
-                $selected.Add([pscustomobject]@{
-                    ProcessId = $procId
-                    Name = [string]$proc.Name
-                    CommandLine = [string]$proc.CommandLine
-                })
-                break
+        $strictMatch = $false
+        foreach ($token in $strictTokens) {
+            if ($cmdLower.Contains($token)) { $strictMatch = $true; break }
+        }
+        if (-not $strictMatch -and -not [string]::IsNullOrWhiteSpace($rootToken) -and $cmdLower.Contains($rootToken)) {
+            foreach ($identityToken in $identityTokens) {
+                if ($cmdLower.Contains($identityToken)) {
+                    $strictMatch = $true
+                    break
+                }
             }
+        }
+        if ($strictMatch) {
+            $selected.Add([pscustomobject]@{
+                ProcessId = $procId
+                Name = [string]$proc.Name
+                CommandLine = [string]$proc.CommandLine
+            })
         }
     }
     return @($selected | Sort-Object ProcessId -Unique)
@@ -1332,7 +1466,9 @@ function Invoke-UninstallHealthCheck([string]$installRoot, [hashtable]$shortcutM
         MainShortcutExists = [bool](Test-Path -LiteralPath ([string]$shortcutMap.MainShortcut))
         UninstallShortcutExists = [bool](Test-Path -LiteralPath ([string]$shortcutMap.UninstallShortcut))
         DesktopShortcutExists = [bool](Test-Path -LiteralPath ([string]$shortcutMap.DesktopShortcut))
+        PublicDesktopShortcutExists = [bool](Test-Path -LiteralPath ([string]$shortcutMap.PublicDesktopShortcut))
         StartupShortcutExists = [bool](Test-Path -LiteralPath ([string]$shortcutMap.StartupShortcut))
+        StartupLegacyShortcutExists = [bool](Test-Path -LiteralPath ([string]$shortcutMap.StartupLegacyShortcut))
         ProcessLockCount = 0
         Healthy = $true
     }
@@ -1345,7 +1481,9 @@ function Invoke-UninstallHealthCheck([string]$installRoot, [hashtable]$shortcutM
     $status.Healthy = (-not $status.MainShortcutExists) -and
         (-not $status.UninstallShortcutExists) -and
         (-not $status.DesktopShortcutExists) -and
+        (-not $status.PublicDesktopShortcutExists) -and
         (-not $status.StartupShortcutExists) -and
+        (-not $status.StartupLegacyShortcutExists) -and
         ($status.ProcessLockCount -eq 0)
     return [pscustomobject]$status
 }
@@ -1440,6 +1578,8 @@ function Remove-PathWithRetry([string]$path, [string]$label, [int]$maxAttempts, 
                 }
                 $path = $renamedPath
             }
+            $null = Schedule-PathRemovalAtReboot -path $path -ui $ui
+        } elseif ($label -eq "app data") {
             $null = Schedule-PathRemovalAtReboot -path $path -ui $ui
         }
 
@@ -1593,6 +1733,7 @@ try {
         $shortcutResult = Remove-AppShortcuts -shortcutMap $shortcutMap -ui $ui
         $script:UninstallReport.ShortcutsRemoved = @($shortcutResult.Removed)
         $script:UninstallReport.ShortcutRemoveFailures = @($shortcutResult.Failed)
+        $script:UninstallReport.ShortcutSkippedUnsafe = @($shortcutResult.SkippedUnsafe)
 
         Set-UninstallProgress $ui 32 "Step 2 of 4 - Cleanup" "Stopping running processes..." ""
         $processResult = Stop-AppProcesses -installRoot $resolvedInstallRoot -ui $ui
@@ -1656,7 +1797,7 @@ try {
         $finalShortcutMap = Get-ShortcutMap
         $health = Invoke-UninstallHealthCheck -installRoot $resolvedInstallRoot -shortcutMap $finalShortcutMap
         $script:UninstallReport.HealthCheck = $health
-        Add-UninstallDetail $ui ("Health check: InstallRootExists={0}; StartupShortcutExists={1}; ProcessLockCount={2}" -f $health.InstallRootExists, $health.StartupShortcutExists, $health.ProcessLockCount)
+        Add-UninstallDetail $ui ("Health check: InstallRootExists={0}; StartupShortcutExists={1}; StartupLegacyShortcutExists={2}; PublicDesktopShortcutExists={3}; ProcessLockCount={4}" -f $health.InstallRootExists, $health.StartupShortcutExists, $health.StartupLegacyShortcutExists, $health.PublicDesktopShortcutExists, $health.ProcessLockCount)
 
         Set-UninstallProgress $ui 100 "Step 4 of 4 - Complete" "Finalizing uninstall..." ""
         Start-Sleep -Milliseconds 300
@@ -1696,6 +1837,7 @@ try {
     }
     Write-UninstallLog $message
     $script:UninstallReport.Result = "UnhandledError"
+    $script:UninstallReport.ResultNormalized = Get-NormalizedUninstallResult -result "UnhandledError"
     $script:UninstallReport.ExitCode = $script:ExitCodes.UnhandledError
     $script:UninstallReport.Summary = $message
     Save-UninstallReport

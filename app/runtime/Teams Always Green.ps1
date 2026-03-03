@@ -7484,34 +7484,131 @@ if ($oneDrivePathFindings.Count -gt 0) {
 # --- Startup shortcut management (create/remove) ---
 function Get-StartupShortcutPath {
     $startupDir = [Environment]::GetFolderPath("Startup")
+    return Join-Path $startupDir "Teams Always Green.lnk"
+}
+
+function Get-LegacyStartupShortcutPath {
+    $startupDir = [Environment]::GetFolderPath("Startup")
     return Join-Path $startupDir "Teams-Always-Green.lnk"
+}
+
+function Get-StartupShortcutExpectation {
+    $launchVbsPath = Join-Path $script:AppRoot "Teams Always Green.VBS"
+    if (Test-Path -LiteralPath $launchVbsPath -PathType Leaf) {
+        return [pscustomobject]@{
+            TargetPath = "$env:WINDIR\System32\wscript.exe"
+            Arguments = "`"$launchVbsPath`""
+            WorkingDirectory = [string]$script:AppRoot
+            WindowStyle = 1
+        }
+    }
+    return [pscustomobject]@{
+        TargetPath = "$env:WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe"
+        Arguments = "-NoProfile -ExecutionPolicy RemoteSigned -WindowStyle Hidden -File `"$scriptPath`""
+        WorkingDirectory = [string]$script:AppRoot
+        WindowStyle = 7
+    }
+}
+
+function Test-ShortcutHealthy([string]$shortcutPath, [object]$expected) {
+    if ([string]::IsNullOrWhiteSpace($shortcutPath) -or -not $expected) { return $false }
+    if (-not (Test-Path -LiteralPath $shortcutPath -PathType Leaf)) { return $false }
+    try {
+        $shell = New-Object -ComObject WScript.Shell
+        $shortcut = $shell.CreateShortcut($shortcutPath)
+        $actualTarget = [string]$shortcut.TargetPath
+        $actualWorking = [string]$shortcut.WorkingDirectory
+        $actualArgs = [string]$shortcut.Arguments
+
+        $targetMatch = $actualTarget.Equals([string]$expected.TargetPath, [System.StringComparison]::OrdinalIgnoreCase)
+        $workingMatch = $actualWorking.Equals([string]$expected.WorkingDirectory, [System.StringComparison]::OrdinalIgnoreCase)
+        $argMatch = $false
+        $argTokens = @([string]$expected.Arguments)
+        try { $argTokens += (Split-Path -Path ([string]$expected.Arguments).Replace('"', '') -Leaf) } catch { $null = $_ }
+        foreach ($token in @($argTokens | Select-Object -Unique)) {
+            if ([string]::IsNullOrWhiteSpace($token)) { continue }
+            if ($actualArgs.IndexOf([string]$token, [System.StringComparison]::OrdinalIgnoreCase) -ge 0) {
+                $argMatch = $true
+                break
+            }
+        }
+        return ($targetMatch -and $workingMatch -and $argMatch)
+    } catch {
+        return $false
+    }
 }
 
 function Set-StartupShortcut([bool]$enabled) {
     $shortcutPath = Get-StartupShortcutPath
+    $legacyPath = Get-LegacyStartupShortcutPath
     if ($enabled) {
+        $expected = Get-StartupShortcutExpectation
         $shell = New-Object -ComObject WScript.Shell
         $shortcut = $shell.CreateShortcut($shortcutPath)
-        $shortcut.TargetPath = "$env:WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe"
-        $shortcut.Arguments = "-NoProfile -ExecutionPolicy RemoteSigned -WindowStyle Hidden -File `"$scriptPath`""
-    $shortcut.WorkingDirectory = $script:AppRoot
-        $shortcut.WindowStyle = 7
+        $shortcut.TargetPath = [string]$expected.TargetPath
+        $shortcut.Arguments = [string]$expected.Arguments
+        $shortcut.WorkingDirectory = [string]$expected.WorkingDirectory
+        $shortcut.WindowStyle = [int]$expected.WindowStyle
         $shortcut.IconLocation = if (Test-Path $iconPath) { $iconPath } else { "$env:WINDIR\System32\shell32.dll,1" }
         $shortcut.Save()
-    } else {
-        if (Test-Path $shortcutPath) {
-            Remove-Item -Path $shortcutPath -Force
+        if (-not (Test-ShortcutHealthy -shortcutPath $shortcutPath -expected $expected)) {
+            throw ("Startup shortcut verification failed: {0}" -f $shortcutPath)
         }
+        if (Test-Path -LiteralPath $legacyPath -PathType Leaf) {
+            try {
+                Remove-Item -LiteralPath $legacyPath -Force -ErrorAction Stop
+                Write-Log ("Startup shortcut cleanup: removed legacy shortcut {0}" -f $legacyPath) "INFO" $null "Startup"
+            } catch {
+                Write-Log "Startup shortcut cleanup failed for legacy shortcut." "WARN" $_.Exception "Startup"
+            }
+        }
+    } else {
+        foreach ($path in @($shortcutPath, $legacyPath)) {
+            if (Test-Path -LiteralPath $path -PathType Leaf) {
+                Remove-Item -LiteralPath $path -Force
+            }
+        }
+    }
+}
+
+function Invoke-StartupShortcutSelfHeal([object]$settingsObject) {
+    if (-not $settingsObject) { return }
+    try {
+        $startupPath = Get-StartupShortcutPath
+        $legacyPath = Get-LegacyStartupShortcutPath
+        $startupRequested = [bool]$settingsObject.StartWithWindows
+        if ($startupRequested) {
+            $expected = Get-StartupShortcutExpectation
+            $healthy = Test-ShortcutHealthy -shortcutPath $startupPath -expected $expected
+            if (-not $healthy) {
+                Set-StartupShortcut $true
+                Write-Log "Startup shortcut self-heal applied." "WARN" $null "SelfHeal"
+            } elseif (Test-Path -LiteralPath $legacyPath -PathType Leaf) {
+                try {
+                    Remove-Item -LiteralPath $legacyPath -Force -ErrorAction Stop
+                    Write-Log ("Startup shortcut self-heal removed legacy shortcut: {0}" -f $legacyPath) "INFO" $null "SelfHeal"
+                } catch {
+                    Write-Log "Startup shortcut self-heal could not remove legacy shortcut." "WARN" $_.Exception "SelfHeal"
+                }
+            }
+        } elseif ((Test-Path -LiteralPath $startupPath -PathType Leaf) -or (Test-Path -LiteralPath $legacyPath -PathType Leaf)) {
+            Set-StartupShortcut $false
+            Write-Log "Startup shortcut self-heal removed unexpected startup shortcut(s)." "WARN" $null "SelfHeal"
+        }
+    } catch {
+        Write-LogExceptionDeduped "Startup shortcut self-heal failed." "WARN" $_.Exception "SelfHeal" 90
     }
 }
 
 try {
     $startupPath = Get-StartupShortcutPath
-    $startupEnabled = Test-Path $startupPath
+    $legacyStartupPath = Get-LegacyStartupShortcutPath
+    $startupEnabled = (Test-Path -LiteralPath $startupPath -PathType Leaf) -or (Test-Path -LiteralPath $legacyStartupPath -PathType Leaf)
     if ($settings.StartWithWindows -ne $startupEnabled) {
         $settings.StartWithWindows = $startupEnabled
         Save-Settings $settings
     }
+    Invoke-StartupShortcutSelfHeal -settingsObject $settings
 } catch {
     Write-Log "Failed to read startup shortcut." "ERROR" $_.Exception "Startup"
 }

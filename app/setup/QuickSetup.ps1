@@ -1,5 +1,10 @@
 # QuickSetup.ps1 - Download and install Teams Always Green into a chosen folder
-# Creates Desktop, Start Menu, and Startup shortcuts (no VBS needed).
+# Creates Desktop, Start Menu, and Startup shortcuts (uses VBS launcher by default).
+
+param(
+    [switch]$RepairShortcuts,
+    [string]$RepairInstallPath = ""
+)
 
 Add-Type -AssemblyName System.Windows.Forms
 $ErrorActionPreference = 'Stop'
@@ -1846,54 +1851,176 @@ if ($ui.Cancelled) {
 }
 }
 
+function Resolve-ComparablePath([string]$path) {
+    if ([string]::IsNullOrWhiteSpace($path)) { return "" }
+    try {
+        return [System.IO.Path]::GetFullPath([string]$path).TrimEnd("\")
+    } catch {
+        return [string]$path.TrimEnd("\")
+    }
+}
+
+function Test-PathUnderRoot([string]$path, [string]$root) {
+    if ([string]::IsNullOrWhiteSpace($path) -or [string]::IsNullOrWhiteSpace($root)) { return $false }
+    $p = Resolve-ComparablePath $path
+    $r = Resolve-ComparablePath $root
+    if ([string]::IsNullOrWhiteSpace($p) -or [string]::IsNullOrWhiteSpace($r)) { return $false }
+    return $p.Equals($r, [System.StringComparison]::OrdinalIgnoreCase) -or
+        $p.StartsWith(($r + "\"), [System.StringComparison]::OrdinalIgnoreCase)
+}
+
+function Test-ReparsePointPath([string]$path) {
+    if ([string]::IsNullOrWhiteSpace($path)) { return $false }
+    try {
+        if (-not (Test-Path -LiteralPath $path -PathType Container)) { return $false }
+        $item = Get-Item -LiteralPath $path -Force -ErrorAction Stop
+        return [bool]($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint)
+    } catch {
+        return $false
+    }
+}
+
+function Test-ShortcutParentSafe([string]$shortcutPath) {
+    if ([string]::IsNullOrWhiteSpace($shortcutPath)) {
+        throw "Shortcut path is empty."
+    }
+
+    $parent = Split-Path -Path $shortcutPath -Parent
+    if ([string]::IsNullOrWhiteSpace($parent)) {
+        throw ("Shortcut parent is empty for path: {0}" -f $shortcutPath)
+    }
+
+    $allowedRoots = @(
+        [Environment]::GetFolderPath("Programs"),
+        [Environment]::GetFolderPath("Desktop"),
+        [Environment]::GetFolderPath("Startup"),
+        [Environment]::GetFolderPath("CommonDesktopDirectory")
+    ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+
+    $underAllowedRoot = $false
+    foreach ($root in $allowedRoots) {
+        if (Test-PathUnderRoot -path $parent -root $root) {
+            $underAllowedRoot = $true
+            break
+        }
+    }
+    if (-not $underAllowedRoot) {
+        throw ("Shortcut parent is outside allowed shell folders: {0}" -f $parent)
+    }
+
+    if (-not (Test-Path -LiteralPath $parent -PathType Container)) {
+        New-Item -ItemType Directory -Path $parent -Force | Out-Null
+    }
+    if (Test-ReparsePointPath -path $parent) {
+        throw ("Shortcut parent is a reparse point and is blocked for safety: {0}" -f $parent)
+    }
+}
+
+function Get-ShortcutIconLocation([string]$workingDir) {
+    foreach ($relativePath in @("assets\\icons\\Tray_Icon.ico", "Meta\\Icons\\Tray_Icon.ico")) {
+        $candidateIconPath = Join-Path $workingDir $relativePath
+        if (Test-Path -LiteralPath $candidateIconPath -PathType Leaf) {
+            Write-SetupLog "Shortcut icon set: $candidateIconPath"
+            return "$candidateIconPath,0"
+        }
+    }
+    Write-SetupLog "Shortcut icon missing, using shell32 fallback."
+    return "$env:WINDIR\System32\shell32.dll,1"
+}
+
+function Test-ShortcutCreated {
+    param(
+        [string]$shortcutPath,
+        [string]$expectedTargetPath,
+        [string]$expectedWorkingDir,
+        [string]$expectedArgumentToken
+    )
+
+    if (-not (Test-Path -LiteralPath $shortcutPath -PathType Leaf)) {
+        Write-SetupLog ("Shortcut verification failed: file not found: {0}" -f $shortcutPath)
+        return $false
+    }
+
+    try {
+        $shell = New-Object -ComObject WScript.Shell
+        $shortcut = $shell.CreateShortcut($shortcutPath)
+        $actualTarget = Resolve-ComparablePath ([string]$shortcut.TargetPath)
+        $actualWorkingDir = Resolve-ComparablePath ([string]$shortcut.WorkingDirectory)
+        $actualArguments = [string]$shortcut.Arguments
+    } catch {
+        Write-SetupLog ("Shortcut verification failed for {0}: {1}" -f $shortcutPath, $_.Exception.Message)
+        return $false
+    }
+
+    $expectedTarget = Resolve-ComparablePath $expectedTargetPath
+    $expectedWorking = Resolve-ComparablePath $expectedWorkingDir
+    if (-not $actualTarget.Equals($expectedTarget, [System.StringComparison]::OrdinalIgnoreCase)) {
+        Write-SetupLog ("Shortcut verification failed (target mismatch): actual={0} expected={1}" -f $actualTarget, $expectedTarget)
+        return $false
+    }
+    if (-not $actualWorkingDir.Equals($expectedWorking, [System.StringComparison]::OrdinalIgnoreCase)) {
+        Write-SetupLog ("Shortcut verification failed (working dir mismatch): actual={0} expected={1}" -f $actualWorkingDir, $expectedWorking)
+        return $false
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($expectedArgumentToken)) {
+        $tokens = @([string]$expectedArgumentToken)
+        try { $tokens += (Split-Path -Path $expectedArgumentToken -Leaf) } catch { $null = $_ }
+        $matched = $false
+        foreach ($token in @($tokens | Select-Object -Unique)) {
+            if ([string]::IsNullOrWhiteSpace($token)) { continue }
+            if ($actualArguments.IndexOf([string]$token, [System.StringComparison]::OrdinalIgnoreCase) -ge 0) {
+                $matched = $true
+                break
+            }
+        }
+        if (-not $matched) {
+            Write-SetupLog ("Shortcut verification failed (arguments mismatch): actual={0} expected token={1}" -f $actualArguments, $expectedArgumentToken)
+            return $false
+        }
+    }
+
+    return $true
+}
+
 function New-Shortcut([string]$shortcutPath, [string]$targetScriptPath, [string]$workingDir) {
+    Test-ShortcutParentSafe -shortcutPath $shortcutPath
     $shell = New-Object -ComObject WScript.Shell
     $shortcut = $shell.CreateShortcut($shortcutPath)
     $shortcut.TargetPath = "$env:WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe"
     $shortcut.Arguments = "-NoProfile -ExecutionPolicy RemoteSigned -WindowStyle Hidden -File `"$targetScriptPath`""
     $shortcut.WorkingDirectory = $workingDir
     $shortcut.WindowStyle = 7
-    $iconPath = $null
-    foreach ($relativePath in @("assets\\icons\\Tray_Icon.ico", "Meta\\Icons\\Tray_Icon.ico")) {
-        $candidateIconPath = Join-Path $workingDir $relativePath
-        if (Test-Path -LiteralPath $candidateIconPath -PathType Leaf) {
-            $iconPath = $candidateIconPath
-            break
-        }
-    }
-    if (Test-Path $iconPath) {
-        $shortcut.IconLocation = "$iconPath,0"
-        Write-SetupLog "Shortcut icon set: $iconPath"
-    } else {
-        $shortcut.IconLocation = "$env:WINDIR\System32\shell32.dll,1"
-        Write-SetupLog "Shortcut icon missing, using shell32 fallback."
-    }
+    $shortcut.IconLocation = Get-ShortcutIconLocation -workingDir $workingDir
     $shortcut.Save()
+
+    $verified = Test-ShortcutCreated -shortcutPath $shortcutPath `
+        -expectedTargetPath "$env:WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe" `
+        -expectedWorkingDir $workingDir `
+        -expectedArgumentToken $targetScriptPath
+    if (-not $verified) {
+        throw ("Shortcut verification failed after creation: {0}" -f $shortcutPath)
+    }
 }
 
 function New-VbsShortcut([string]$shortcutPath, [string]$vbsPath, [string]$workingDir) {
+    Test-ShortcutParentSafe -shortcutPath $shortcutPath
     $shell = New-Object -ComObject WScript.Shell
     $shortcut = $shell.CreateShortcut($shortcutPath)
     $shortcut.TargetPath = "$env:WINDIR\System32\wscript.exe"
     $shortcut.Arguments = "`"$vbsPath`""
     $shortcut.WorkingDirectory = $workingDir
     $shortcut.WindowStyle = 1
-    $iconPath = $null
-    foreach ($relativePath in @("assets\\icons\\Tray_Icon.ico", "Meta\\Icons\\Tray_Icon.ico")) {
-        $candidateIconPath = Join-Path $workingDir $relativePath
-        if (Test-Path -LiteralPath $candidateIconPath -PathType Leaf) {
-            $iconPath = $candidateIconPath
-            break
-        }
-    }
-    if (Test-Path $iconPath) {
-        $shortcut.IconLocation = "$iconPath,0"
-        Write-SetupLog "Shortcut icon set: $iconPath"
-    } else {
-        $shortcut.IconLocation = "$env:WINDIR\System32\shell32.dll,1"
-        Write-SetupLog "Shortcut icon missing, using shell32 fallback."
-    }
+    $shortcut.IconLocation = Get-ShortcutIconLocation -workingDir $workingDir
     $shortcut.Save()
+
+    $verified = Test-ShortcutCreated -shortcutPath $shortcutPath `
+        -expectedTargetPath "$env:WINDIR\System32\wscript.exe" `
+        -expectedWorkingDir $workingDir `
+        -expectedArgumentToken $vbsPath
+    if (-not $verified) {
+        throw ("Shortcut verification failed after creation: {0}" -f $shortcutPath)
+    }
 }
 
 function Install-UninstallAssets {
@@ -1975,6 +2102,134 @@ function Install-UninstallAssets {
     }
 }
 
+function Get-ShortcutLayout([string]$installPath) {
+    $programsDir = [Environment]::GetFolderPath("Programs")
+    $menuFolder = Join-Path $programsDir "Teams Always Green"
+    $desktopDir = [Environment]::GetFolderPath("Desktop")
+    $startupDir = [Environment]::GetFolderPath("Startup")
+    return @{
+        MenuFolder = $menuFolder
+        MenuShortcut = (Join-Path $menuFolder "Teams Always Green.lnk")
+        UninstallShortcut = (Join-Path $menuFolder "Uninstall Teams Always Green.lnk")
+        DesktopShortcut = (Join-Path $desktopDir "Teams Always Green.lnk")
+        StartupShortcut = (Join-Path $startupDir "Teams Always Green.lnk")
+        StartupLegacyShortcut = (Join-Path $startupDir "Teams-Always-Green.lnk")
+        LaunchVbsPath = (Join-Path $installPath "Teams Always Green.VBS")
+        TargetScriptPath = (Join-Path $installPath "app/runtime/Teams Always Green.ps1")
+        UninstallVbsPath = (Join-Path $installPath "app/uninstall/Uninstall-Teams-Always-Green.vbs")
+    }
+}
+
+function Set-InstallShortcutsCore {
+    param(
+        [string]$installPath,
+        [string]$targetScript,
+        [bool]$enableStartup,
+        [string]$uninstallVbsPath = ""
+    )
+
+    $layout = Get-ShortcutLayout -installPath $installPath
+    if (-not (Test-Path -LiteralPath ([string]$layout.MenuFolder) -PathType Container)) {
+        New-Item -ItemType Directory -Path ([string]$layout.MenuFolder) -Force | Out-Null
+    }
+
+    $launchVbsPath = [string]$layout.LaunchVbsPath
+    $useVbsLauncher = Test-Path -LiteralPath $launchVbsPath -PathType Leaf
+    if (-not $useVbsLauncher) {
+        Write-SetupLog "Launch VBS not found; falling back to direct PowerShell shortcuts."
+    }
+
+    $shortcutsCreated = @()
+    if ($useVbsLauncher) {
+        New-VbsShortcut -shortcutPath ([string]$layout.MenuShortcut) -vbsPath $launchVbsPath -workingDir $installPath
+    } else {
+        New-Shortcut -shortcutPath ([string]$layout.MenuShortcut) -targetScriptPath $targetScript -workingDir $installPath
+    }
+    $shortcutsCreated += "Start Menu"
+
+    if ($enableStartup) {
+        if ($useVbsLauncher) {
+            New-VbsShortcut -shortcutPath ([string]$layout.StartupShortcut) -vbsPath $launchVbsPath -workingDir $installPath
+        } else {
+            New-Shortcut -shortcutPath ([string]$layout.StartupShortcut) -targetScriptPath $targetScript -workingDir $installPath
+        }
+        $shortcutsCreated += "Startup"
+    }
+    $legacyStartup = [string]$layout.StartupLegacyShortcut
+    if (-not [string]::IsNullOrWhiteSpace($legacyStartup) -and (Test-Path -LiteralPath $legacyStartup -PathType Leaf)) {
+        try {
+            Remove-Item -LiteralPath $legacyStartup -Force -ErrorAction Stop
+            Write-SetupLog ("Removed legacy startup shortcut: {0}" -f $legacyStartup)
+        } catch {
+            Write-SetupLog ("Failed to remove legacy startup shortcut: {0}" -f $_.Exception.Message)
+        }
+    }
+
+    if ($useVbsLauncher) {
+        New-VbsShortcut -shortcutPath ([string]$layout.DesktopShortcut) -vbsPath $launchVbsPath -workingDir $installPath
+    } else {
+        New-Shortcut -shortcutPath ([string]$layout.DesktopShortcut) -targetScriptPath $targetScript -workingDir $installPath
+    }
+    $shortcutsCreated += "Desktop"
+
+    $effectiveUninstallVbsPath = if ([string]::IsNullOrWhiteSpace($uninstallVbsPath)) { [string]$layout.UninstallVbsPath } else { [string]$uninstallVbsPath }
+    if (Test-Path -LiteralPath $effectiveUninstallVbsPath -PathType Leaf) {
+        New-VbsShortcut -shortcutPath ([string]$layout.UninstallShortcut) -vbsPath $effectiveUninstallVbsPath -workingDir $installPath
+        $shortcutsCreated += "Uninstall"
+    }
+
+    return $shortcutsCreated
+}
+
+function Resolve-RepairInstallPath([string]$requestedPath) {
+    if (-not [string]::IsNullOrWhiteSpace($requestedPath)) {
+        try { return [System.IO.Path]::GetFullPath($requestedPath) } catch { return [string]$requestedPath }
+    }
+
+    $sourceRoot = Get-QuickSetupSourceRoot
+    if (-not [string]::IsNullOrWhiteSpace($sourceRoot)) {
+        return [string]$sourceRoot
+    }
+
+    try {
+        $cwd = [string](Get-Location).Path
+        $runtimePath = Join-Path $cwd "app/runtime/Teams Always Green.ps1"
+        if (Test-Path -LiteralPath $runtimePath -PathType Leaf) {
+            return $cwd
+        }
+    } catch {
+        $null = $_
+    }
+
+    return ""
+}
+
+function Invoke-ShortcutRepairMode {
+    param(
+        [string]$repairInstallPath
+    )
+
+    $resolvedInstallPath = Resolve-RepairInstallPath -requestedPath $repairInstallPath
+    if ([string]::IsNullOrWhiteSpace($resolvedInstallPath)) {
+        throw "Could not resolve install path for shortcut repair mode. Pass -RepairInstallPath."
+    }
+
+    $targetScript = Join-Path $resolvedInstallPath "app/runtime/Teams Always Green.ps1"
+    if (-not (Test-Path -LiteralPath $targetScript -PathType Leaf)) {
+        throw ("Install root does not contain runtime script: {0}" -f $targetScript)
+    }
+
+    $layout = Get-ShortcutLayout -installPath $resolvedInstallPath
+    $enableStartup = (Test-Path -LiteralPath ([string]$layout.StartupShortcut) -PathType Leaf) -or
+        (Test-Path -LiteralPath ([string]$layout.StartupLegacyShortcut) -PathType Leaf)
+    $created = Set-InstallShortcutsCore -installPath $resolvedInstallPath -targetScript $targetScript -enableStartup:$enableStartup -uninstallVbsPath ([string]$layout.UninstallVbsPath)
+    return [pscustomobject]@{
+        InstallPath = $resolvedInstallPath
+        StartupEnabled = [bool]$enableStartup
+        Shortcuts = @($created)
+    }
+}
+
 function Finalize-Install {
     param(
         [string]$installPath,
@@ -1984,21 +2239,6 @@ function Finalize-Install {
         [object]$manifest
     )
 
-    $programsDir = [Environment]::GetFolderPath("Programs")
-    $menuFolder = Join-Path $programsDir "Teams Always Green"
-    if (-not (Test-Path $menuFolder)) {
-        New-Item -ItemType Directory -Path $menuFolder -Force | Out-Null
-    }
-    $menuShortcut = Join-Path $menuFolder "Teams Always Green.lnk"
-    $uninstallShortcut = Join-Path $menuFolder "Uninstall Teams Always Green.lnk"
-    $desktopDir = [Environment]::GetFolderPath("Desktop")
-    $desktopShortcut = Join-Path $desktopDir "Teams Always Green.lnk"
-
-    if ($enableStartup) {
-        $startupDir = [Environment]::GetFolderPath("Startup")
-        $startupShortcut = Join-Path $startupDir "Teams Always Green.lnk"
-    }
-
     $uninstallVbsPath = $null
     try {
         $uninstallAssets = Install-UninstallAssets -installPath $installPath -manifest $manifest
@@ -2007,28 +2247,17 @@ function Finalize-Install {
         Write-SetupLog ("Failed to stage uninstall assets: {0}" -f $_.Exception.Message)
     }
 
-    $shortcutsCreated = @()
-    if (-not $portableMode) {
-        try {
-            New-Shortcut -shortcutPath $menuShortcut -targetScriptPath $targetScript -workingDir $installPath
-            $shortcutsCreated += "Start Menu"
-            if ($enableStartup) {
-                New-Shortcut -shortcutPath $startupShortcut -targetScriptPath $targetScript -workingDir $installPath
-                $shortcutsCreated += "Startup"
-            }
-            New-Shortcut -shortcutPath $desktopShortcut -targetScriptPath $targetScript -workingDir $installPath
-            $shortcutsCreated += "Desktop"
-            if (Test-Path $uninstallVbsPath) {
-                New-VbsShortcut -shortcutPath $uninstallShortcut -vbsPath $uninstallVbsPath -workingDir $installPath
-                $shortcutsCreated += "Uninstall"
-            }
-        } catch {
-            Write-SetupLog "Failed to create shortcuts: $($_.Exception.Message)"
-        }
-    } else {
+    if ($portableMode) {
         Write-SetupLog "Portable mode: shortcuts not created."
+        return @()
     }
-    return $shortcutsCreated
+
+    try {
+        return @(Set-InstallShortcutsCore -installPath $installPath -targetScript $targetScript -enableStartup:$enableStartup -uninstallVbsPath $uninstallVbsPath)
+    } catch {
+        Write-SetupLog "Failed to create shortcuts: $($_.Exception.Message)"
+        return @()
+    }
 }
 
 function Show-SetupWizard {
@@ -2904,6 +3133,23 @@ function Show-SetupWizard {
     & $showStep 0
     if ($owner) { $form.ShowDialog($owner) | Out-Null } else { $form.ShowDialog() | Out-Null }
     return $state
+}
+
+if ($RepairShortcuts) {
+    Write-SetupLog "Shortcut repair mode requested."
+    try {
+        $repairResult = Invoke-ShortcutRepairMode -repairInstallPath $RepairInstallPath
+        Write-SetupLog ("Shortcut repair completed. InstallPath={0} StartupEnabled={1} Shortcuts={2}" -f [string]$repairResult.InstallPath, [bool]$repairResult.StartupEnabled, ([string](@($repairResult.Shortcuts) -join ", ")))
+        $repairOwner = New-SetupOwner
+        Show-SetupInfo -message ("Shortcut repair completed.`n`nInstall path: {0}`nStartup shortcut: {1}`nUpdated shortcuts: {2}" -f [string]$repairResult.InstallPath, [string]$repairResult.StartupEnabled, [string](@($repairResult.Shortcuts) -join ", ")) -owner $repairOwner
+        if ($repairOwner -and -not $repairOwner.IsDisposed) { $repairOwner.Close() }
+        Cleanup-SetupTempFiles -success $true
+        exit 0
+    } catch {
+        Show-SetupError ("Shortcut repair failed: {0}" -f $_.Exception.Message)
+        Cleanup-SetupTempFiles -success $true
+        exit 1
+    }
 }
 
 $channelResolution = Resolve-QuickSetupChannel

@@ -381,6 +381,13 @@ Describe "Quality: QuickSetup Wizard Flow" {
         $script:quickSetupText | Should -Match 'OneDrive:\s*Warning'
         $script:quickSetupText | Should -Match 'LOCALAPPDATA'
     }
+
+    It "supports shortcut repair mode with verified shortcut creation" {
+        $script:quickSetupText | Should -Match '\[switch\]\$RepairShortcuts'
+        $script:quickSetupText | Should -Match 'function\s+Invoke-ShortcutRepairMode'
+        $script:quickSetupText | Should -Match 'function\s+Test-ShortcutCreated'
+        $script:quickSetupText | Should -Match 'Shortcut verification failed after creation'
+    }
 }
 
 Describe "Quality: Uninstall Flow" {
@@ -422,6 +429,10 @@ Describe "Quality: Uninstall Flow" {
         $script:uninstallText | Should -Match 'Copy diagnostics'
         $script:uninstallText | Should -Match 'function\s+Remove-PathWithRetry'
         $script:uninstallText | Should -Match 'function\s+Remove-AppShortcuts'
+        $script:uninstallText | Should -Match 'PublicDesktopShortcut'
+        $script:uninstallText | Should -Match 'StartupLegacyShortcut'
+        $script:uninstallText | Should -Match 'ResultNormalized'
+        $script:uninstallText | Should -Match 'function\s+Test-SafeShortcutPath'
         $script:uninstallText | Should -Match '\$script:ExitCodes\s*=\s*@\{'
         $script:uninstallText | Should -Match 'Install signature files were not found'
         $script:uninstallText | Should -Match 'Uninstall completed successfully\.'
@@ -454,6 +465,17 @@ Describe "Quality: Startup Path Advisories" {
         $script:mainText | Should -Match 'Startup path advisory: no OneDrive-managed paths detected for app/data/log roots'
         $script:mainText | Should -Match 'AppRoot'
         $script:mainText | Should -Match 'DataRoot'
+    }
+}
+
+Describe "Quality: Startup Shortcut Self-Heal" {
+    It "uses a single startup shortcut naming convention with legacy cleanup and verification" {
+        $script:mainText | Should -Match 'function\s+Get-StartupShortcutPath'
+        $script:mainText | Should -Match 'Teams Always Green\.lnk'
+        $script:mainText | Should -Match 'function\s+Get-LegacyStartupShortcutPath'
+        $script:mainText | Should -Match 'Teams-Always-Green\.lnk'
+        $script:mainText | Should -Match 'function\s+Invoke-StartupShortcutSelfHeal'
+        $script:mainText | Should -Match 'function\s+Test-ShortcutHealthy'
     }
 }
 

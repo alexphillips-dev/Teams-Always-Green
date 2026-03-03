@@ -129,6 +129,7 @@ Describe "Uninstall integration" {
         (Test-Path -LiteralPath $root) | Should -BeTrue
         $artifacts.Report | Should -Not -BeNullOrEmpty
         [string]$artifacts.Report.Result | Should -Be "DryRun"
+        [string]$artifacts.Report.ResultNormalized | Should -Be "DryRun-Validated"
         $artifacts.LogText | Should -Match "Dry run complete"
 
         Remove-Item -Path $root -Recurse -Force -ErrorAction SilentlyContinue
@@ -153,6 +154,7 @@ Describe "Uninstall integration" {
         $exitCode | Should -Be 0
         $artifacts.Report | Should -Not -BeNullOrEmpty
         [string]$artifacts.Report.Result | Should -Be "Completed"
+        [string]$artifacts.Report.ResultNormalized | Should -Be "Completed-Clean"
         [bool]$artifacts.Report.EntryPointPhaseComplete | Should -BeTrue
         [string]$artifacts.Report.PhaseMarkerPath | Should -Not -BeNullOrEmpty
         $artifacts.Report.HealthCheck | Should -Not -BeNullOrEmpty
@@ -253,6 +255,7 @@ Describe "Uninstall integration" {
             $exitCode | Should -Be 30
             $artifacts.Report | Should -Not -BeNullOrEmpty
             [string]$artifacts.Report.Result | Should -Be "PartialCleanup"
+            @("PartialCleanup-RebootPending", "PartialCleanup-OneDriveLock", "PartialCleanup-Locked") | Should -Contain ([string]$artifacts.Report.ResultNormalized)
             [bool]$artifacts.Report.OneDrivePathLike | Should -BeTrue
             [string]$artifacts.Report.ResidualReason | Should -Be "lock"
             @($artifacts.Report.ResidualPaths).Count | Should -BeGreaterThan 0
@@ -265,6 +268,45 @@ Describe "Uninstall integration" {
 
         Remove-Item -Path $root -Recurse -Force -ErrorAction SilentlyContinue
         Remove-Item -Path $oneDriveBase -Recurse -Force -ErrorAction SilentlyContinue
+        Remove-Item -Path $localAppData -Recurse -Force -ErrorAction SilentlyContinue
+        Remove-Item -Path $runTemp -Recurse -Force -ErrorAction SilentlyContinue
+    }
+
+    It "removes legacy startup shortcut naming variant during uninstall" {
+        $root = New-UninstallSandbox -WithMarkers $true
+        $scriptPath = Join-Path $root "app/uninstall/Uninstall-Teams-Always-Green.ps1"
+        $localAppData = Join-Path $env:TEMP ("TAG-Uninstall-IT-Local-" + [Guid]::NewGuid().ToString("N"))
+        $runTemp = Join-Path $env:TEMP ("TAG-Uninstall-IT-Run-" + [Guid]::NewGuid().ToString("N"))
+        New-Item -ItemType Directory -Path $localAppData -Force | Out-Null
+        New-Item -ItemType Directory -Path $runTemp -Force | Out-Null
+
+        $startupDir = [Environment]::GetFolderPath("Startup")
+        $legacyStartupPath = Join-Path $startupDir "Teams-Always-Green.lnk"
+        $backupPath = ""
+        $hadExisting = Test-Path -LiteralPath $legacyStartupPath -PathType Leaf
+        if ($hadExisting) {
+            $backupPath = Join-Path $startupDir ("Teams-Always-Green.bak." + [Guid]::NewGuid().ToString("N") + ".lnk")
+            Move-Item -LiteralPath $legacyStartupPath -Destination $backupPath -Force
+        }
+
+        try {
+            Set-Content -Path $legacyStartupPath -Value "legacy-shortcut-marker" -Encoding ASCII
+            $exitCode = Invoke-UninstallChild -ScriptPath $scriptPath -InstallRoot $root -Arguments "-Silent -AppDataPolicy Keep" -LocalAppDataPath $localAppData -RuntimeTempRoot $runTemp
+            $artifacts = Get-UninstallArtifacts -RuntimeTempRoot $runTemp
+
+            $exitCode | Should -Be 0
+            $artifacts.Report | Should -Not -BeNullOrEmpty
+            [string]$artifacts.Report.Result | Should -Be "Completed"
+            (Test-Path -LiteralPath $legacyStartupPath -PathType Leaf) | Should -BeFalse
+        } finally {
+            if (-not [string]::IsNullOrWhiteSpace($backupPath) -and (Test-Path -LiteralPath $backupPath -PathType Leaf)) {
+                Move-Item -LiteralPath $backupPath -Destination $legacyStartupPath -Force
+            } elseif (Test-Path -LiteralPath $legacyStartupPath -PathType Leaf) {
+                Remove-Item -LiteralPath $legacyStartupPath -Force -ErrorAction SilentlyContinue
+            }
+        }
+
+        Remove-Item -Path $root -Recurse -Force -ErrorAction SilentlyContinue
         Remove-Item -Path $localAppData -Recurse -Force -ErrorAction SilentlyContinue
         Remove-Item -Path $runTemp -Recurse -Force -ErrorAction SilentlyContinue
     }
